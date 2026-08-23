@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { openCache } from "../cache/index.js";
 import type { GitHubReadClient } from "../github/connection.js";
 import { startApplication, startServer } from "./start.js";
 
@@ -26,10 +27,13 @@ describe("server startup", () => {
 
   it("keeps a configured token out of browser assets, HTTP responses, and startup logs", async () => {
     const webRoot = await createWebRoot();
+    const dataDirectory = await createDataDirectory();
     const { app } = await startServer({
       environment: environment(),
+      host: "127.0.0.1",
       port: 0,
       webRoot,
+      dataDirectory,
       createGitHubClient: () => client(),
     });
 
@@ -46,8 +50,10 @@ describe("server startup", () => {
       const logs: string[] = [];
       const started = await startApplication({
         environment: environment(),
+        host: "127.0.0.1",
         port: 0,
         webRoot,
+        dataDirectory,
         createGitHubClient: () => ({
           async getViewer() {
             throw new Error(sentinel);
@@ -65,10 +71,40 @@ describe("server startup", () => {
     }
   });
 
+  it("creates the SQLite cache in the configured data directory", async () => {
+    const webRoot = await createWebRoot();
+    const dataDirectory = await createDataDirectory();
+    const { app } = await startServer({
+      environment: environment(),
+      host: "127.0.0.1",
+      port: 0,
+      webRoot,
+      dataDirectory,
+      createGitHubClient: () => client(),
+    });
+
+    await app.close();
+
+    await expect(access(join(dataDirectory, "repo-control.sqlite"))).resolves.toBeUndefined();
+
+    const cache = openCache({ path: join(dataDirectory, "repo-control.sqlite") });
+    try {
+      expect(cache.getStatus().storedItemCount).toBe(0);
+    } finally {
+      cache.close();
+    }
+  });
+
   async function createWebRoot() {
     const directory = await mkdtemp(join(tmpdir(), "repo-control-web-"));
     temporaryDirectories.push(directory);
     await writeFile(join(directory, "index.html"), "<!doctype html><main>Browser shell</main>");
+    return directory;
+  }
+
+  async function createDataDirectory() {
+    const directory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
+    temporaryDirectories.push(directory);
     return directory;
   }
 

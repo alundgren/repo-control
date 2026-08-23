@@ -107,8 +107,8 @@ the token; it is never returned to the browser or stored in SQLite, and startup
 logs use fixed safe messages rather than raw GitHub responses.
 
 SQLite runs on a private persistent host volume, and the deployment is
-Tailnet-restricted. The [README](../README.md) is the operator runbook for
-finite token expiry, revocation, and rotation.
+Tailnet-restricted. The [Piploy operator runbook](piploy-operator-runbook.md)
+defines the deployment payload, finite token expiry, revocation, and rotation.
 
 ## Future mutations
 
