@@ -4,6 +4,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { OverviewResponse } from "../api/read-models.js";
 import { App } from "./App.js";
 
 describe("work queue overview", () => {
@@ -44,12 +45,14 @@ describe("work queue overview", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "Now" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Pull requests 1" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Ready for agent 2" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Needs me 1" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Triage 2" })).toBeTruthy();
-    expect(screen.getByText(/Sample of 6 items from 2 repositories\. Refreshed .*\. Partial result\./)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Refresh sample" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Pull requests 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ready for agent 2" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Needs me 1" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Triage 2" })).toBeTruthy();
+    expect(screen.getByText("Issues")).toBeTruthy();
+    expect(screen.getByText(/Sampled .* · 6 items from 2 repositories · Partial result/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sync sampled view" })).toBeTruthy();
+    expect(screen.queryByText("Current work")).toBeNull();
   });
 
   it("opens full lists and searches the loaded work with keyboard navigation", async () => {
@@ -62,7 +65,7 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByRole("heading", { name: "Now" });
-    const agentNavigation = screen.getByRole("link", { name: "Ready for agent 2" });
+    const agentNavigation = screen.getByRole("button", { name: "Ready for agent 2" });
     agentNavigation.focus();
     await user.keyboard("{Enter}");
 
@@ -71,7 +74,7 @@ describe("work queue overview", () => {
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
     expect(screen.getByText("Review fictional moss")).toBeTruthy();
 
-    await user.click(screen.getByRole("link", { name: "Now 6" }));
+    await user.click(screen.getByRole("button", { name: "Now 6" }));
     const search = screen.getByRole("searchbox", { name: "Search loaded work" });
 
     await user.type(search, "paths tidy");
@@ -104,12 +107,12 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByText("Add a fictional seed");
-    const refreshButton = screen.getByRole("button", { name: "Refresh sample" });
+    const refreshButton = screen.getByRole("button", { name: "Sync sampled view" });
     await user.click(refreshButton);
 
-    expect(refreshButton.hasAttribute("disabled")).toBe(true);
+    const syncingButton = screen.getByRole("button", { name: "Syncing sampled view…" });
+    expect(syncingButton.hasAttribute("disabled")).toBe(true);
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
-    expect(screen.getByText("Refreshing sample…")).toBeTruthy();
 
     refresh.resolve(response({
       status: "complete",
@@ -117,7 +120,7 @@ describe("work queue overview", () => {
       scope: readyOverview().scope,
     }));
 
-    expect(await screen.findByText("Sample refreshed just now.")).toBeTruthy();
+    expect(await screen.findByText("Sample synced just now.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -137,14 +140,72 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByText("Add a fictional seed");
-    await user.click(screen.getByRole("button", { name: "Refresh sample" }));
+    await user.click(screen.getByRole("button", { name: "Sync sampled view" }));
 
-    expect(await screen.findByText("Refresh failed. Showing the current sample. Try again.")).toBeTruthy();
+    expect(await screen.findByText("Sync failed. Showing the previous sample. Try again.")).toBeTruthy();
+    expect(screen.getByText("Add a fictional seed")).toBeTruthy();
+  });
+
+  it("keeps Now concise and restores the facts needed to choose work", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    overview.pullRequests = [
+      { ...pullRequest({ id: "PR_1", number: 41, title: "Keep fictional paths tidy" }), isDraft: true },
+      pullRequest({ id: "PR_2", number: 42, title: "Trim fictional branches" }),
+      pullRequest({ id: "PR_3", number: 43, title: "Water the fictional garden" }),
+    ];
+    overview.scope.itemCount = 8;
+    overview.queues[0]!.issues = [
+      {
+        ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }),
+        readiness: {
+          kind: "blocked" as const,
+          blockers: [
+            { status: "known" as const, id: "I_9", repositoryId: "R_2", number: 31, title: "Choose a river", url: "https://github.test/fictional-tools/river/issues/31" },
+            { status: "unknown" as const, id: "I_10" },
+          ],
+        },
+      },
+      { ...issue({ id: "I_2", number: 23, title: "Review fictional moss" }), readiness: { kind: "unavailable" as const } },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    expect(await screen.findByText("Keep fictional paths tidy")).toBeTruthy();
+    expect(screen.getByText("Draft")).toBeTruthy();
+    expect(screen.getAllByText("+8 −3").length).toBeGreaterThan(0);
+    expect(screen.getByText("Blocked by fictional-tools/river#31 +1 more")).toBeTruthy();
+    expect(screen.getByText("Dependency status unavailable")).toBeTruthy();
+    expect(screen.queryByText("Water the fictional garden")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "See all open pull requests" }));
+    expect(screen.getByText("Water the fictional garden")).toBeTruthy();
+  });
+
+  it("shows partial sampled sync as a warning without clearing the queue", async () => {
+    const user = userEvent.setup();
+    const partialOverview = { ...readyOverview(), scope: { ...readyOverview().scope, truncatedReason: "item_limit" } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response(readyOverview()))
+        .mockResolvedValueOnce(response({ status: "partial", fetchedAt: "2026-08-23T11:00:00.000Z", scope: partialOverview.scope }))
+        .mockResolvedValueOnce(response(partialOverview)),
+    );
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Sync sampled view" }));
+
+    expect(await screen.findByText("Sample synced with a partial result.")).toBeTruthy();
+    expect(screen.getByText(/Partial result/)).toBeTruthy();
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
   });
 });
 
-function readyOverview() {
+function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
   return {
     status: "ready" as const,
     fetchedAt: "2026-08-23T10:00:00.000Z",
