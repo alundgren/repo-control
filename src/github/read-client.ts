@@ -4,6 +4,7 @@ export const SNAPSHOT_ITEM_LIMIT = SNAPSHOT_REPOSITORY_LIMIT * SNAPSHOT_ITEMS_PE
 export const BODY_EXCERPT_LIMIT = 500;
 export const LABEL_LIMIT = 20;
 export const RELATIONSHIP_LIMIT = 25;
+export const RELATIONSHIP_SUBJECT_LIMIT = 10;
 
 export type GitHubViewer = {
   id: string;
@@ -24,6 +25,7 @@ export type GitHubReadClient = {
   readOwnedRepositoryCapabilities(): Promise<RepositoryCapability[]>;
   readAccountSnapshot(): Promise<AccountSnapshotRead>;
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
+  readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
 };
 
 export type AccountSnapshot = {
@@ -41,6 +43,32 @@ export type FocusedItemRead =
   | { status: "open"; item: GitHubWorkItem; fetchedAt: string; rateLimit: GitHubRateLimit; scope: FocusedReadScope }
   | { status: "out_of_scope"; reason: "closed" | "repository_not_owned"; rateLimit: GitHubRateLimit }
   | UnavailableRead;
+
+export type RelationshipEnrichmentRead = {
+  requestedCount: number;
+  readCount: number;
+  subjectLimit: number;
+  status: "complete" | "partial";
+  rateLimit?: GitHubRateLimit;
+  subjects: RelationshipEnrichmentSubject[];
+} | UnavailableRead;
+
+export type RelationshipEnrichmentSubject = {
+  nodeId: string;
+  coverage: Pick<RelationshipCoverageByType, "blocker" | "closing_issue">;
+  relationships: GitHubRelationship[];
+  relatedItems: RelatedWorkItem[];
+  status: "read" | "not_sampled";
+};
+
+export type RelatedWorkItem = {
+  id: string;
+  repositoryId: string;
+  repositoryNameWithOwner: string;
+  number: number;
+  title: string;
+  url: string;
+};
 
 export type GitHubRateLimit = {
   cost: number;

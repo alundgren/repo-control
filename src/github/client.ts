@@ -5,6 +5,7 @@ import {
   BODY_EXCERPT_LIMIT,
   LABEL_LIMIT,
   RELATIONSHIP_LIMIT,
+  RELATIONSHIP_SUBJECT_LIMIT,
   SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY,
   SNAPSHOT_ITEM_LIMIT,
   SNAPSHOT_REPOSITORY_LIMIT,
@@ -20,6 +21,8 @@ import {
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
+  type RelationshipEnrichmentRead,
+  type RelationshipEnrichmentSubject,
   type SnapshotPartialReason,
 } from "./read-client.js";
 
@@ -47,6 +50,31 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
       try {
         const data = await readWorkGraphQL(fetch, token, "FocusedWorkItem", FOCUSED_ITEM_QUERY, { id: nodeId });
         return parseFocusedItem(data);
+      } catch (error) {
+        return unavailableRead(error);
+      }
+    },
+    async readRelationshipEnrichment({ nodeIds }): Promise<RelationshipEnrichmentRead> {
+      const requested = [...new Set(nodeIds)];
+      const readNodeIds = requested.slice(0, RELATIONSHIP_SUBJECT_LIMIT);
+      if (readNodeIds.length === 0) {
+        return { requestedCount: 0, readCount: 0, subjectLimit: RELATIONSHIP_SUBJECT_LIMIT, status: "complete", subjects: [] };
+      }
+      try {
+        const data = await readWorkGraphQL(fetch, token, "EnrichWorkItemRelationships", RELATIONSHIP_QUERY, { ids: readNodeIds });
+        const { rateLimit, subjects } = parseRelationshipEnrichment(data, readNodeIds);
+        return {
+          requestedCount: requested.length,
+          readCount: readNodeIds.length,
+          subjectLimit: RELATIONSHIP_SUBJECT_LIMIT,
+          status: requested.length === readNodeIds.length ? "complete" : "partial",
+          rateLimit,
+          subjects: [...subjects, ...requested.slice(readNodeIds.length).map((nodeId) => ({
+            nodeId,
+            coverage: { blocker: "not_sampled", closing_issue: "not_sampled" } as const,
+            relationships: [], relatedItems: [], status: "not_sampled" as const,
+          }))],
+        };
       } catch (error) {
         return unavailableRead(error);
       }
@@ -84,20 +112,21 @@ const WORK_ITEM_FIELDS = `
   labels(first: ${LABEL_LIMIT}) { nodes { id name } pageInfo { hasNextPage endCursor } }
 `;
 
-const ISSUE_FIELDS = `
-  ${WORK_ITEM_FIELDS}
-  blockedBy(first: ${RELATIONSHIP_LIMIT}) { nodes { id state } pageInfo { hasNextPage endCursor } }
-  parent { id }
-`;
-
-const PULL_REQUEST_FIELDS = `
-  ${WORK_ITEM_FIELDS}
-  isDraft
-  changedFiles
-  additions
-  deletions
-  closingIssuesReferences(first: ${RELATIONSHIP_LIMIT}) { nodes { id } pageInfo { hasNextPage endCursor } }
-`;
+const RELATED_ISSUE_FIELDS = `id number title url repository { id nameWithOwner }`;
+const RELATIONSHIP_QUERY = `query EnrichWorkItemRelationships($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    __typename
+    ... on Issue {
+      id
+      blockedBy(first: ${RELATIONSHIP_LIMIT}) { nodes { ${RELATED_ISSUE_FIELDS} state } pageInfo { hasNextPage endCursor } }
+    }
+    ... on PullRequest {
+      id
+      closingIssuesReferences(first: ${RELATIONSHIP_LIMIT}) { nodes { ${RELATED_ISSUE_FIELDS} } pageInfo { hasNextPage endCursor } }
+    }
+  }
+  rateLimit { cost remaining resetAt }
+}`;
 
 const SNAPSHOT_QUERY = `query BoundedAccountSnapshot {
   viewer {
@@ -108,11 +137,11 @@ const SNAPSHOT_QUERY = `query BoundedAccountSnapshot {
         id
         nameWithOwner
         issues(first: ${SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY}, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
-          nodes { ${ISSUE_FIELDS} }
+          nodes { ${WORK_ITEM_FIELDS} }
           pageInfo { hasNextPage endCursor }
         }
         pullRequests(first: ${SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY}, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
-          nodes { ${PULL_REQUEST_FIELDS} }
+          nodes { ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
           pageInfo { hasNextPage endCursor }
         }
       }
@@ -126,8 +155,8 @@ const FOCUSED_ITEM_QUERY = `query FocusedWorkItem($id: ID!) {
   viewer { id }
   node(id: $id) {
     __typename
-    ... on Issue { state ${ISSUE_FIELDS} }
-    ... on PullRequest { state ${PULL_REQUEST_FIELDS} }
+    ... on Issue { state ${WORK_ITEM_FIELDS} }
+    ... on PullRequest { state ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
   }
   rateLimit { cost remaining resetAt }
 }`;
@@ -174,7 +203,7 @@ async function readWorkGraphQL(
   token: string,
   operationName: string,
   query: string,
-  variables: Record<string, string | null>,
+  variables: Record<string, string | string[] | null>,
 ) {
   let response: Response;
   try {
@@ -208,6 +237,60 @@ async function readWorkGraphQL(
     throw new WorkReadFailure("invalid_response");
   }
   return payload.data as Record<string, unknown>;
+}
+
+function parseRelationshipEnrichment(
+  data: Record<string, unknown>,
+  requestedNodeIds: string[],
+): { rateLimit: GitHubRateLimit; subjects: RelationshipEnrichmentSubject[] } {
+  const rateLimit = parseRateLimit(data.rateLimit);
+  if (!Array.isArray(data.nodes)) throw new WorkReadFailure("invalid_response");
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const node of data.nodes) {
+    if (isObject(node) && isString(node.id)) byId.set(node.id, node);
+  }
+  return { rateLimit, subjects: requestedNodeIds.map((nodeId) => {
+    const node = byId.get(nodeId);
+    if (!node || (node.__typename !== "Issue" && node.__typename !== "PullRequest")) {
+      return unavailableRelationshipSubject(nodeId);
+    }
+    try {
+      const relationships: GitHubWorkItem["relationships"] = [];
+      const relatedItems = [] as import("./read-client.js").RelatedWorkItem[];
+      const type = node.__typename === "Issue" ? "blocker" : "closing_issue";
+      const connection = node.__typename === "Issue" ? node.blockedBy : node.closingIssuesReferences;
+      if (connection === undefined) return unavailableRelationshipSubject(nodeId, node.__typename);
+      const parsed = parseConnection(connection);
+      if (parsed.pageInfo.hasNextPage) return unavailableRelationshipSubject(nodeId, node.__typename);
+      for (const related of parsed.nodes) {
+        if (!isObject(related) || !isString(related.id) || !Number.isInteger(related.number) || !isString(related.title) || !isString(related.url) || !isObject(related.repository) || !isString(related.repository.id) || !isString(related.repository.nameWithOwner) || (type === "blocker" && related.state !== "OPEN" && related.state !== "CLOSED")) {
+          return unavailableRelationshipSubject(nodeId, node.__typename);
+        }
+        if (type === "blocker" && related.state !== "OPEN") continue;
+        relationships.push({ sourceId: nodeId, targetId: related.id, type });
+        relatedItems.push({ id: related.id, repositoryId: related.repository.id, repositoryNameWithOwner: related.repository.nameWithOwner, number: related.number as number, title: related.title, url: related.url });
+      }
+      return {
+        nodeId,
+        coverage: type === "blocker" ? { blocker: "complete", closing_issue: "not_sampled" } : { blocker: "not_sampled", closing_issue: "complete" },
+        relationships,
+        relatedItems,
+        status: "read",
+      };
+    } catch {
+      return unavailableRelationshipSubject(nodeId, node.__typename);
+    }
+  }) };
+}
+
+function unavailableRelationshipSubject(nodeId: string, type?: unknown): RelationshipEnrichmentSubject {
+  return {
+    nodeId,
+    coverage: type === "Issue" ? { blocker: "unavailable", closing_issue: "not_sampled" } : type === "PullRequest" ? { blocker: "not_sampled", closing_issue: "unavailable" } : { blocker: "unavailable", closing_issue: "unavailable" },
+    relationships: [],
+    relatedItems: [],
+    status: "read",
+  };
 }
 
 function parseAccountSnapshot(data: Record<string, unknown>): AccountSnapshot {
@@ -399,7 +482,7 @@ function parseRateLimit(value: unknown): GitHubRateLimit {
 }
 
 function unavailableCoverage(): RelationshipCoverageByType {
-  return { blocker: "unavailable", parent: "unavailable", closing_issue: "unavailable" };
+  return { blocker: "not_sampled", parent: "not_sampled", closing_issue: "not_sampled" };
 }
 
 function nullableInteger(value: unknown): value is number | null {
