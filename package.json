@@ -14,7 +14,8 @@
     "start": "node dist/server/main.js",
     "test": "vitest run --reporter=dot",
     "test:focused": "node scripts/run-focused-test.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:container": "node scripts/verify-container.mjs"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",

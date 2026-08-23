@@ -5,10 +5,12 @@ import { startApplication } from "./start.js";
 
 const moduleDirectory = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(moduleDirectory, "../web");
+const dataDirectory = resolve(process.env.DATA_DIRECTORY ?? "data");
+const host = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? "3000");
 
 const started = await startApplication(
-  { environment: process.env, port, webRoot },
+  { dataDirectory, environment: process.env, host, port, webRoot },
   (message) => console.error(message),
 );
 if (!started) {
