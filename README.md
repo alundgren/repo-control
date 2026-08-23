@@ -34,7 +34,15 @@ corepack pnpm start
 ```
 
 The server listens on port 3000 by default. Set `PORT` to choose another port.
-`corepack pnpm lint` and `corepack pnpm test` run the focused checks.
+
+Use `corepack pnpm lint` for linting. During a focused red-green loop, run one
+source test file with:
+
+```sh
+corepack pnpm test:focused -- src/server/app.test.ts
+```
+
+Run `corepack pnpm test` for the full test suite.
 
 ## License
 
