@@ -1,27 +1,17 @@
+import type { GitHubReadClient, GitHubViewer, RepositoryCapability } from "./read-client.js";
+
 export type ConnectionConfiguration = {
   token: string;
   expectedOwner: string;
   expiresAt: Date;
 };
 
-export type GitHubViewer = {
-  id: string;
-  login: string;
-  type: "User" | "Organization";
-};
+export type { GitHubReadClient, GitHubViewer, RepositoryCapability } from "./read-client.js";
 
-export type RepositoryCapability = {
-  id: string;
-  nameWithOwner: string;
-  owner: { id: string; login: string };
-  issues: { totalCount: number };
-  pullRequests: { totalCount: number };
-};
-
-export type GitHubReadClient = {
-  getViewer(): Promise<GitHubViewer>;
-  readOwnedRepositoryCapabilities(): Promise<RepositoryCapability[]>;
-};
+export type GitHubConnectionClient = Pick<
+  GitHubReadClient,
+  "getViewer" | "readOwnedRepositoryCapabilities"
+>;
 
 export type ConnectionValidationCode =
   | "missing_token"
@@ -85,7 +75,7 @@ export function readConnectionConfiguration(
 
 export async function validateConnection(
   configuration: ConnectionConfiguration,
-  github: GitHubReadClient,
+  github: GitHubConnectionClient,
 ) {
   let viewer: GitHubViewer;
   let repositories: RepositoryCapability[];

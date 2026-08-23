@@ -4,7 +4,7 @@ import {
   ConnectionValidationError,
   readConnectionConfiguration,
   validateConnection,
-  type GitHubReadClient,
+  type GitHubConnectionClient,
 } from "./connection.js";
 
 const token = "github_pat_example_token_for_tests";
@@ -109,7 +109,7 @@ function client(overrides: Partial<{
     issues: { totalCount: number };
     pullRequests: { totalCount: number };
   }>;
-}> = {}): GitHubReadClient {
+}> = {}): GitHubConnectionClient {
   return {
     async getViewer() {
       return overrides.viewer ?? { id: "U_1", login: "octo", type: "User" };

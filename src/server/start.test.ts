@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openCache } from "../cache/index.js";
-import type { GitHubReadClient } from "../github/connection.js";
+import type { GitHubConnectionClient } from "../github/connection.js";
 import { startApplication, startServer } from "./start.js";
 
 const execFile = promisify(execFileCallback);
@@ -132,7 +132,7 @@ function environment() {
   };
 }
 
-function client(): GitHubReadClient {
+function client(): GitHubConnectionClient {
   return {
     async getViewer() {
       return { id: "U_1", login: "octo", type: "User" };
