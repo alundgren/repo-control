@@ -46,11 +46,11 @@ used.
   an account connects.
 - Work navigation: the five queue views with loaded-item counts. It becomes a
   two-column document-flow navigation on narrow screens.
-- Work queue: one page header with sampled freshness, a sampled-refresh
+- Work queue: one page header with reconciliation freshness, an account-refresh
   action, loaded-work search, queue previews, and dedicated full lists. A
-  selected full row keeps the list visible while a plain-text quick-read area
-  appears alongside it; GitHub links stay in that area.
-- Sample status: a quiet success or warning dot, sampled scope, and an
+  selected row keeps the list visible while a plain-text quick-read area appears
+  alongside it; GitHub links stay in that area.
+- Sync status: a quiet success or warning dot, reconciliation scope, and an
   underlined account-wide sync action.
 - Work row: a compact number, title, repository, age, and available readiness
   or change-size facts. The whole row is the selection control. The quick-read

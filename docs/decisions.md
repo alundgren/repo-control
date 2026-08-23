@@ -12,12 +12,23 @@ account. Organization-owned repositories remain excluded even when the token
 can read them. It does not merge, edit, assign, comment, approve, or make any
 other GitHub mutation.
 
-## Full lists are cached views, not unbounded syncs
+## Full lists come from reconciled cache generations
 
-Dedicated views show every item in the current cache generation. A sampled
-refresh remains bounded, so the interface preserves its scope and
-partial-result state instead of suggesting the list is a complete GitHub
-inventory.
+The initial account sync paginates separate searches for every open issue and
+pull request in repositories owned by the authenticated personal account. A
+successful full pass replaces the active cache generation, so closed, deleted,
+and inaccessible work does not linger indefinitely. GitHub search has a
+1,000-result cap per query. When it applies, Repo Control marks the generation
+partial rather than calling it a complete inventory.
+
+Each full search uses GitHub's `sort:updated-asc` qualifier. The ascending
+update order keeps cursor traversal stable while the account changes, rather
+than relying on the default result order.
+
+Later user-triggered syncs read items updated since the last full pass with a
+five-minute overlap. Node-ID upserts make overlap safe. A full pass happens on
+the next explicit sync after 24 hours. Repo Control does not poll GitHub in the
+background.
 
 ## A fine-grained token stays outside application storage
 
@@ -49,8 +60,8 @@ the open blocker, or `Dependency status unavailable`.
 
 ## Refresh has two scopes
 
-`Sync sampled view` refreshes the bounded account-wide cache. `Refresh this
-item` fetches one selected item after a known GitHub change. The two actions
+`Sync account` reconciles the account cache. `Refresh this item` fetches one
+selected item after a known GitHub change. The two actions
 must remain visibly different so a focused update does not look like a global
 sync.
 

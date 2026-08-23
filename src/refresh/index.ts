@@ -93,12 +93,12 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
     return { status: "removed", reason: read.reason, rateLimit: read.rateLimit };
   }
 
-  const sampledType: "blocker" | "closing_issue" = read.item.type === "issue" ? "blocker" : "closing_issue";
+  const enrichedType: "blocker" | "closing_issue" = read.item.type === "issue" ? "blocker" : "closing_issue";
   const enrichmentRead = await client.readRelationshipEnrichment({ nodeIds: [nodeId] });
   const subject = enrichmentRead.status === "unavailable" ? undefined : enrichmentRead.subjects[0];
 
-  const relationshipStatus = subject && subject.coverage[sampledType] === "complete" ? "fresh" : "stale";
-  const merged = { ...mergeItem(previous, read.item, sampledType, subject), observedAt: read.fetchedAt };
+  const relationshipStatus = subject && subject.coverage[enrichedType] === "complete" ? "fresh" : "stale";
+  const merged = { ...mergeItem(previous, read.item, enrichedType, subject), observedAt: read.fetchedAt };
 
   try {
     cache.replaceItem(merged, read.fetchedAt);
@@ -120,20 +120,20 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
 function mergeItem(
   previous: CacheItem,
   fresh: GitHubWorkItem,
-  sampledType: "blocker" | "closing_issue",
+  enrichedType: "blocker" | "closing_issue",
   subject: RelationshipEnrichmentSubject | undefined,
 ): CacheItem {
   const relationshipCoverage = { ...previous.relationshipCoverage };
   let relationships = previous.relationships;
-  if (subject && subject.coverage[sampledType] === "complete") {
-    relationshipCoverage[sampledType] = subject.coverage[sampledType];
+  if (subject && subject.coverage[enrichedType] === "complete") {
+    relationshipCoverage[enrichedType] = subject.coverage[enrichedType];
     relationships = [
-      ...previous.relationships.filter((relationship) => relationship.type !== sampledType),
+      ...previous.relationships.filter((relationship) => relationship.type !== enrichedType),
       ...subject.relationships,
     ];
   }
 
-  const relatedItems: RelatedItemSummary[] | undefined = subject && subject.coverage[sampledType] === "complete"
+  const relatedItems: RelatedItemSummary[] | undefined = subject && subject.coverage[enrichedType] === "complete"
     ? subject.relatedItems
     : undefined;
   const base = {
@@ -143,6 +143,7 @@ function mergeItem(
     title: fresh.title,
     body: fresh.bodyExcerpt,
     url: fresh.url,
+    createdAt: fresh.createdAt ?? previous.createdAt ?? null,
     updatedAt: fresh.updatedAt,
     labels: fresh.labels,
     relationships,

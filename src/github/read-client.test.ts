@@ -4,22 +4,27 @@ import { createGitHubReadClient } from "./client.js";
 import { RELATIONSHIP_SUBJECT_LIMIT } from "./read-client.js";
 
 describe("GitHub work reads", () => {
-  it("maps a bounded account snapshot, including rate limits and partial scope", async () => {
+  it("paginates separate open issue and pull-request searches, retaining only personal-account repositories", async () => {
+    const requests: Array<{ operationName: string; variables: { query?: string; after?: string | null } }> = [];
     const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
-      const request = JSON.parse(String(init.body)) as { operationName: string };
-      expect(request.operationName).toBe("BoundedAccountSnapshot");
-      return response(snapshotPayload({
-        repositoriesPage: { hasNextPage: true, endCursor: "repo-page-2" },
-        issuePage: { hasNextPage: true, endCursor: "issue-page-2" },
-        pullRequestPage: { hasNextPage: true, endCursor: "pr-page-2" },
-        labelPage: { hasNextPage: true, endCursor: "label-page-2" },
-      }));
+      const request = JSON.parse(String(init.body)) as typeof requests[number];
+      requests.push(request);
+      if (request.operationName === "AccountSearchViewer") {
+        return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });
+      }
+      if (request.variables.query?.includes("is:issue") && request.variables.after === null) {
+        return response(searchPayload([workItem()], true, "issue-page-2", 2));
+      }
+      if (request.variables.query?.includes("is:issue")) {
+        return response(searchPayload([{ ...workItem({ id: "I_unowned" }), repository: { id: "R_other", nameWithOwner: "other/repo", owner: { id: "U_other" } } }], false, null, 2));
+      }
+      return response(searchPayload([{ __typename: "PullRequest", ...workItem({ id: "PR_1", number: 22 }), isDraft: false, changedFiles: 4, additions: 21, deletions: 3 }], false, null, 1));
     });
 
-    await expect(client.readAccountSnapshot()).resolves.toMatchObject({
+    await expect(client.readAccountSnapshot({ updatedSince: null })).resolves.toMatchObject({
       account: { id: "U_1", login: "octo" },
       fetchedAt: expect.any(String),
-      rateLimit: { cost: 12, remaining: 4888, resetAt: "2026-08-24T12:00:00Z" },
+      rateLimit: { cost: 4, remaining: 4999, resetAt: "2026-08-24T12:00:00Z" },
       repositories: [{ id: "R_1", nameWithOwner: "octo/repo" }],
       items: [
         {
@@ -39,19 +44,53 @@ describe("GitHub work reads", () => {
         },
       ],
       scope: {
-        repositoryLimit: 50,
+        reconciliation: "full",
+        inventoryComplete: true,
+        searchPageSize: 100,
+        searchResultLimit: 1000,
         repositoryCount: 1,
-        itemLimit: 200,
         itemCount: 2,
-        status: "partial",
-        partialReasons: expect.arrayContaining([
-          { kind: "repository_limit" },
-          { kind: "item_limit", repositoryId: "R_1", itemType: "issue" },
-          { kind: "item_limit", repositoryId: "R_1", itemType: "pull_request" },
-          { kind: "label_limit", itemId: "I_1" },
-        ]),
+        status: "complete",
+        partialReasons: [],
       },
     });
+    expect(requests).toMatchObject([
+      { operationName: "AccountSearchViewer" },
+      { operationName: "AccountSearchPage", variables: { query: "user:octo is:open is:issue sort:updated-asc", after: null } },
+      { operationName: "AccountSearchPage", variables: { query: "user:octo is:open is:issue sort:updated-asc", after: "issue-page-2" } },
+      { operationName: "AccountSearchPage", variables: { query: "user:octo is:open is:pr sort:updated-asc", after: null } },
+    ]);
+  });
+
+  it("marks GitHub's search-result cap as partial instead of claiming a complete inventory", async () => {
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
+      const request = JSON.parse(String(init.body)) as { operationName: string; variables: { query?: string } };
+      if (request.operationName === "AccountSearchViewer") return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });
+      return response(searchPayload(request.variables.query?.includes("is:issue") ? [workItem()] : [], false, null, request.variables.query?.includes("is:issue") ? 1_001 : 0));
+    });
+
+    await expect(client.readAccountSnapshot({ updatedSince: null })).resolves.toMatchObject({
+      scope: { inventoryComplete: false, status: "partial", partialReasons: [{ kind: "search_result_limit", itemType: "issue" }] },
+    });
+  });
+
+  it("uses a five-minute overlap for incremental searches while retaining the ascending update order", async () => {
+    const queries: string[] = [];
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
+      const request = JSON.parse(String(init.body)) as { operationName: string; variables: { query?: string } };
+      if (request.operationName === "AccountSearchViewer") {
+        return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });
+      }
+      queries.push(request.variables.query!);
+      return response(searchPayload([], false, null, 0));
+    });
+
+    await client.readAccountSnapshot({ updatedSince: "2026-08-24T12:00:00.000Z" });
+
+    expect(queries).toEqual([
+      "user:octo is:open is:issue sort:updated-asc updated:>=2026-08-24T11:55:00.000Z",
+      "user:octo is:open is:pr sort:updated-asc updated:>=2026-08-24T11:55:00.000Z",
+    ]);
   });
 
   it("maps a focused open pull request and preserves unavailable GitHub fields", async () => {
@@ -151,12 +190,25 @@ describe("GitHub work reads", () => {
     } }));
 
     const result = await client.readRelationshipEnrichment({ nodeIds: ["I_empty", "PR_empty", "PR_truncated", "I_bad"] });
+    expect(result).toMatchObject({ status: "partial" });
     expect("subjects" in result && result.subjects).toEqual([
       { nodeId: "I_empty", status: "read", coverage: { blocker: "complete", closing_issue: "not_sampled" }, relationships: [], relatedItems: [] },
       { nodeId: "PR_empty", status: "read", coverage: { blocker: "not_sampled", closing_issue: "complete" }, relationships: [], relatedItems: [] },
       { nodeId: "PR_truncated", status: "read", coverage: { blocker: "not_sampled", closing_issue: "unavailable" }, relationships: [], relatedItems: [] },
       { nodeId: "I_bad", status: "read", coverage: { blocker: "unavailable", closing_issue: "not_sampled" }, relationships: [], relatedItems: [] },
     ]);
+  });
+
+  it("treats a missing relationship subject as a partial enrichment", async () => {
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async () => response({ data: {
+      nodes: [],
+      rateLimit: rateLimit(),
+    } }));
+
+    await expect(client.readRelationshipEnrichment({ nodeIds: ["I_missing"] })).resolves.toMatchObject({
+      status: "partial",
+      subjects: [{ nodeId: "I_missing", coverage: { blocker: "unavailable", closing_issue: "unavailable" } }],
+    });
   });
 
   it("keeps primary and secondary rate limits safe while preserving retry timing", async () => {
@@ -286,10 +338,19 @@ function workItem({
     title: "Ship it",
     body,
     url: "https://github.test/octo/repo/issues/17",
+    createdAt: "2026-08-20T10:00:00Z",
     updatedAt: "2026-08-23T10:00:00Z",
     repository: { id: "R_1", nameWithOwner: "octo/repo", owner: { id: "U_1" } },
     labels,
   };
+}
+
+function searchPayload(nodes: unknown[], hasNextPage: boolean, endCursor: string | null, issueCount: number) {
+  return { data: { viewer: { id: "U_1", login: "octo" }, search: { issueCount, nodes, pageInfo: { hasNextPage, endCursor } }, rateLimit: rateLimit() } };
+}
+
+function rateLimit() {
+  return { cost: 1, remaining: 4999, resetAt: "2026-08-24T12:00:00Z" };
 }
 
 function relatedIssue({ id, number }: { id: string; number: number }) {

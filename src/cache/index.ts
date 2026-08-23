@@ -17,7 +17,7 @@ export type SuccessfulSnapshot = {
   fetchedAt: string;
   repositories: CacheRepository[];
   items: CacheItem[];
-  scope: SampledScope;
+  scope: ReconciliationScope;
 };
 
 export type CacheAccount = {
@@ -37,6 +37,7 @@ type BaseCacheItem = {
   title: string;
   body: string | null;
   url: string;
+  createdAt?: string | null;
   updatedAt: string;
   observedAt?: string;
   labels: CacheLabel[];
@@ -81,11 +82,18 @@ export type PullRequestFacts = {
   isDraft: boolean;
 };
 
-export type SampledScope = {
-  repositoryLimit: number;
+export type ReconciliationScope = {
+  reconciliation?: "full" | "incremental";
+  lastFullReconciliationAt?: string | null;
+  inventoryComplete?: boolean;
+  searchPageSize?: number;
+  searchResultLimit?: number;
   repositoryCount: number;
-  itemLimit: number;
   itemCount: number;
+  /** @deprecated Reconciliation no longer stops at a repository or item budget. */
+  repositoryLimit?: number;
+  /** @deprecated Reconciliation no longer stops at a repository or item budget. */
+  itemLimit?: number;
   truncatedReason: string | null;
 };
 
@@ -139,17 +147,23 @@ class SqliteCache implements Cache {
         .prepare(
           `INSERT INTO snapshot_generations (
              account_node_id, fetched_at, repository_limit, repository_count,
-             item_limit, item_count, truncated_reason
-           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             item_limit, item_count, truncated_reason, reconciliation_kind,
+             last_full_reconciled_at, inventory_complete, search_page_size, search_result_limit
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           snapshot.account.id,
           snapshot.fetchedAt,
-          snapshot.scope.repositoryLimit,
+          snapshot.scope.searchPageSize ?? 100,
           snapshot.scope.repositoryCount,
-          snapshot.scope.itemLimit,
+          snapshot.scope.searchResultLimit ?? 1_000,
           snapshot.scope.itemCount,
           snapshot.scope.truncatedReason,
+          snapshot.scope.reconciliation ?? "full",
+          snapshot.scope.lastFullReconciliationAt,
+          Number(snapshot.scope.inventoryComplete ?? false),
+          snapshot.scope.searchPageSize ?? 100,
+          snapshot.scope.searchResultLimit ?? 1_000,
         );
       const generationId = Number(generation.lastInsertRowid);
 
@@ -206,7 +220,8 @@ class SqliteCache implements Cache {
         .prepare(
           `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                   items.number, items.title, items.body, items.url,
-                  items.github_updated_at AS updatedAt, items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
+                  items.github_created_at AS createdAt, items.github_updated_at AS updatedAt,
+                  items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
                   pull_request_facts.additions, pull_request_facts.deletions
            FROM items
            LEFT JOIN pull_request_facts ON pull_request_facts.item_node_id = items.node_id
@@ -312,8 +327,8 @@ class SqliteCache implements Cache {
     this.database
       .prepare(
         `INSERT INTO items (
-           node_id, repository_node_id, type, number, title, body, url, github_updated_at, observed_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           node_id, repository_node_id, type, number, title, body, url, github_created_at, github_updated_at, observed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(node_id) DO UPDATE SET
            repository_node_id = excluded.repository_node_id,
            type = excluded.type,
@@ -321,6 +336,7 @@ class SqliteCache implements Cache {
            title = excluded.title,
            body = excluded.body,
            url = excluded.url,
+           github_created_at = excluded.github_created_at,
            github_updated_at = excluded.github_updated_at,
            observed_at = excluded.observed_at`,
     )
@@ -332,6 +348,7 @@ class SqliteCache implements Cache {
         item.title,
         item.body,
         item.url,
+        item.createdAt,
         item.updatedAt,
         observedAt,
       );
@@ -375,7 +392,7 @@ class SqliteCache implements Cache {
     }
     for (const relationship of item.relationships) {
       if (relationship.sourceId !== item.id) {
-        throw new Error("Relationship source must match its sampled item");
+        throw new Error("Relationship source must match its cached item");
       }
       if (item.relationshipCoverage[relationship.type] !== "complete") {
         throw new Error("Only complete relationship sets can contain relationship facts");
@@ -440,7 +457,10 @@ class SqliteCache implements Cache {
       .prepare(
         `SELECT generations.id, generations.fetched_at, generations.repository_limit,
                 generations.repository_count, generations.item_limit, generations.item_count,
-                generations.truncated_reason, accounts.node_id AS account_id, accounts.login
+                generations.truncated_reason, generations.reconciliation_kind,
+                generations.last_full_reconciled_at, generations.inventory_complete,
+                generations.search_page_size, generations.search_result_limit,
+                accounts.node_id AS account_id, accounts.login
          FROM cache_state
          JOIN snapshot_generations AS generations
            ON generations.id = cache_state.active_generation_id
@@ -466,7 +486,8 @@ class SqliteCache implements Cache {
       .prepare(
         `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                 items.number, items.title, items.body, items.url,
-                items.github_updated_at AS updatedAt, items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
+                items.github_created_at AS createdAt, items.github_updated_at AS updatedAt,
+                items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
                 pull_request_facts.additions, pull_request_facts.deletions
          FROM snapshot_items
          JOIN items ON items.node_id = snapshot_items.item_node_id
@@ -484,9 +505,12 @@ class SqliteCache implements Cache {
       repositories,
       scope: {
         itemCount: generation.item_count,
-        itemLimit: generation.item_limit,
+        inventoryComplete: Boolean(generation.inventory_complete),
+        lastFullReconciliationAt: generation.last_full_reconciled_at,
+        reconciliation: generation.reconciliation_kind,
         repositoryCount: generation.repository_count,
-        repositoryLimit: generation.repository_limit,
+        searchPageSize: generation.search_page_size,
+        searchResultLimit: generation.search_result_limit,
         truncatedReason: generation.truncated_reason,
       },
     };
@@ -528,6 +552,7 @@ class SqliteCache implements Cache {
 
     const item = {
       body: row.body,
+      createdAt: row.createdAt,
       id: row.id,
       labels,
       number: row.number,
@@ -631,6 +656,11 @@ type GenerationRow = {
   item_limit: number;
   item_count: number;
   truncated_reason: string | null;
+  reconciliation_kind: ReconciliationScope["reconciliation"];
+  last_full_reconciled_at: string | null;
+  inventory_complete: number;
+  search_page_size: number;
+  search_result_limit: number;
   account_id: string;
   login: string;
 };
@@ -643,6 +673,7 @@ type ItemRow = {
   title: string;
   body: string | null;
   url: string;
+  createdAt: string | null;
   updatedAt: string;
   observedAt: string;
   isDraft: number | null;
@@ -752,12 +783,7 @@ function migrate(database: Database.Database) {
       .prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (1, ?)")
       .run(new Date().toISOString());
   })();
-
-  if ((applied.version ?? 0) >= 2) {
-    return;
-  }
-
-  database.transaction(() => {
+  if ((applied.version ?? 0) < 2) database.transaction(() => {
     database.exec(`
       CREATE TABLE related_item_summaries (
         node_id TEXT PRIMARY KEY,
@@ -772,5 +798,34 @@ function migrate(database: Database.Database) {
     database
       .prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (2, ?)")
       .run(new Date().toISOString());
+  })();
+  if ((applied.version ?? 0) < 3) database.transaction(() => {
+    const columns = database.prepare("PRAGMA table_info(items)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "github_created_at")) {
+      database.exec("ALTER TABLE items ADD COLUMN github_created_at TEXT");
+    }
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS related_item_summaries (
+        node_id TEXT PRIMARY KEY,
+        repository_node_id TEXT NOT NULL,
+        repository_name_with_owner TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        url TEXT NOT NULL,
+        observed_at TEXT NOT NULL
+      );
+    `);
+    const generationColumns = database.prepare("PRAGMA table_info(snapshot_generations)").all() as Array<{ name: string }>;
+    const addColumn = (name: string, definition: string) => {
+      if (!generationColumns.some((column) => column.name === name)) {
+        database.exec(`ALTER TABLE snapshot_generations ADD COLUMN ${definition}`);
+      }
+    };
+    addColumn("reconciliation_kind", "reconciliation_kind TEXT NOT NULL DEFAULT 'full'");
+    addColumn("last_full_reconciled_at", "last_full_reconciled_at TEXT");
+    addColumn("inventory_complete", "inventory_complete INTEGER NOT NULL DEFAULT 0");
+    addColumn("search_page_size", "search_page_size INTEGER NOT NULL DEFAULT 100");
+    addColumn("search_result_limit", "search_result_limit INTEGER NOT NULL DEFAULT 1000");
+    database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (3, ?)").run(new Date().toISOString());
   })();
 }

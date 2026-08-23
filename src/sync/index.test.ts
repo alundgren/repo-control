@@ -172,6 +172,158 @@ describe("bounded sampled sync", () => {
     }
   });
 
+  it("uses the last complete reconciliation for an overlapping incremental read and retains unchanged cached items", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const reads: Array<{ updatedSince: string | null } | undefined> = [];
+    const fullAt = new Date().toISOString();
+    const secondItem = issueItem();
+    const client: SyncClient = {
+      async readAccountSnapshot(input) {
+        reads.push(input);
+        return reads.length === 1
+          ? accountSnapshot({ fetchedAt: fullAt, items: [issueItem(), { ...pullRequestItem(), id: "PR_unchanged" }] })
+          : accountSnapshot({
+            fetchedAt: new Date().toISOString(),
+            items: [{ ...secondItem, title: "Updated after the full pass" }],
+            scope: { ...accountSnapshot().scope, reconciliation: "incremental", lastFullReconciliationAt: fullAt },
+          });
+      },
+      async readRelationshipEnrichment({ nodeIds }) {
+        return completeEnrichment(nodeIds);
+      },
+    };
+
+    try {
+      const service = createSyncService({ cache, client });
+      await service.sync();
+      await service.sync();
+
+      expect(reads).toEqual([{ updatedSince: null }, { updatedSince: fullAt }]);
+      expect(cache.getActiveSnapshot()?.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "I_fixture_1", title: "Updated after the full pass" }),
+        expect.objectContaining({ id: "PR_unchanged", title: "Ship the fixture" }),
+      ]));
+      expect(cache.getActiveSnapshot()?.scope).toMatchObject({ reconciliation: "incremental", lastFullReconciliationAt: fullAt });
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("runs another full reconciliation at the 24-hour boundary", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    const reads: Array<{ updatedSince: string | null } | undefined> = [];
+    const client: SyncClient = {
+      async readAccountSnapshot(input) {
+        reads.push(input);
+        return accountSnapshot({ fetchedAt: fullAt });
+      },
+      async readRelationshipEnrichment({ nodeIds }) {
+        return completeEnrichment(nodeIds);
+      },
+    };
+    try {
+      const service = createSyncService({
+        cache,
+        client,
+        now: () => new Date("2026-08-24T09:00:00.000Z").getTime(),
+      });
+      await service.sync();
+      await service.sync();
+
+      expect(reads).toEqual([{ updatedSince: null }, { updatedSince: null }]);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("enriches all reconciliation items in safe batches before it swaps the active generation", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const batches: string[][] = [];
+    const items = Array.from({ length: 11 }, (_, index) => ({ ...issueItem(), id: `I_${index}` }));
+    const client: SyncClient = {
+      async readAccountSnapshot() {
+        return accountSnapshot({ items });
+      },
+      async readRelationshipEnrichment({ nodeIds }) {
+        batches.push(nodeIds);
+        return completeEnrichment(nodeIds);
+      },
+    };
+
+    try {
+      await createSyncService({ cache, client }).sync();
+      expect(batches).toEqual([items.slice(0, 10).map((item) => item.id), ["I_10"]]);
+      expect(cache.getActiveSnapshot()?.items.every((item) => item.relationshipCoverage.blocker === "complete")).toBe(true);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("does not drop prior cached items when GitHub reports a capped partial full read", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    try {
+      await createSyncService({ cache, client: countingClient(async () => accountSnapshot({
+        fetchedAt: "2026-08-20T10:00:00.000Z",
+        items: [issueItem(), { ...pullRequestItem(), id: "PR_retained" }],
+      })) }).sync();
+      const cappedClient: SyncClient = {
+        async readAccountSnapshot() {
+          return accountSnapshot({
+            fetchedAt: new Date().toISOString(),
+            items: [issueItem()],
+            scope: {
+              ...accountSnapshot().scope,
+              inventoryComplete: false,
+              partialReasons: [{ kind: "search_result_limit", itemType: "issue" }],
+              status: "partial",
+            },
+          });
+        },
+        async readRelationshipEnrichment({ nodeIds }) {
+          return completeEnrichment(nodeIds);
+        },
+      };
+
+      await createSyncService({ cache, client: cappedClient }).sync();
+
+      expect(cache.getActiveSnapshot()?.items.map((item) => item.id)).toEqual(["I_fixture_1", "PR_retained"]);
+      expect(cache.getActiveSnapshot()?.scope.truncatedReason).toBe("search_result_limit");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("stops later enrichment batches after an unavailable read and exposes its rate limit", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const items = Array.from({ length: 11 }, (_, index) => ({ ...issueItem(), id: `I_${index}` }));
+    const batches: string[][] = [];
+    const client: SyncClient = {
+      async readAccountSnapshot() {
+        return accountSnapshot({ items });
+      },
+      async readRelationshipEnrichment({ nodeIds }) {
+        batches.push(nodeIds);
+        return {
+          status: "unavailable" as const,
+          error: { code: "rate_limited" as const, message: "GitHub rate limit prevented this read.", retryAfterSeconds: 60 },
+          rateLimit: { cost: 3, remaining: 4700, resetAt: "2026-08-23T10:00:00.000Z" },
+        };
+      },
+    };
+    try {
+      await expect(createSyncService({ cache, client }).sync()).resolves.toMatchObject({
+        status: "partial",
+        rateLimit: { cost: 15, remaining: 4700, resetAt: "2026-08-23T10:00:00.000Z" },
+        scope: { truncatedReason: "relationship_enrichment_failed" },
+      });
+      expect(batches).toEqual([items.slice(0, 10).map((item) => item.id)]);
+      expect(cache.getActiveSnapshot()?.items.every((item) => item.relationshipCoverage.blocker !== "complete")).toBe(true);
+    } finally {
+      cache.close();
+    }
+  });
+
   async function createCachePath() {
     const directory = await mkdtemp(join(tmpdir(), "repo-control-sync-"));
     temporaryDirectories.push(directory);
@@ -186,8 +338,39 @@ function countingClient(readAccountSnapshot: () => Promise<AccountSnapshotRead>)
       client.callCount += 1;
       return readAccountSnapshot();
     },
+    async readRelationshipEnrichment({ nodeIds }: { nodeIds: string[] }) {
+      return {
+        requestedCount: nodeIds.length,
+        readCount: nodeIds.length,
+        subjectLimit: 10,
+        status: "complete" as const,
+        subjects: nodeIds.map((nodeId) => ({
+          nodeId,
+          status: "read" as const,
+          coverage: { blocker: "unavailable" as const, closing_issue: "unavailable" as const },
+          relationships: [],
+          relatedItems: [],
+        })),
+      };
+    },
   };
   return client;
+}
+
+function completeEnrichment(nodeIds: string[]) {
+  return {
+    requestedCount: nodeIds.length,
+    readCount: nodeIds.length,
+    subjectLimit: 10,
+    status: "complete" as const,
+    subjects: nodeIds.map((nodeId) => ({
+      nodeId,
+      status: "read" as const,
+      coverage: { blocker: "complete" as const, closing_issue: "not_sampled" as const },
+      relationships: [],
+      relatedItems: [],
+    })),
+  };
 }
 
 function accountSnapshot(overrides: Partial<AccountSnapshot> = {}): AccountSnapshot {
@@ -198,6 +381,11 @@ function accountSnapshot(overrides: Partial<AccountSnapshot> = {}): AccountSnaps
     repositories: [{ id: "R_fixture", nameWithOwner: "octofixture/example-widgets" }],
     items: [issueItem(), pullRequestItem()],
     scope: {
+      reconciliation: "full",
+      lastFullReconciliationAt: "2026-08-23T09:00:00.000Z",
+      inventoryComplete: true,
+      searchPageSize: 100,
+      searchResultLimit: 1_000,
       repositoryLimit: 50,
       repositoryCount: 1,
       itemLimit: 200,

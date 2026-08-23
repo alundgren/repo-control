@@ -80,7 +80,7 @@ export function App() {
       setOverview(response.status === "ready" ? response : null);
       setLoadMessage("");
     } catch {
-      setLoadMessage("The sampled work queue is unavailable.");
+      setLoadMessage("The work queue is unavailable. Try again.");
     } finally {
       setLoading(false);
     }
@@ -93,7 +93,7 @@ export function App() {
     window.requestAnimationFrame(() => titleRef.current?.focus());
   }
 
-  async function syncSampledView() {
+  async function syncAccount() {
     setSyncState("busy");
     try {
       const response = await syncOverview();
@@ -214,20 +214,20 @@ export function App() {
               <button
                 className="quietButton syncButton"
                 disabled={syncState === "busy"}
-                onClick={() => void syncSampledView()}
+                onClick={() => void syncAccount()}
                 type="button"
               >
-                {syncState === "busy" ? "Syncing sampled view…" : "Sync sampled view"}
+                {syncState === "busy" ? "Syncing account…" : "Sync account"}
               </button>
             </div>
           </header>
 
           <p aria-live="polite" className={`statusMessage ${syncState}`}>{statusMessage}</p>
 
-          {loading ? <p>Loading the sampled work queue…</p> : null}
+          {loading ? <p>Loading the work queue…</p> : null}
           {!loading && !overview ? (
             <p className="emptyState">
-              {loadMessage || "No sampled work is available yet."}
+              {loadMessage || "No work is available yet."}
               {loadMessage ? <button className="quietButton retryButton" onClick={() => void loadOverview()} type="button">Try again</button> : null}
             </p>
           ) : null}
@@ -548,17 +548,17 @@ function filterItems(items: ApiItem[], query: string, overview: Extract<Overview
 
 function freshness(overview: Extract<OverviewResponse, { status: "ready" }>) {
   const partial = overview.scope.truncatedReason ? " · Partial result" : "";
-  return `Sampled ${relativeTime(overview.fetchedAt)} · ${overview.scope.itemCount} items from ${overview.scope.repositoryCount} repositories${partial}`;
+  return `Synced ${relativeTime(overview.fetchedAt)} · ${overview.scope.itemCount} items from ${overview.scope.repositoryCount} repositories${partial}`;
 }
 
 function syncStatusMessage(syncState: SyncState) {
   switch (syncState) {
     case "success":
-      return "Sample synced just now.";
+      return "Account synced just now.";
     case "partial":
-      return "Sample synced with a partial result.";
+      return "Account synced with a partial result.";
     case "failed":
-      return "Sync failed. Showing the previous sample. Try again.";
+      return "Sync failed. Showing the previous account cache. Try again.";
     default:
       return "";
   }
