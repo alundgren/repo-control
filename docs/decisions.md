@@ -5,23 +5,36 @@
 The name describes a personal place to inspect and eventually act on repository
 work. It does not imply that the project is made by or affiliated with GitHub.
 
-## Repository names are short in the interface
+## Version one is personal-account-only and read-only
 
-Rows show a repository name such as `orbit-tools`, plus the issue or pull
-request number. A full owner name is unnecessary for a person viewing their
-own connected repositories, but it remains available in the data for unique
-identity and links.
+Version one reads only repositories owned by the authenticated personal
+account. Organization-owned repositories remain excluded even when the token
+can read them. It does not merge, edit, assign, comment, approve, or make any
+other GitHub mutation.
 
-## The main view is a glance, not a dashboard
+## Full lists are cached views, not unbounded syncs
 
-The overview shows only a small preview of each queue. Dedicated views hold the
-full lists. The detail opens beside the list so a quick read does not lose the
-current place.
+Dedicated views show every item in the current cache generation. A sampled
+refresh remains bounded, so the interface preserves its scope and
+partial-result state instead of suggesting the list is a complete GitHub
+inventory.
 
-## Focus and order are secondary controls
+## A fine-grained token stays outside application storage
 
-They help only while choosing agent work. They stay behind a small disclosure
-instead of competing with the queues for attention.
+The first release uses a fine-grained personal access token with Metadata,
+Issues, and Pull requests read permissions. Piploy's daemon injects it from its
+host-managed environment; the server reads it but the browser, logs, and SQLite
+do not. A token is finite: expiry, revocation, and rotation are normal operator
+events.
+
+## Private SQLite is a lean cache, not a history store
+
+The Tailnet-restricted deployment keeps private cached facts in persistent
+SQLite. The cache retains only bounded data with an active product or
+operational need, including source-text excerpts rather than raw GitHub
+payloads. Successful refreshes delete data that left the open scope or lost
+repository access; failed or partial refreshes do not. Later releases must
+explicitly archive or delete data that is no longer needed.
 
 ## No epic view in version one
 
