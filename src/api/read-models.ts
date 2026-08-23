@@ -1,0 +1,268 @@
+import type { Cache, CacheItem, SuccessfulSnapshot } from "../cache/index.js";
+import type { RefreshError, RefreshOutcome } from "../refresh/index.js";
+import type { SyncOutcome } from "../sync/index.js";
+import { classifyIssues, type ClassifiedIssue, type IssueReadiness, type QueueMapping } from "../domain/workflow.js";
+import type { GitHubReadError } from "../github/read-client.js";
+
+export type ApiScope = SuccessfulSnapshot["scope"];
+export type ApiRepository = SuccessfulSnapshot["repositories"][number];
+
+export type ApiBlocker =
+  | { status: "known"; id: string; repositoryId: string; number: number; title: string; url: string }
+  | { status: "unknown"; id: string };
+
+export type ApiReadiness =
+  | { kind: "unblocked" }
+  | { kind: "unavailable" }
+  | { kind: "blocked"; blockers: ApiBlocker[] };
+
+export type ApiIssue = {
+  id: string;
+  type: "issue";
+  repositoryId: string;
+  number: number;
+  title: string;
+  excerpt: string | null;
+  url: string;
+  updatedAt: string;
+  queue: string;
+  readiness: ApiReadiness;
+};
+
+export type ApiPullRequest = {
+  id: string;
+  type: "pull_request";
+  repositoryId: string;
+  number: number;
+  title: string;
+  excerpt: string | null;
+  url: string;
+  updatedAt: string;
+  isDraft: boolean;
+  additions: number | null;
+  deletions: number | null;
+};
+
+export type ApiItem = ApiIssue | ApiPullRequest;
+
+export type ApiQueue = { name: string; issues: ApiIssue[] };
+
+export type OverviewResponse =
+  | {
+      status: "ready";
+      fetchedAt: string;
+      repositories: ApiRepository[];
+      scope: ApiScope;
+      queues: ApiQueue[];
+      pullRequests: ApiPullRequest[];
+    }
+  | { status: "empty" };
+
+export type ApiError = { code: string; retryAfterSeconds?: number; retryAt?: string };
+
+export type SyncResponse =
+  | { status: "complete" | "partial"; fetchedAt: string; scope: ApiScope }
+  | {
+      status: "failed";
+      error: ApiError;
+      lastSuccessfulSync: { fetchedAt: string } | null;
+    };
+
+export type ItemRefreshResponse =
+  | { status: "updated"; item: ApiItem }
+  | { status: "removed"; reason: "closed" | "repository_not_owned" }
+  | { status: "not_found" }
+  | { status: "permission_denied"; error: ApiError; item: ApiItem }
+  | { status: "failed"; error: ApiError; item: ApiItem };
+
+export function buildOverview(cache: Cache): OverviewResponse {
+  const snapshot = cache.getActiveSnapshot();
+  if (!snapshot) {
+    return { status: "empty" };
+  }
+
+  const mapping = cache.getQueueMapping();
+  const issues = snapshot.items.filter(
+    (item): item is CacheItem & { type: "issue" } => item.type === "issue",
+  );
+  const pullRequests = snapshot.items.filter(
+    (item): item is CacheItem & { type: "pull_request" } => item.type === "pull_request",
+  );
+
+  const blockerCache = new Map<string, ApiBlocker>();
+  const apiIssues = classifyIssues(mapping, issues).map((classified) =>
+    toApiIssue(cache, classified, blockerCache),
+  );
+
+  return {
+    status: "ready",
+    fetchedAt: snapshot.fetchedAt,
+    repositories: snapshot.repositories,
+    scope: snapshot.scope,
+    queues: groupIntoQueues(mapping, apiIssues),
+    pullRequests: pullRequests.map(toApiPullRequest).sort(comparePullRequests),
+  };
+}
+
+export function toSyncResponse(outcome: SyncOutcome): SyncResponse {
+  if (outcome.status === "failed") {
+    return {
+      status: "failed",
+      error: toApiError(outcome.error),
+      lastSuccessfulSync: outcome.activeSnapshot ? { fetchedAt: outcome.activeSnapshot.fetchedAt } : null,
+    };
+  }
+  return { status: outcome.status, fetchedAt: outcome.fetchedAt, scope: outcome.scope };
+}
+
+export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): ItemRefreshResponse {
+  switch (outcome.status) {
+    case "not_found":
+      return { status: "not_found" };
+    case "removed":
+      return { status: "removed", reason: outcome.reason };
+    case "updated":
+      return { status: "updated", item: toApiItem(cache, outcome.item) };
+    case "permission_denied":
+      return {
+        status: "permission_denied",
+        error: toApiError(outcome.error),
+        item: toApiItem(cache, outcome.cachedItem),
+      };
+    case "failed":
+      return {
+        status: "failed",
+        error: toApiError(outcome.error),
+        item: toApiItem(cache, outcome.cachedItem),
+      };
+  }
+}
+
+function toApiItem(cache: Cache, item: CacheItem): ApiItem {
+  if (item.type === "pull_request") {
+    return toApiPullRequest(item);
+  }
+  const mapping = cache.getQueueMapping();
+  const [classified] = classifyIssues(mapping, [item]);
+  return toApiIssue(cache, classified!);
+}
+
+function toApiIssue(
+  cache: Cache,
+  classified: ClassifiedIssue<CacheItem>,
+  blockerCache: Map<string, ApiBlocker> = new Map(),
+): ApiIssue {
+  return {
+    id: classified.id,
+    type: "issue",
+    repositoryId: classified.repositoryId,
+    number: classified.number,
+    title: classified.title,
+    excerpt: classified.body,
+    url: classified.url,
+    updatedAt: classified.updatedAt,
+    queue: classified.queue,
+    readiness: toApiReadiness(cache, classified.readiness, blockerCache),
+  };
+}
+
+function toApiReadiness(
+  cache: Cache,
+  readiness: IssueReadiness,
+  blockerCache: Map<string, ApiBlocker>,
+): ApiReadiness {
+  if (readiness.kind !== "blocked") {
+    return { kind: readiness.kind };
+  }
+  return {
+    kind: "blocked",
+    blockers: readiness.blockerIds.map((id) => resolveBlocker(cache, id, blockerCache)),
+  };
+}
+
+function resolveBlocker(cache: Cache, id: string, blockerCache: Map<string, ApiBlocker>): ApiBlocker {
+  const cached = blockerCache.get(id);
+  if (cached) {
+    return cached;
+  }
+  const item = cache.getItem(id);
+  const resolved: ApiBlocker = item
+    ? { status: "known", id: item.id, repositoryId: item.repositoryId, number: item.number, title: item.title, url: item.url }
+    : { status: "unknown", id };
+  blockerCache.set(id, resolved);
+  return resolved;
+}
+
+function toApiPullRequest(item: CacheItem & { type: "pull_request" }): ApiPullRequest {
+  return {
+    id: item.id,
+    type: "pull_request",
+    repositoryId: item.repositoryId,
+    number: item.number,
+    title: item.title,
+    excerpt: item.body,
+    url: item.url,
+    updatedAt: item.updatedAt,
+    isDraft: item.pullRequest.isDraft,
+    additions: item.pullRequest.additions,
+    deletions: item.pullRequest.deletions,
+  };
+}
+
+function groupIntoQueues(mapping: QueueMapping, issues: ApiIssue[]): ApiQueue[] {
+  const byQueue = new Map<string, ApiIssue[]>();
+  for (const name of queueOrder(mapping)) {
+    byQueue.set(name, []);
+  }
+  for (const issue of issues) {
+    const existing = byQueue.get(issue.queue);
+    if (existing) {
+      existing.push(issue);
+    } else {
+      byQueue.set(issue.queue, [issue]);
+    }
+  }
+  return [...byQueue.entries()].map(([name, queueIssues]) => ({ name, issues: queueIssues }));
+}
+
+function queueOrder(mapping: QueueMapping): string[] {
+  const order: string[] = [];
+  for (const { queue } of mapping.labels) {
+    if (!order.includes(queue)) {
+      order.push(queue);
+    }
+  }
+  if (!order.includes(mapping.defaultQueue)) {
+    order.push(mapping.defaultQueue);
+  }
+  return order;
+}
+
+function comparePullRequests(left: ApiPullRequest, right: ApiPullRequest): number {
+  return (
+    compareStrings(left.updatedAt, right.updatedAt) ||
+    compareStrings(left.repositoryId, right.repositoryId) ||
+    left.number - right.number
+  );
+}
+
+function compareStrings(left: string, right: string): number {
+  if (left < right) {
+    return -1;
+  }
+  if (left > right) {
+    return 1;
+  }
+  return 0;
+}
+
+function toApiError(error: GitHubReadError | RefreshError): ApiError {
+  const apiError: ApiError = { code: error.code };
+  if ("retryAfterSeconds" in error && error.retryAfterSeconds !== undefined) {
+    apiError.retryAfterSeconds = error.retryAfterSeconds;
+  }
+  if ("retryAt" in error && error.retryAt !== undefined) {
+    apiError.retryAt = error.retryAt;
+  }
+  return apiError;
+}

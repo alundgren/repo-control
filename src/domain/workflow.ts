@@ -63,11 +63,23 @@ function getReadiness(issue: IssueForClassification): IssueReadiness {
 
 function compareIssues(left: ClassifiedIssue, right: ClassifiedIssue) {
   return (
-    compareStrings(right.updatedAt, left.updatedAt) ||
+    readinessBand(left.readiness) - readinessBand(right.readiness) ||
+    compareStrings(left.updatedAt, right.updatedAt) ||
     compareStrings(left.repositoryId, right.repositoryId) ||
     left.number - right.number ||
     compareStrings(left.id, right.id)
   );
+}
+
+function readinessBand(readiness: IssueReadiness): number {
+  switch (readiness.kind) {
+    case "unblocked":
+      return 0;
+    case "unavailable":
+      return 1;
+    case "blocked":
+      return 2;
+  }
 }
 
 function compareStrings(left: string, right: string) {
