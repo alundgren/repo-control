@@ -89,11 +89,22 @@ longer qualifies.
 
 ## Credential and hosting contract
 
-Version one uses a fine-grained personal access token with **Metadata**,
-**Issues**, and **Pull requests** read permissions. Piploy's host-managed
-environment injects it as `${hostEnv:REPO_CONTROL_GITHUB_TOKEN}` when starting
-the application. Only server-side code reads it; it is never returned to the
-browser or stored in SQLite.
+Version one uses a fine-grained personal access token for **All repositories**
+under the personal account, with **Metadata**, **Issues**, and **Pull requests**
+read-only permissions. Piploy's host-managed environment injects
+`REPO_CONTROL_GITHUB_TOKEN`, `REPO_CONTROL_GITHUB_OWNER`, and
+`REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` when starting the application. Startup
+validates the token format and future expiry locally, then reads the
+authenticated viewer and repository metadata, issue, and pull-request fields.
+It rejects organization viewers, a configured owner mismatch, and repositories
+outside the authenticated personal account.
+
+A bearer token cannot reveal its own repository-selection setting. The
+operator must select **All repositories** when creating the token. Runtime
+checks can verify returned repository access and required fields, but cannot
+prove access to repositories GitHub did not return. Only server-side code reads
+the token; it is never returned to the browser or stored in SQLite, and startup
+logs use fixed safe messages rather than raw GitHub responses.
 
 SQLite runs on a private persistent host volume, and the deployment is
 Tailnet-restricted. The [README](../README.md) is the operator runbook for

@@ -6,6 +6,6 @@
     "rootDir": "./src",
     "sourceMap": true
   },
-  "include": ["src/server/**/*.ts", "src/cache/**/*.ts"],
+  "include": ["src/server/**/*.ts", "src/cache/**/*.ts", "src/github/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

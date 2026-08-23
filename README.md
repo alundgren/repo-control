@@ -31,12 +31,26 @@ only repositories whose owner is the authenticated personal account;
 organization-owned repositories stay out of scope even when the token could
 read them.
 
-Create a fine-grained personal access token with read permissions for
-**Metadata**, **Issues**, and **Pull requests**. The host, not the application,
-manages the secret: Piploy's daemon injects it as
-`${hostEnv:REPO_CONTROL_GITHUB_TOKEN}` when the application container starts.
-The server alone reads that environment variable; browser code, SQLite, logs,
-and responses never receive the token.
+Create a fine-grained personal access token for your personal account. Select
+**All repositories** under that account and set **Metadata**, **Issues**, and
+**Pull requests** to read-only. The host, not the application, manages the
+secret. Piploy's daemon injects these values when the application container
+starts:
+
+```text
+REPO_CONTROL_GITHUB_TOKEN=${hostEnv:REPO_CONTROL_GITHUB_TOKEN}
+REPO_CONTROL_GITHUB_OWNER=${hostEnv:REPO_CONTROL_GITHUB_OWNER}
+REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT=${hostEnv:REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT}
+```
+
+Set `REPO_CONTROL_GITHUB_OWNER` to the personal-account login and
+`REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` to the token's future UTC expiry in ISO
+8601 format, for example `2030-01-01T00:00:00.000Z`. Startup checks the token
+format, expiry, authenticated account, repository ownership, and the required
+read fields before serving the app. It cannot inspect a bearer token's
+repository-selection setting, so select **All repositories** when creating the
+token. The server alone reads the token; browser code, SQLite, logs, and
+responses never receive it.
 
 The deployment keeps its persistent SQLite cache on a private host-managed
 volume. Expose the application only through the Tailnet, not the public
