@@ -102,15 +102,23 @@ longer qualifies.
 
 ## Credential and hosting contract
 
-Version one uses a fine-grained personal access token for **All repositories**
+Production uses a fine-grained personal access token for **All repositories**
 under the personal account, with **Metadata**, **Issues**, and **Pull requests**
 read-only permissions. Piploy's host-managed environment injects
 `REPO_CONTROL_GITHUB_TOKEN`, `REPO_CONTROL_GITHUB_OWNER`, and
 `REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` when starting the application. Startup
-validates the token format and future expiry locally, then reads the
-authenticated viewer and repository metadata, issue, and pull-request fields.
-It rejects organization viewers, a configured owner mismatch, and repositories
-outside the authenticated personal account.
+validates the PAT format and future expiry locally, then reads the authenticated
+viewer and repository metadata, issue, and pull-request fields. It rejects
+organization viewers, a configured owner mismatch, and repositories outside
+the authenticated personal account.
+
+Local development may instead use a GitHub CLI OAuth access token. Set
+`NODE_ENV=development`, `REPO_CONTROL_GITHUB_AUTH_MODE=oauth`,
+`REPO_CONTROL_GITHUB_TOKEN`, and `REPO_CONTROL_GITHUB_OWNER`. OAuth tokens are
+rejected in every other runtime mode, including production. A local OAuth token
+does not need `REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT`; if supplied, Repo Control
+still validates that it is a future UTC timestamp. This path exists only for
+local testing and is never included in the production operating contract.
 
 A bearer token cannot reveal its own repository-selection setting. The
 operator must select **All repositories** when creating the token. Runtime
