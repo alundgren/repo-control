@@ -199,7 +199,7 @@ export function App() {
         </div>
       </aside>
 
-      <section className="content" aria-busy={loading}>
+      <section aria-busy={loading} aria-label="Work queues" className="content">
         <div className="contentInner">
           <header className="pageHeader">
             <div>
@@ -263,12 +263,12 @@ export function App() {
                     />
                   )}
                 </div> : null}
-                {!compactLayout || selectedItem ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
               </div>
             </>
           ) : null}
         </div>
       </section>
+      {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
   );
 }

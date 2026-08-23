@@ -46,10 +46,10 @@ used.
   an account connects.
 - Work navigation: the five queue views with loaded-item counts. It becomes a
   two-column document-flow navigation on narrow screens.
-- Work queue: one page header with reconciliation freshness, an account-refresh
-  action, loaded-work search, queue previews, and dedicated full lists. A
-  selected row keeps the list visible while a plain-text quick-read area appears
-  alongside it; GitHub links stay in that area.
+- Work queue: on desktop, a three-column scan-and-read layout keeps navigation,
+  the page header and loaded-work search, and the quick read in separate
+  columns. A selected row keeps the list visible while a plain-text quick-read
+  area stays in the right column; GitHub links stay in that area.
 - Sync status: a quiet success or warning dot, reconciliation scope, and an
   underlined account-wide sync action.
 - Work row: a compact number, title, repository, age, and available readiness

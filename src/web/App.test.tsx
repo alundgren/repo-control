@@ -55,6 +55,21 @@ describe("work queue overview", () => {
     expect(screen.queryByText("Current work")).toBeNull();
   });
 
+  it("keeps quick read as the shell's third column", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(readyOverview())));
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "Now" });
+
+    const shell = screen.getByRole("main");
+    expect(Array.from(shell.children).map((child) => child.getAttribute("aria-label"))).toEqual([
+      null,
+      "Work queues",
+      "Quick read",
+    ]);
+  });
+
   it("opens full lists and searches the loaded work with keyboard navigation", async () => {
     const user = userEvent.setup();
     vi.stubGlobal(
