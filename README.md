@@ -20,8 +20,21 @@ particular GitHub account or repository. Anyone can run their own copy.
 
 ## Status
 
-This repository currently holds a prototype and planning material. It does not
-call GitHub, persist credentials, or mutate GitHub data yet.
+This repository now includes the first application shell. It does not call
+GitHub, persist credentials, or mutate GitHub data yet.
+
+## Run the shell
+
+Use Node 24 and pnpm 11. Corepack can provide the pinned pnpm version:
+
+```sh
+corepack pnpm install
+corepack pnpm build
+corepack pnpm start
+```
+
+The server listens on port 3000 by default. Set `PORT` to choose another port.
+`corepack pnpm lint` and `corepack pnpm test` run the focused checks.
 
 ## License
 
