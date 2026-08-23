@@ -272,6 +272,71 @@ describe("local cache", () => {
     }
   });
 
+  it("replaces one item's facts without creating a new snapshot generation", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot({ title: "Original" }));
+      const activeBefore = cache.getActiveSnapshot();
+
+      const item = cache.getItem("I_issue_1");
+      if (!item) throw new Error("expected seeded item");
+      cache.replaceItem({ ...item, title: "Refreshed" }, "2026-08-25T00:00:00.000Z");
+
+      expect(cache.getItem("I_issue_1")?.title).toBe("Refreshed");
+      expect(cache.getActiveSnapshot()?.items[0]?.title).toBe("Refreshed");
+      expect(cache.getActiveSnapshot()?.generationId).toBe(activeBefore?.generationId);
+      expect(cache.getStatus().retainedGenerationCount).toBe(1);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("returns null from getItem for an item that isn't cached", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      expect(cache.getItem("I_missing")).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("rejects a replaceItem for a repository the cache has never seen and leaves the cached item intact", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot());
+      const item = cache.getItem("I_issue_1");
+      if (!item) throw new Error("expected seeded item");
+
+      expect(() =>
+        cache.replaceItem({ ...item, repositoryId: "R_unknown" }, "2026-08-25T00:00:00.000Z"),
+      ).toThrow();
+      expect(cache.getItem("I_issue_1")?.repositoryId).toBe("R_repo_1");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("removes an item, its labels, and its relationships from the cache and the active snapshot", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot({
+        relationships: [{ sourceId: "I_issue_1", targetId: "I_issue_2", type: "blocker" }],
+      }));
+
+      cache.removeItem("I_issue_1");
+
+      expect(cache.getItem("I_issue_1")).toBeNull();
+      expect(cache.getActiveSnapshot()?.items).toEqual([]);
+      expect(cache.getStatus().storedItemCount).toBe(0);
+    } finally {
+      cache.close();
+    }
+  });
+
   it("stores instance queue mappings separately from GitHub facts", async () => {
     const cache = openCache({ path: await createCachePath() });
 
