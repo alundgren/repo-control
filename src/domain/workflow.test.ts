@@ -25,9 +25,9 @@ describe("classifyIssues", () => {
     ]);
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
-      { id: "I_human", queue: "human" },
       { id: "I_earlier", queue: "agent" },
       { id: "I_later", queue: "agent" },
+      { id: "I_human", queue: "human" },
     ]);
   });
 
@@ -84,6 +84,24 @@ describe("classifyIssues", () => {
       readiness: { kind: "blocked", blockerIds: ["I_blocker_a", "I_blocker_b"] },
       eligibleForRecommendation: false,
     });
+  });
+
+  it("orders unblocked before unavailable before blocked regardless of recency", () => {
+    const classified = classifyIssues(mapping, [
+      issue({
+        id: "I_blocked_but_newest",
+        updatedAt: "2026-08-24T10:00:00.000Z",
+        relationships: [{ sourceId: "I_blocked_but_newest", targetId: "I_blocker", type: "blocker" }],
+      }),
+      issue({ id: "I_unavailable_middle", blockerCoverage: "unavailable", updatedAt: "2026-08-23T10:00:00.000Z" }),
+      issue({ id: "I_unblocked_but_oldest", updatedAt: "2026-08-22T10:00:00.000Z" }),
+    ]);
+
+    expect(classified.map(({ id }) => id)).toEqual([
+      "I_unblocked_but_oldest",
+      "I_unavailable_middle",
+      "I_blocked_but_newest",
+    ]);
   });
 
   it("does not treat unavailable or unsampled blocker facts as unblocked", () => {

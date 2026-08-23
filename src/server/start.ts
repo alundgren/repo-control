@@ -9,6 +9,8 @@ import {
   validateConnection,
   type GitHubConnectionClient,
 } from "../github/connection.js";
+import { createItemRefreshService } from "../refresh/index.js";
+import { createSyncService } from "../sync/index.js";
 import { createApp } from "./app.js";
 
 export type StartServerOptions = {
@@ -32,9 +34,12 @@ export async function startServer({
   const connection = await validateConnection(configuration, createGitHubClient(configuration.token));
   await mkdir(dataDirectory, { recursive: true });
   const cache = openCache({ path: join(dataDirectory, "repo-control.sqlite") });
+  const client = createGitHubReadClient(configuration.token);
+  const syncService = createSyncService({ cache, client });
+  const refreshService = createItemRefreshService({ cache, client });
 
   try {
-    const app = await createApp({ webRoot });
+    const app = await createApp({ webRoot, cache, syncService, refreshService });
     app.addHook("onClose", () => cache.close());
     await app.listen({ host, port });
     return { app, connection };

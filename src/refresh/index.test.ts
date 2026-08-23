@@ -238,7 +238,7 @@ describe("focused item refresh", () => {
 
       const outcome = await service.refreshItem({ nodeId: "I_issue_1" });
 
-      expect(outcome).toMatchObject({ status: "failed" });
+      expect(outcome).toMatchObject({ status: "failed", error: { code: "cache_write_failed" } });
       expect(cache.getItem("I_issue_1")).toEqual(before);
     } finally {
       cache.close();

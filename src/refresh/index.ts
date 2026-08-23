@@ -42,9 +42,11 @@ export type RefreshPermissionDenied = {
   cachedItem: CacheItem;
 };
 
+export type RefreshError = GitHubReadError | { code: "cache_write_failed" };
+
 export type RefreshFailed = {
   status: "failed";
-  error: GitHubReadError;
+  error: RefreshError;
   rateLimit: GitHubRateLimit | null;
   cachedItem: CacheItem;
 };
@@ -104,7 +106,7 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
     }
     return {
       status: "failed",
-      error: { code: "unavailable", message: "The refreshed item could not be written to the local cache." },
+      error: { code: "cache_write_failed" },
       rateLimit: read.rateLimit,
       cachedItem: previous,
     };
