@@ -91,7 +91,7 @@ export type CacheStatus = {
 };
 
 export type Cache = {
-  replaceActiveSnapshot(snapshot: SuccessfulSnapshot): void;
+  replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number;
   getActiveSnapshot(): ActiveSnapshot | null;
   replaceQueueMapping(mapping: QueueMapping): void;
   getQueueMapping(): QueueMapping;
@@ -110,8 +110,8 @@ export function openCache({ path }: CacheOptions): Cache {
 class SqliteCache implements Cache {
   constructor(private readonly database: Database.Database) {}
 
-  replaceActiveSnapshot(snapshot: SuccessfulSnapshot) {
-    this.database.transaction(() => {
+  replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number {
+    return this.database.transaction(() => {
       this.database
         .prepare(
           `INSERT INTO accounts (node_id, login, observed_at)
@@ -177,6 +177,7 @@ class SqliteCache implements Cache {
         .run(generationId);
 
       this.prune(snapshot.fetchedAt);
+      return generationId;
     })();
   }
 
