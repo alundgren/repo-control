@@ -7,7 +7,7 @@ import {
   ConnectionValidationError,
   readConnectionConfiguration,
   validateConnection,
-  type GitHubReadClient,
+  type GitHubConnectionClient,
 } from "../github/connection.js";
 import { createApp } from "./app.js";
 
@@ -17,7 +17,7 @@ export type StartServerOptions = {
   host: string;
   port: number;
   webRoot: string;
-  createGitHubClient?: (token: string) => GitHubReadClient;
+  createGitHubClient?: (token: string) => GitHubConnectionClient;
 };
 
 export async function startServer({
