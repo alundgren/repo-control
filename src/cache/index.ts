@@ -93,6 +93,9 @@ export type CacheStatus = {
 export type Cache = {
   replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number;
   getActiveSnapshot(): ActiveSnapshot | null;
+  getItem(nodeId: string): CacheItem | null;
+  replaceItem(item: CacheItem, observedAt: string): void;
+  removeItem(nodeId: string): void;
   replaceQueueMapping(mapping: QueueMapping): void;
   getQueueMapping(): QueueMapping;
   getStatus(): CacheStatus;
@@ -183,6 +186,36 @@ class SqliteCache implements Cache {
 
   getActiveSnapshot(): ActiveSnapshot | null {
     return this.database.transaction(() => this.readActiveSnapshot())();
+  }
+
+  getItem(nodeId: string): CacheItem | null {
+    return this.database.transaction(() => {
+      const row = this.database
+        .prepare(
+          `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
+                  items.number, items.title, items.body, items.url,
+                  items.github_updated_at AS updatedAt, pull_request_facts.is_draft AS isDraft,
+                  pull_request_facts.additions, pull_request_facts.deletions
+           FROM items
+           LEFT JOIN pull_request_facts ON pull_request_facts.item_node_id = items.node_id
+           WHERE items.node_id = ?`,
+        )
+        .get(nodeId) as ItemRow | undefined;
+      return row ? this.readItem(row) : null;
+    })();
+  }
+
+  replaceItem(item: CacheItem, observedAt: string): void {
+    this.database.transaction(() => {
+      this.writeItem(item, observedAt);
+    })();
+  }
+
+  removeItem(nodeId: string): void {
+    this.database.transaction(() => {
+      this.database.prepare("DELETE FROM snapshot_items WHERE item_node_id = ?").run(nodeId);
+      this.database.prepare("DELETE FROM items WHERE node_id = ?").run(nodeId);
+    })();
   }
 
   replaceQueueMapping(mapping: QueueMapping) {
