@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Repo Control prototype</title>
+    <style>
+      :root { --bg:#f2eade; --surface:#eadfcd; --raised:#e0d2bd; --line:#c1af9a; --field:#f9f6f0; --text:#604939; --muted:#66574d; --accent:#784f26; --link:#3d5d71; --ok:#3d6034; --warn:#7e5220; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font:400 16px/1.5 "IBM Plex Sans", Aptos, "Segoe UI", sans-serif; }
+      button, input, select { font:inherit; }
+      button { color:inherit; }
+      .shell { display:grid; grid-template-columns:235px minmax(365px,1fr) minmax(330px,.9fr); min-height:100vh; }
+      .side, .detail { padding:28px 20px; }
+      .side { border-right:1px solid var(--line); }
+      .detail { background:var(--surface); border-left:1px solid var(--line); }
+      .brand { display:flex; align-items:center; gap:9px; margin:0 0 34px; font-size:19px; font-weight:600; }
+      .mark { display:grid; width:28px; height:28px; place-items:center; border-radius:9px; background:var(--accent); color:var(--field); }
+      .eyebrow { margin:0 0 7px; color:var(--muted); font:500 11px/1.4 "IBM Plex Mono", Consolas, monospace; letter-spacing:.07em; text-transform:uppercase; }
+      .nav { display:grid; gap:4px; }
+      .nav + .nav { margin-top:28px; }
+      .nav button { display:flex; justify-content:space-between; width:100%; padding:9px 10px; border:0; border-radius:8px; background:transparent; cursor:pointer; text-align:left; }
+      .nav button:hover, .nav [aria-current="page"] { background:var(--raised); }
+      .nav [aria-current="page"] { font-weight:600; }
+      .count, .side-foot { color:var(--muted); font-size:13.5px; font-variant-numeric:tabular-nums; }
+      .side-foot { position:fixed; bottom:24px; width:195px; }
+      .content { min-width:0; padding:27px 32px 60px; }
+      .top { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+      h1, h2, h3, p { margin-top:0; }
+      h1 { margin-bottom:5px; font-size:clamp(28px,4vw,40px); line-height:1.1; letter-spacing:-.015em; }
+      h2 { margin:0; font-size:22px; letter-spacing:-.01em; }
+      h3 { margin:0; font-size:17px; }
+      .subhead, .section-note, .item-meta, .detail-meta { color:var(--muted); }
+      .sync { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:13.5px; white-space:nowrap; }
+      .sync-status::before { content:""; display:inline-block; width:7px; height:7px; margin:0 7px 1px 0; border-radius:50%; background:var(--ok); }
+      .quiet { padding:2px 0; border:0; background:transparent; color:var(--link); cursor:pointer; font-size:13.5px; text-decoration:underline; }
+      .search { width:100%; margin:25px 0 30px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; background:var(--field); color:var(--text); }
+      .search:focus { outline:3px solid #c9b495; outline-offset:2px; }
+      .section { margin-top:34px; }
+      .section-head { display:flex; align-items:baseline; justify-content:space-between; gap:15px; margin-bottom:10px; }
+      .queue { border-top:1px solid var(--line); }
+      .item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; width:100%; padding:15px 9px; border:0; border-bottom:1px solid var(--line); background:transparent; cursor:pointer; text-align:left; }
+      .item:hover, .item.selected { background:var(--surface); }
+      .item.selected { box-shadow:inset 3px 0 0 var(--accent); }
+      .number { padding-top:1px; color:var(--muted); font:13px "IBM Plex Mono", Consolas, monospace; }
+      .item-title { display:block; font-weight:600; line-height:1.32; }
+      .item-meta { display:block; margin-top:5px; font-size:13.5px; line-height:1.35; }
+      .item-age { color:var(--muted); font-size:12px; white-space:nowrap; }
+      .tag { display:inline-block; margin:6px 5px 0 0; padding:2px 7px; border:1px solid currentColor; border-radius:999px; color:var(--ok); font-size:11px; font-weight:500; line-height:1.4; }
+      .tag.blocked { color:var(--warn); }
+      .tag.triage { color:var(--muted); }
+      .tag.oldest { color:var(--accent); }
+      .preview .item:nth-child(n+3) { display:none; }
+      .view-link { margin-top:12px; }
+      details { position:relative; color:var(--muted); font-size:13.5px; }
+      summary { cursor:pointer; list-style:none; }
+      summary::-webkit-details-marker { display:none; }
+      summary::after { content:"⌄"; margin-left:5px; }
+      details[open] summary::after { content:"⌃"; }
+      .options { position:absolute; z-index:1; top:25px; right:0; display:grid; gap:8px; min-width:248px; padding:11px; border:1px solid var(--line); border-radius:8px; background:var(--field); }
+      .options label { display:flex; justify-content:space-between; gap:14px; }
+      select { padding:4px 22px 4px 7px; border:1px solid var(--line); border-radius:6px; background:var(--field); color:var(--text); }
+      .detail-inner { position:sticky; top:28px; max-width:560px; }
+      .detail-empty { padding-top:110px; color:var(--muted); }
+      .detail-kind, .detail-repo { margin:0 0 8px; color:var(--muted); font:12px "IBM Plex Mono", Consolas, monospace; }
+      .detail-kind { text-transform:uppercase; letter-spacing:.07em; }
+      .detail-title { margin-bottom:12px; font-size:28px; line-height:1.16; }
+      .detail-meta { margin-bottom:24px; font-size:13.5px; }
+      .actions { display:flex; flex-wrap:wrap; gap:9px; margin-bottom:8px; }
+      .action { display:inline-flex; align-items:center; min-height:38px; padding:7px 11px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--link); cursor:pointer; text-decoration:none; }
+      .action.secondary { background:transparent; color:var(--text); }
+      .refreshed { min-height:20px; margin:0 0 20px; color:var(--muted); font-size:13.5px; }
+      .fact { padding:19px 0; border-top:1px solid var(--line); }
+      .body { display:none; max-height:270px; overflow:auto; white-space:pre-line; }
+      .body.open { display:block; }
+      .hidden { display:none !important; }
+      @media (max-width:980px) { .shell { grid-template-columns:190px minmax(0,1fr); } .detail { grid-column:1 / -1; border-top:1px solid var(--line); border-left:0; } .detail-inner { position:static; max-width:none; } .side-foot { width:155px; } }
+      @media (max-width:660px) { .shell { display:block; } .side { border-right:0; border-bottom:1px solid var(--line); padding:20px; } .brand { margin-bottom:18px; } .nav { grid-template-columns:repeat(2,minmax(0,1fr)); } .nav + .nav { margin-top:12px; } .side-foot { display:none; } .content, .detail { padding:23px 20px 42px; } .top { align-items:flex-start; flex-direction:column; gap:5px; } .item { grid-template-columns:auto minmax(0,1fr); } .item-age { grid-column:2; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="side">
+        <p class="brand"><span class="mark">↗</span> Repo Control</p>
+        <nav class="nav" aria-label="Main views">
+          <button aria-current="page" data-view="all">Now <span class="count">9</span></button>
+          <button data-view="pr">Pull requests <span class="count">2</span></button>
+        </nav>
+        <nav class="nav" aria-label="Issue queues">
+          <p class="eyebrow">Issues</p>
+          <button data-view="agent">Ready for agent <span class="count">3</span></button>
+          <button data-view="human">Needs me <span class="count">2</span></button>
+          <button data-view="triage">Triage <span class="count">2</span></button>
+        </nav>
+        <p class="side-foot">Fictional sample data<br />Read-only prototype</p>
+      </aside>
+
+      <section class="content preview" aria-label="Work queues">
+        <div class="top"><div><h1 id="title">Now</h1><p class="subhead" id="description">The few things worth looking at first.</p></div><div class="sync"><span class="sync-status" id="sync-status">Sampled 12 min ago</span><button class="quiet" data-sync>Sync sampled view</button></div></div>
+        <input class="search" type="search" placeholder="Filter pull requests and issues" aria-label="Filter pull requests and issues" />
+        <section class="section section-pr"><div class="section-head"><h2>Open pull requests</h2><span class="section-note">Across your repositories</span></div><div class="queue" id="pr-list"></div></section>
+        <section class="section section-agent"><div class="section-head"><h2>Ready for agent</h2><details><summary>Focus &amp; order</summary><div class="options"><label>Focus <select aria-label="Focus"><option>All work</option><option>Current focus</option></select></label><label>Order <select aria-label="Order"><option>Ready, then oldest</option><option>Oldest ready</option><option>Issue number</option></select></label></div></details></div><div class="queue" id="agent-list"></div><button class="quiet view-link" data-view-link="agent">See all ready-for-agent issues</button></section>
+        <section class="section section-human"><div class="section-head"><h2>Needs me</h2><span class="section-note">A decision, access, or hands-on work</span></div><div class="queue" id="human-list"></div><button class="quiet view-link" data-view-link="human">See all human work</button></section>
+        <section class="section section-triage"><div class="section-head"><h2>Triage</h2><span class="section-note">Open work that needs sorting</span></div><div class="queue" id="triage-list"></div><button class="quiet view-link" data-view-link="triage">See all triage</button></section>
+      </section>
+
+      <aside class="detail" aria-live="polite"><div class="detail-inner" id="detail"><div class="detail-empty"><p class="eyebrow">Quick read</p><h2>Choose an item</h2><p>Inspect the body here, then open GitHub when you need the full context.</p></div></div></aside>
+    </main>
+    <script>
+      const items = [
+        { id:"pr-48", type:"pr", number:48, repo:"orbit-tools", title:"Document the bootstrap command for a fresh machine", age:"Opened 2 days ago", size:"Small · +18 −0 · 1 file", body:"Adds the missing bootstrap command to the setup guide. This PR has no linked closing issue.", url:"https://github.com/example/orbit-tools/pull/48" },
+        { id:"pr-17", type:"pr", number:17, repo:"trail-notes", title:"Fix the duplicate export in the weekly digest", age:"Opened today", size:"Small · +9 −4 · 2 files", body:"Removes a duplicate weekly export from the digest job. Closes trail-notes#12.", closing:{label:"trail-notes#12",url:"https://github.com/example/trail-notes/issues/12"}, url:"https://github.com/example/trail-notes/pull/17" },
+        { id:"issue-31", type:"agent", number:31, repo:"orbit-tools", title:"Add a safe cleanup command", age:"9 days old", dependency:{kind:"unblocked", text:"Unblocked"}, oldest:true, body:"Add a cleanup command that removes only state the tool can prove it owns. Leave unknown files in place and report them.", url:"https://github.com/example/orbit-tools/issues/31" },
+        { id:"issue-42", type:"agent", number:42, repo:"trail-notes", title:"Build the first import screen", age:"Today", dependency:{kind:"unblocked", text:"Unblocked"}, body:"Build the first screen for importing a set of trail notes. Keep the import read-only for the first release.", url:"https://github.com/example/trail-notes/issues/42" },
+        { id:"issue-33", type:"agent", number:33, repo:"orbit-tools", title:"Store cleanup evidence before deleting anything", age:"9 days old", dependency:{kind:"blocked", text:"Blocked by orbit-tools#31"}, body:"Record the proof that a file belongs to the tool before any cleanup flow can remove it.", url:"https://github.com/example/orbit-tools/issues/33" },
+        { id:"issue-28", type:"human", number:28, repo:"orbit-tools", title:"Choose where release backups live", age:"4 days old", dependency:{kind:"unblocked", text:"Unblocked"}, body:"Pick a backup location for release artifacts. This needs an account owner decision before implementation starts.", url:"https://github.com/example/orbit-tools/issues/28" },
+        { id:"issue-45", type:"human", number:45, repo:"trail-notes", title:"Connect a production mail account", age:"Today", dependency:{kind:"blocked", text:"Blocked by trail-notes#42"}, body:"Connect the production mail account after the import screen and message review flow exist.", url:"https://github.com/example/trail-notes/issues/45" },
+        { id:"issue-51", type:"triage", number:51, repo:"orbit-tools", title:"Consider a release activity view", age:"Today", tag:"Needs refinement", body:"Explore whether release activity needs a separate view or can remain in the existing release detail.", url:"https://github.com/example/orbit-tools/issues/51" },
+        { id:"issue-19", type:"triage", number:19, repo:"trail-notes", title:"Clarify retention rules for imported notes", age:"12 days old", tag:"Unclassified", body:"This issue has no workflow label yet. Decide whether it needs discovery, a human decision, or implementation.", url:"https://github.com/example/trail-notes/issues/19" }
+      ];
+      const views = { all:["Now","The few things worth looking at first."], pr:["Pull requests","Open changes, with enough context to decide where to click."], agent:["Ready for agent","Issues with a workflow label. A blocker still wins over that label."], human:["Needs me","A decision, access, or hands-on work belongs here."], triage:["Triage","Open work that needs sorting before it becomes a task."] };
+      const types = { all:["pr","agent","human","triage"], pr:["pr"], agent:["agent"], human:["human"], triage:["triage"] };
+      const escape = value => value.replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]);
+      const queued = type => items.filter(item => item.type === type).sort((a,b) => Number(a.dependency?.kind !== "unblocked") - Number(b.dependency?.kind !== "unblocked") || a.number - b.number);
+      function row(item) {
+        const status = item.dependency ? `<span class="tag ${item.dependency.kind === "blocked" ? "blocked" : ""}">${escape(item.dependency.text)}</span>` : item.tag ? `<span class="tag triage">${escape(item.tag)}</span>` : "";
+        const oldest = item.oldest ? `<span class="tag oldest">Oldest ready</span>` : "";
+        const kind = item.type === "pr" ? "PR" : "#";
+        const meta = item.type === "pr" ? `${item.repo} · #${item.number} · ${item.size}` : `${item.repo} · #${item.number}`;
+        return `<button class="item" data-id="${item.id}"><span class="number">${kind}${item.number}</span><span><span class="item-title">${escape(item.title)}</span><span class="item-meta">${escape(meta)}</span>${status}${oldest}</span><span class="item-age">${escape(item.age)}</span></button>`;
+      }
+      document.querySelector("#pr-list").innerHTML = queued("pr").map(row).join("");
+      document.querySelector("#agent-list").innerHTML = queued("agent").map(row).join("");
+      document.querySelector("#human-list").innerHTML = queued("human").map(row).join("");
+      document.querySelector("#triage-list").innerHTML = queued("triage").map(row).join("");
+      function show(item) {
+        document.querySelectorAll(".item").forEach(element => element.classList.toggle("selected", element.dataset.id === item.id));
+        const facts = item.type === "pr" ? `<div class="fact"><p class="eyebrow">Change size</p><h3>${escape(item.size)}</h3><p>${item.closing ? `Closes <a href="${item.closing.url}" target="_blank" rel="noreferrer">${escape(item.closing.label)} ↗</a>.` : "No closing issue linked."}</p></div>` : item.dependency ? `<div class="fact"><p class="eyebrow">Dependency status</p><p>${escape(item.dependency.text)}</p></div>` : "";
+        const closingAction = item.closing ? `<a class="action secondary" href="${item.closing.url}" target="_blank" rel="noreferrer">Open closing issue ↗</a>` : "";
+        document.querySelector("#detail").innerHTML = `<p class="detail-kind">${item.type === "pr" ? "Pull request" : "Issue"}</p><p class="detail-repo">${escape(item.repo)} · ${item.type === "pr" ? "PR" : "#"}${item.number}</p><h2 class="detail-title">${escape(item.title)}</h2><p class="detail-meta">${escape(item.age)}</p><div class="actions"><a class="action" href="${item.url}" target="_blank" rel="noreferrer">Open on GitHub ↗</a>${closingAction}<button class="action secondary" data-body>Quick read</button><button class="quiet" data-refresh>Refresh this item</button></div><p class="refreshed" data-refresh-status></p>${facts}<div class="fact"><p class="eyebrow">Body</p><p class="body">${escape(item.body)}</p></div>`;
+        document.querySelector("[data-body]").addEventListener("click", () => { const body = document.querySelector(".body"); body.classList.toggle("open"); document.querySelector("[data-body]").textContent = body.classList.contains("open") ? "Hide body" : "Quick read"; });
+        document.querySelector("[data-refresh]").addEventListener("click", () => { document.querySelector("[data-refresh-status]").textContent = "This item was refreshed just now."; });
+      }
+      document.addEventListener("click", event => { const item = event.target.closest(".item"); if (item) show(items.find(value => value.id === item.dataset.id)); });
+      document.querySelectorAll(".nav button").forEach(button => button.addEventListener("click", () => { const view = button.dataset.view; document.querySelectorAll(".nav button").forEach(item => item.removeAttribute("aria-current")); button.setAttribute("aria-current","page"); document.querySelector(".content").classList.toggle("preview", view === "all"); document.querySelector("#title").textContent = views[view][0]; document.querySelector("#description").textContent = views[view][1]; ["pr","agent","human","triage"].forEach(type => document.querySelectorAll(`.section-${type}`).forEach(section => section.classList.toggle("hidden", !types[view].includes(type)))); }));
+      document.querySelectorAll("[data-view-link]").forEach(link => link.addEventListener("click", () => document.querySelector(`.nav button[data-view="${link.dataset.viewLink}"]`).click()));
+      document.querySelector("[data-sync]").addEventListener("click", () => { document.querySelector("#sync-status").textContent = "Sampled just now"; });
+      document.querySelector(".search").addEventListener("input", event => { const value = event.target.value.trim().toLowerCase(); document.querySelectorAll(".item").forEach(element => { const item = items.find(candidate => candidate.id === element.dataset.id); element.classList.toggle("hidden", Boolean(value) && !`${item.repo} ${item.number} ${item.title} ${item.tag || ""}`.toLowerCase().includes(value)); }); });
+    </script>
+  </body>
+</html>
