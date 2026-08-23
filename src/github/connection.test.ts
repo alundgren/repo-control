@@ -8,11 +8,17 @@ import {
 } from "./connection.js";
 
 const token = "github_pat_example_token_for_tests";
+const oauthToken = "gho_exampletokenfortests";
 
 describe("GitHub connection validation", () => {
   it.each([
     ["missing", {}, "missing_token"],
     ["malformed", { REPO_CONTROL_GITHUB_TOKEN: "ghp_legacy_token" }, "invalid_token"],
+    [
+      "unsupported authentication mode",
+      { REPO_CONTROL_GITHUB_TOKEN: token, REPO_CONTROL_GITHUB_AUTH_MODE: "app" },
+      "invalid_authentication_mode",
+    ],
     [
       "expired",
       {
@@ -42,6 +48,34 @@ describe("GitHub connection validation", () => {
       expect(error).toBeInstanceOf(ConnectionValidationError);
       expect(String(error)).not.toContain(token);
     }
+  });
+
+  it("accepts a GitHub CLI OAuth token only for local development", () => {
+    expect(readConnectionConfiguration({
+      NODE_ENV: "development",
+      REPO_CONTROL_GITHUB_AUTH_MODE: "oauth",
+      REPO_CONTROL_GITHUB_TOKEN: oauthToken,
+      REPO_CONTROL_GITHUB_OWNER: "octo",
+    }, new Date("2026-08-23T00:00:00.000Z"))).toMatchObject({
+      authentication: "oauth",
+      token: oauthToken,
+      expectedOwner: "octo",
+      expiresAt: null,
+    });
+  });
+
+  it.each([
+    ["production", "production"],
+    ["an unspecified runtime", undefined],
+  ])("rejects OAuth authentication in %s", (_, nodeEnvironment) => {
+    expect(() => readConnectionConfiguration({
+      NODE_ENV: nodeEnvironment,
+      REPO_CONTROL_GITHUB_AUTH_MODE: "oauth",
+      REPO_CONTROL_GITHUB_TOKEN: oauthToken,
+      REPO_CONTROL_GITHUB_OWNER: "octo",
+    }, new Date("2026-08-23T00:00:00.000Z"))).toThrow(
+      expect.objectContaining({ code: "oauth_not_local" }),
+    );
   });
 
   it("accepts a fictional configuration and validates the authenticated owner", async () => {

@@ -1,9 +1,10 @@
 import type { GitHubReadClient, GitHubViewer, RepositoryCapability } from "./read-client.js";
 
 export type ConnectionConfiguration = {
+  authentication: "pat" | "oauth";
   token: string;
   expectedOwner: string;
-  expiresAt: Date;
+  expiresAt: Date | null;
 };
 
 export type { GitHubReadClient, GitHubViewer, RepositoryCapability } from "./read-client.js";
@@ -15,6 +16,8 @@ export type GitHubConnectionClient = Pick<
 
 export type ConnectionValidationCode =
   | "missing_token"
+  | "invalid_authentication_mode"
+  | "oauth_not_local"
   | "invalid_token"
   | "missing_owner"
   | "invalid_expiry"
@@ -40,7 +43,15 @@ export function readConnectionConfiguration(
   if (token === undefined || token.trim() === "") {
     throw new ConnectionValidationError("missing_token");
   }
-  if (!/^github_pat_[A-Za-z0-9_]{8,}$/.test(token)) {
+
+  const authentication = readAuthenticationMode(environment);
+  if (authentication === "oauth" && environment.NODE_ENV !== "development") {
+    throw new ConnectionValidationError("oauth_not_local");
+  }
+  const tokenPattern = authentication === "pat"
+    ? /^github_pat_[A-Za-z0-9_]{8,}$/
+    : /^gho_[A-Za-z0-9]{8,}$/;
+  if (!tokenPattern.test(token)) {
     throw new ConnectionValidationError("invalid_token");
   }
 
@@ -49,7 +60,28 @@ export function readConnectionConfiguration(
     throw new ConnectionValidationError("missing_owner");
   }
 
+  const expiresAt = readExpiry(environment, authentication, now);
+
+  return { authentication, token, expectedOwner, expiresAt };
+}
+
+function readAuthenticationMode(
+  environment: Readonly<Record<string, string | undefined>>,
+): ConnectionConfiguration["authentication"] {
+  const configuredMode = environment.REPO_CONTROL_GITHUB_AUTH_MODE ?? "pat";
+  if (configuredMode === "pat" || configuredMode === "oauth") return configuredMode;
+  throw new ConnectionValidationError("invalid_authentication_mode");
+}
+
+function readExpiry(
+  environment: Readonly<Record<string, string | undefined>>,
+  authentication: ConnectionConfiguration["authentication"],
+  now: Date,
+): Date | null {
   const expiry = environment.REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT;
+  if (authentication === "oauth" && (expiry === undefined || expiry.trim() === "")) {
+    return null;
+  }
   if (
     expiry === undefined ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(expiry)
@@ -69,8 +101,7 @@ export function readConnectionConfiguration(
   if (expiresAt <= now) {
     throw new ConnectionValidationError("expired_token");
   }
-
-  return { token, expectedOwner, expiresAt };
+  return expiresAt;
 }
 
 export async function validateConnection(
@@ -114,7 +145,9 @@ export async function validateConnection(
 function messageFor(code: ConnectionValidationCode) {
   const messages: Record<ConnectionValidationCode, string> = {
     missing_token: "GitHub connection configuration is missing REPO_CONTROL_GITHUB_TOKEN.",
-    invalid_token: "GitHub connection configuration requires a fine-grained personal access token.",
+    invalid_authentication_mode: "GitHub connection configuration requires REPO_CONTROL_GITHUB_AUTH_MODE to be pat or oauth.",
+    oauth_not_local: "GitHub OAuth authentication is available only when NODE_ENV is development.",
+    invalid_token: "GitHub connection configuration does not match the selected GitHub authentication mode.",
     missing_owner: "GitHub connection configuration is missing REPO_CONTROL_GITHUB_OWNER.",
     invalid_expiry: "GitHub connection configuration requires a valid REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT timestamp.",
     expired_token: "GitHub connection configuration has an expired GitHub token.",

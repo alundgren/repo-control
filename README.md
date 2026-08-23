@@ -48,6 +48,16 @@ corepack pnpm start
 
 The server listens on port 3000 by default. Set `PORT` to choose another port.
 
+## Local GitHub OAuth testing
+
+For a local development session, Repo Control also accepts a GitHub CLI OAuth
+access token. Run with `NODE_ENV=development`,
+`REPO_CONTROL_GITHUB_AUTH_MODE=oauth`, `REPO_CONTROL_GITHUB_TOKEN`, and
+`REPO_CONTROL_GITHUB_OWNER` set in the local process environment. OAuth is
+rejected unless the runtime is explicitly marked `development`, and the
+production image always runs with `NODE_ENV=production`. Do not put the token
+in a file, command line, browser configuration, or source code.
+
 Use `corepack pnpm lint` for linting. During a focused red-green loop, run one
 source test file with:
 
