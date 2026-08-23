@@ -47,14 +47,19 @@ used.
 - Work navigation: the five queue views with loaded-item counts. It becomes a
   two-column document-flow navigation on narrow screens.
 - Work queue: one page header with sampled freshness, a sampled-refresh
-  action, loaded-work search, queue previews, and dedicated full lists. Rows
-  link directly to GitHub and never open a persistent detail sidebar.
+  action, loaded-work search, queue previews, and dedicated full lists. A
+  selected full row keeps the list visible while a plain-text quick-read area
+  appears alongside it; GitHub links stay in that area.
 - Sample status: a quiet success or warning dot, sampled scope, and an
   underlined account-wide sync action.
 - Work row: a compact number, title, repository, age, and available readiness
-  or change-size facts. Status facts use the success, warning, and secondary
-  text roles.
+  or change-size facts. The whole row is the selection control. The quick-read
+  area carries the bounded excerpt, relationship links or their unavailable
+  state, item freshness, and the focused refresh control. Status facts use
+  the success, warning, and secondary text roles.
 
 ## Deviations
 
-None.
+The right-hand quick-read area remains because it makes the queue a stable
+scan-and-read surface. At narrow widths, selection temporarily replaces the
+list and a Back control restores it.

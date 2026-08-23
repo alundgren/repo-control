@@ -32,7 +32,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 1,
+        schemaVersion: 2,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -43,7 +43,7 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(1);
+      expect(reopened.getStatus().schemaVersion).toBe(2);
     } finally {
       reopened.close();
     }
@@ -325,13 +325,24 @@ describe("local cache", () => {
     try {
       cache.replaceActiveSnapshot(snapshot({
         relationships: [{ sourceId: "I_issue_1", targetId: "I_issue_2", type: "blocker" }],
+        relatedItems: [{
+          id: "I_issue_2",
+          repositoryId: "R_repo_2",
+          repositoryNameWithOwner: "octo-user/related-repository",
+          number: 18,
+          title: "Related issue",
+          url: "https://example.test/octo/related-repository/issues/18",
+        }],
       }));
+
+      expect(cache.getRelatedItem("I_issue_2")).not.toBeNull();
 
       cache.removeItem("I_issue_1");
 
       expect(cache.getItem("I_issue_1")).toBeNull();
       expect(cache.getActiveSnapshot()?.items).toEqual([]);
       expect(cache.getStatus().storedItemCount).toBe(0);
+      expect(cache.getRelatedItem("I_issue_2")).toBeNull();
     } finally {
       cache.close();
     }
@@ -375,6 +386,7 @@ function snapshot({
   labels = [{ id: "L_ready", name: "ready-for-agent" }],
   itemType = "issue",
   pullRequest,
+  relatedItems,
   relationships = [],
   relationshipCoverage = coverage(),
   repositoryId = "R_repo_1",
@@ -393,6 +405,7 @@ function snapshot({
   itemType?: CacheItem["type"];
   labels?: SuccessfulSnapshot["items"][number]["labels"];
   pullRequest?: PullRequestFacts;
+  relatedItems?: SuccessfulSnapshot["items"][number]["relatedItems"];
   relationships?: SuccessfulSnapshot["items"][number]["relationships"];
   relationshipCoverage?: RelationshipCoverageByType;
   repositoryId?: string;
@@ -410,6 +423,7 @@ function snapshot({
         number: 17,
         relationshipCoverage,
         relationships,
+        relatedItems,
         repositoryId,
         title,
         type: "pull_request",
@@ -424,6 +438,7 @@ function snapshot({
         number: 17,
         relationshipCoverage,
         relationships,
+        relatedItems,
         repositoryId,
         title,
         type: "issue",

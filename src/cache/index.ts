@@ -38,9 +38,11 @@ type BaseCacheItem = {
   body: string | null;
   url: string;
   updatedAt: string;
+  observedAt?: string;
   labels: CacheLabel[];
   relationships: CacheRelationship[];
   relationshipCoverage: RelationshipCoverageByType;
+  relatedItems?: RelatedItemSummary[];
 };
 
 export type CacheItem =
@@ -56,6 +58,15 @@ export type CacheRelationship = {
   sourceId: string;
   targetId: string;
   type: RelationshipType;
+};
+
+export type RelatedItemSummary = {
+  id: string;
+  repositoryId: string;
+  repositoryNameWithOwner: string;
+  number: number;
+  title: string;
+  url: string;
 };
 
 export type RelationshipCoverage = "complete" | "unavailable" | "not_sampled";
@@ -94,6 +105,7 @@ export type Cache = {
   replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number;
   getActiveSnapshot(): ActiveSnapshot | null;
   getItem(nodeId: string): CacheItem | null;
+  getRelatedItem(nodeId: string): RelatedItemSummary | null;
   replaceItem(item: CacheItem, observedAt: string): void;
   removeItem(nodeId: string): void;
   replaceQueueMapping(mapping: QueueMapping): void;
@@ -194,7 +206,7 @@ class SqliteCache implements Cache {
         .prepare(
           `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                   items.number, items.title, items.body, items.url,
-                  items.github_updated_at AS updatedAt, pull_request_facts.is_draft AS isDraft,
+                  items.github_updated_at AS updatedAt, items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
                   pull_request_facts.additions, pull_request_facts.deletions
            FROM items
            LEFT JOIN pull_request_facts ON pull_request_facts.item_node_id = items.node_id
@@ -203,6 +215,15 @@ class SqliteCache implements Cache {
         .get(nodeId) as ItemRow | undefined;
       return row ? this.readItem(row) : null;
     })();
+  }
+
+  getRelatedItem(nodeId: string): RelatedItemSummary | null {
+    return this.database.prepare(
+      `SELECT node_id AS id, repository_node_id AS repositoryId,
+              repository_name_with_owner AS repositoryNameWithOwner,
+              number, title, url
+       FROM related_item_summaries WHERE node_id = ?`,
+    ).get(nodeId) as RelatedItemSummary | undefined ?? null;
   }
 
   replaceItem(item: CacheItem, observedAt: string): void {
@@ -215,6 +236,7 @@ class SqliteCache implements Cache {
     this.database.transaction(() => {
       this.database.prepare("DELETE FROM snapshot_items WHERE item_node_id = ?").run(nodeId);
       this.database.prepare("DELETE FROM items WHERE node_id = ?").run(nodeId);
+      this.cleanupUnreferencedRelatedItems();
     })();
   }
 
@@ -365,6 +387,33 @@ class SqliteCache implements Cache {
         observedAt,
       );
     }
+    const relatedItems = (item as CacheItem & { relatedItems?: RelatedItemSummary[] }).relatedItems;
+    if (relatedItems) {
+      const upsertRelatedItem = this.database.prepare(
+        `INSERT INTO related_item_summaries (
+           node_id, repository_node_id, repository_name_with_owner, number, title, url, observed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(node_id) DO UPDATE SET
+           repository_node_id = excluded.repository_node_id,
+           repository_name_with_owner = excluded.repository_name_with_owner,
+           number = excluded.number,
+           title = excluded.title,
+           url = excluded.url,
+           observed_at = excluded.observed_at`,
+      );
+      for (const relatedItem of relatedItems) {
+        upsertRelatedItem.run(
+          relatedItem.id,
+          relatedItem.repositoryId,
+          relatedItem.repositoryNameWithOwner,
+          relatedItem.number,
+          relatedItem.title,
+          relatedItem.url,
+          observedAt,
+        );
+      }
+    }
+    this.cleanupUnreferencedRelatedItems();
     if (item.type === "pull_request") {
       this.database
         .prepare(
@@ -417,7 +466,7 @@ class SqliteCache implements Cache {
       .prepare(
         `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                 items.number, items.title, items.body, items.url,
-                items.github_updated_at AS updatedAt, pull_request_facts.is_draft AS isDraft,
+                items.github_updated_at AS updatedAt, items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
                 pull_request_facts.additions, pull_request_facts.deletions
          FROM snapshot_items
          JOIN items ON items.node_id = snapshot_items.item_node_id
@@ -487,6 +536,7 @@ class SqliteCache implements Cache {
       repositoryId: row.repositoryId,
       title: row.title,
       updatedAt: row.updatedAt,
+      observedAt: row.observedAt,
       url: row.url,
     };
     if (row.type === "issue") {
@@ -562,6 +612,14 @@ class SqliteCache implements Cache {
            AND node_id NOT IN (SELECT label_node_id FROM item_labels)`,
       )
       .run(staleBefore);
+    this.cleanupUnreferencedRelatedItems();
+  }
+
+  private cleanupUnreferencedRelatedItems() {
+    this.database.prepare(
+      `DELETE FROM related_item_summaries
+       WHERE node_id NOT IN (SELECT DISTINCT target_node_id FROM relationships)`,
+    ).run();
   }
 }
 
@@ -586,6 +644,7 @@ type ItemRow = {
   body: string | null;
   url: string;
   updatedAt: string;
+  observedAt: string;
   isDraft: number | null;
   additions: number | null;
   deletions: number | null;
@@ -602,11 +661,7 @@ function migrate(database: Database.Database) {
     .prepare("SELECT MAX(version) AS version FROM cache_migrations")
     .get() as { version: number | null };
 
-  if ((applied.version ?? 0) >= 1) {
-    return;
-  }
-
-  database.transaction(() => {
+  if ((applied.version ?? 0) < 1) database.transaction(() => {
     database.exec(`
       CREATE TABLE accounts (
         node_id TEXT PRIMARY KEY,
@@ -695,6 +750,27 @@ function migrate(database: Database.Database) {
     `);
     database
       .prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (1, ?)")
+      .run(new Date().toISOString());
+  })();
+
+  if ((applied.version ?? 0) >= 2) {
+    return;
+  }
+
+  database.transaction(() => {
+    database.exec(`
+      CREATE TABLE related_item_summaries (
+        node_id TEXT PRIMARY KEY,
+        repository_node_id TEXT NOT NULL,
+        repository_name_with_owner TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        url TEXT NOT NULL,
+        observed_at TEXT NOT NULL
+      );
+    `);
+    database
+      .prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (2, ?)")
       .run(new Date().toISOString());
   })();
 }

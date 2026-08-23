@@ -107,9 +107,11 @@ describe("api read models", () => {
             excerpt: "Fictional body",
             url: "https://github.test/fictional/pull/17",
             updatedAt: "2026-08-23T10:00:00.000Z",
+            observedAt: "2026-08-23T10:00:00.000Z",
             isDraft: false,
             additions: 4,
             deletions: 1,
+            closingIssues: { status: "complete", items: [] },
           },
         ]);
       } finally {
@@ -117,7 +119,45 @@ describe("api read models", () => {
       }
     });
 
-    it("resolves a known blocker to its cached summary and marks a missing blocker id explicitly", async () => {
+    it("exposes a linked closing issue from a durable relationship summary", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceActiveSnapshot(snapshot({ items: [pullRequest({ id: "PR_1" })] }));
+        const item = cache.getItem("PR_1");
+        if (!item) throw new Error("expected pull request");
+        cache.replaceItem({
+          ...item,
+          relationships: [{ sourceId: "PR_1", targetId: "I_closing", type: "closing_issue" }],
+          relatedItems: [{
+            id: "I_closing",
+            repositoryId: "R_related",
+            repositoryNameWithOwner: "fictional-tools/river",
+            number: 44,
+            title: "Close the river loop",
+            url: "https://github.test/fictional-tools/river/issues/44",
+          }],
+        }, "2026-08-24T10:00:00.000Z");
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+
+        expect(overview.pullRequests[0]?.closingIssues).toEqual({
+          status: "complete",
+          items: [{
+            id: "I_closing",
+            repositoryId: "R_related",
+            repositoryNameWithOwner: "fictional-tools/river",
+            number: 44,
+            title: "Close the river loop",
+            url: "https://github.test/fictional-tools/river/issues/44",
+          }],
+        });
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("resolves a known blocker to its durable summary and marks a missing blocker id explicitly", async () => {
       const cache = await freshCache();
       try {
         cache.replaceQueueMapping({ defaultQueue: "triage", labels: [{ label: "ready-for-agent", queue: "agent" }] });
@@ -131,8 +171,15 @@ describe("api read models", () => {
                   { sourceId: "I_blocked", targetId: "I_known_blocker", type: "blocker" },
                   { sourceId: "I_blocked", targetId: "I_missing_blocker", type: "blocker" },
                 ],
+                relatedItems: [{
+                  id: "I_known_blocker",
+                  repositoryId: "R_related",
+                  repositoryNameWithOwner: "fictional-tools/river",
+                  number: 31,
+                  title: "Known durable blocker",
+                  url: "https://github.test/fictional-tools/river/issues/31",
+                }],
               }),
-              issue({ id: "I_known_blocker", labels: [] }),
             ],
           }),
         );
@@ -149,10 +196,11 @@ describe("api read models", () => {
             {
               status: "known",
               id: "I_known_blocker",
-              repositoryId: "R_repo_1",
-              number: 17,
-              title: "Fictional title",
-              url: "https://github.test/fictional/issues/17",
+              repositoryId: "R_related",
+              repositoryNameWithOwner: "fictional-tools/river",
+              number: 31,
+              title: "Known durable blocker",
+              url: "https://github.test/fictional-tools/river/issues/31",
             },
             { status: "unknown", id: "I_missing_blocker" },
           ],
@@ -177,16 +225,18 @@ describe("api read models", () => {
         const [pullRequestRead] = overview.pullRequests;
 
         expect(Object.keys(issueRead!).sort()).toEqual(
-          ["excerpt", "id", "number", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
+          ["excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(pullRequestRead!).sort()).toEqual(
           [
             "additions",
             "deletions",
+            "closingIssues",
             "excerpt",
             "id",
             "isDraft",
             "number",
+            "observedAt",
             "repositoryId",
             "title",
             "type",
@@ -247,6 +297,7 @@ describe("api read models", () => {
           status: "updated",
           item: updatedItem,
           fetchedAt: "2026-08-23T10:00:00.000Z",
+          relationshipStatus: "fresh",
           rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-08-23T11:00:00.000Z" },
         };
 
@@ -326,6 +377,7 @@ function itemRecord({
   title = "Fictional title",
   labels = [] as string[],
   relationships = [] as CacheItem["relationships"],
+  relatedItems,
   relationshipCoverage = { blocker: "complete", closing_issue: "complete", parent: "complete" } as CacheItem["relationshipCoverage"],
   updatedAt = "2026-08-23T10:00:00.000Z",
 }: {
@@ -335,6 +387,7 @@ function itemRecord({
   title?: string;
   labels?: string[];
   relationships?: CacheItem["relationships"];
+  relatedItems?: CacheItem["relatedItems"];
   relationshipCoverage?: CacheItem["relationshipCoverage"];
   updatedAt?: string;
 } = {}): CacheItem & { type: "issue" } {
@@ -348,6 +401,7 @@ function itemRecord({
     updatedAt,
     labels: labels.map((name, index) => ({ id: `L_${index}_${name}`, name })),
     relationships,
+    relatedItems,
     relationshipCoverage,
     type: "issue",
   };
