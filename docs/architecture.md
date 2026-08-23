@@ -21,7 +21,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Module | Responsibility |
 | --- | --- |
 | GitHub client | Fetches pull requests, issues, labels, parent relationships, blockers, and closing issues only for repositories owned by the authenticated personal account. |
-| Snapshot service | Builds a bounded account overview and records its freshness and partial-result state. |
+| Snapshot service (`src/sync`) | Builds a bounded account overview and records its freshness and partial-result state. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
