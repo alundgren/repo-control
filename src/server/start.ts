@@ -2,6 +2,8 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { openCache } from "../cache/index.js";
+import { createReconciliationCoordinator } from "../coordination/index.js";
+import { createChangeEventHub } from "../events/index.js";
 import { createGitHubReadClient } from "../github/client.js";
 import {
   ConnectionValidationError,
@@ -11,6 +13,8 @@ import {
 } from "../github/connection.js";
 import { createItemRefreshService } from "../refresh/index.js";
 import { createSyncService } from "../sync/index.js";
+import { createWebhookService } from "../webhook/index.js";
+import { openDeliveryStore } from "../webhook/store.js";
 import { createApp } from "./app.js";
 
 export type StartServerOptions = {
@@ -35,15 +39,38 @@ export async function startServer({
   await mkdir(dataDirectory, { recursive: true });
   const cache = openCache({ path: join(dataDirectory, "repo-control.sqlite") });
   const client = createGitHubReadClient(configuration.token);
-  const syncService = createSyncService({ cache, client });
-  const refreshService = createItemRefreshService({ cache, client });
+  const deliveryStore = openDeliveryStore({ path: join(dataDirectory, "repo-control.sqlite") });
+  const coordinator = createReconciliationCoordinator();
+  const eventHub = createChangeEventHub();
+  const syncService = createSyncService({
+    cache,
+    client,
+    coordinator,
+    onComplete: () => deliveryStore.resolveManualReconciliation(new Date().toISOString()),
+  });
+  const refreshService = createItemRefreshService({ cache, client, coordinator, onChange: eventHub.publish });
+  const webhookService = environment.REPO_CONTROL_GITHUB_WEBHOOK_SECRET
+    ? createWebhookService({
+        cache,
+        refreshService,
+        secret: environment.REPO_CONTROL_GITHUB_WEBHOOK_SECRET,
+        store: deliveryStore,
+      })
+    : null;
 
   try {
-    const app = await createApp({ webRoot, cache, syncService, refreshService });
-    app.addHook("onClose", () => cache.close());
+    const app = await createApp({ webRoot, cache, syncService, refreshService, eventHub, webhookService: webhookService ?? undefined });
+    app.addHook("onClose", async () => {
+      if (webhookService) await webhookService.stop();
+      deliveryStore.close();
+      cache.close();
+    });
     await app.listen({ host, port });
+    if (webhookService) void webhookService.start().catch(() => undefined);
     return { app, connection };
   } catch (error) {
+    if (webhookService) await webhookService.stop();
+    deliveryStore.close();
     cache.close();
     throw error;
   }
