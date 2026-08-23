@@ -1,5 +1,9 @@
 import Database from "better-sqlite3";
 
+import type { QueueMapping } from "../domain/workflow.js";
+
+export type { QueueMapping } from "../domain/workflow.js";
+
 const RETAINED_GENERATIONS = 3;
 const STALE_FACT_RETENTION_DAYS = 30;
 const relationshipTypes: RelationshipType[] = ["blocker", "parent", "closing_issue"];
@@ -76,11 +80,6 @@ export type SampledScope = {
 
 export type ActiveSnapshot = SuccessfulSnapshot & {
   generationId: number;
-};
-
-export type QueueMapping = {
-  defaultQueue: string;
-  labels: Array<{ label: string; queue: string }>;
 };
 
 export type CacheStatus = {
