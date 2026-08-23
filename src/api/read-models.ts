@@ -38,6 +38,7 @@ export type ApiIssue = {
   title: string;
   excerpt: string | null;
   url: string;
+  createdAt?: string | null;
   updatedAt: string;
   observedAt?: string;
   queue: string;
@@ -52,6 +53,7 @@ export type ApiPullRequest = {
   title: string;
   excerpt: string | null;
   url: string;
+  createdAt?: string | null;
   updatedAt: string;
   observedAt?: string;
   isDraft: boolean;
@@ -183,6 +185,7 @@ function toApiIssue(
     excerpt: classified.body,
     observedAt: classified.observedAt,
     url: classified.url,
+    createdAt: classified.createdAt,
     updatedAt: classified.updatedAt,
     queue: classified.queue,
     readiness: toApiReadiness(cache, classified.readiness, blockerCache),
@@ -237,6 +240,7 @@ function toApiPullRequest(cache: Cache, item: CacheItem & { type: "pull_request"
     excerpt: item.body,
     observedAt: item.observedAt,
     url: item.url,
+    createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     isDraft: item.pullRequest.isDraft,
     additions: item.pullRequest.additions,

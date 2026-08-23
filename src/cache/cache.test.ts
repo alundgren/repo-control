@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -32,7 +33,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 2,
+        schemaVersion: 3,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -43,9 +44,67 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(2);
+      expect(reopened.getStatus().schemaVersion).toBe(3);
     } finally {
       reopened.close();
+    }
+  });
+
+  it("upgrades a version-one cache without losing its active generation", async () => {
+    const path = await createCachePath();
+    const current = openCache({ path });
+    current.replaceActiveSnapshot(snapshot({ title: "Retained generation" }));
+    const activeBefore = current.getActiveSnapshot();
+    current.close();
+
+    const versionOne = new Database(path);
+    versionOne.exec(`
+      DELETE FROM cache_migrations WHERE version IN (2, 3);
+      DROP TABLE related_item_summaries;
+      ALTER TABLE items DROP COLUMN github_created_at;
+      ALTER TABLE snapshot_generations DROP COLUMN reconciliation_kind;
+      ALTER TABLE snapshot_generations DROP COLUMN last_full_reconciled_at;
+      ALTER TABLE snapshot_generations DROP COLUMN inventory_complete;
+      ALTER TABLE snapshot_generations DROP COLUMN search_page_size;
+      ALTER TABLE snapshot_generations DROP COLUMN search_result_limit;
+    `);
+    versionOne.close();
+
+    const migrated = openCache({ path });
+    try {
+      expect(migrated.getStatus().schemaVersion).toBe(3);
+      expect(migrated.getActiveSnapshot()).toMatchObject({
+        generationId: activeBefore?.generationId,
+        items: [{ id: "I_issue_1", title: "Retained generation" }],
+      });
+    } finally {
+      migrated.close();
+    }
+  });
+
+  it("upgrades a reconciliation version-two cache while adding related-item storage", async () => {
+    const path = await createCachePath();
+    const current = openCache({ path });
+    current.replaceActiveSnapshot(snapshot({ title: "Retained reconciliation generation" }));
+    const activeBefore = current.getActiveSnapshot();
+    current.close();
+
+    const versionTwo = new Database(path);
+    versionTwo.exec(`
+      DELETE FROM cache_migrations WHERE version = 3;
+      DROP TABLE related_item_summaries;
+    `);
+    versionTwo.close();
+
+    const migrated = openCache({ path });
+    try {
+      expect(migrated.getStatus().schemaVersion).toBe(3);
+      expect(migrated.getActiveSnapshot()).toMatchObject({
+        generationId: activeBefore?.generationId,
+        items: [{ id: "I_issue_1", title: "Retained reconciliation generation" }],
+      });
+    } finally {
+      migrated.close();
     }
   });
 
@@ -113,9 +172,7 @@ describe("local cache", () => {
       cache.replaceActiveSnapshot(snapshot({
         scope: {
           itemCount: 20,
-          itemLimit: 20,
           repositoryCount: 3,
-          repositoryLimit: 3,
           truncatedReason: "item_limit",
         },
         relationshipCoverage: coverage({ blocker: "unavailable" }),
@@ -125,9 +182,7 @@ describe("local cache", () => {
         fetchedAt: "2026-08-23T10:00:00.000Z",
         scope: {
           itemCount: 20,
-          itemLimit: 20,
           repositoryCount: 3,
-          repositoryLimit: 3,
           truncatedReason: "item_limit",
         },
         items: [
@@ -215,6 +270,19 @@ describe("local cache", () => {
           items: [{ ...snapshot().items[0], type: "pull_request" }],
         } as SuccessfulSnapshot),
       ).toThrow("Pull requests require pull-request facts");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("stores the GitHub creation time alongside the update time", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    try {
+      cache.replaceActiveSnapshot(snapshot({ createdAt: "2026-08-01T10:00:00.000Z" }));
+      expect(cache.getActiveSnapshot()?.items[0]).toMatchObject({
+        createdAt: "2026-08-01T10:00:00.000Z",
+        updatedAt: "2026-08-22T09:00:00.000Z",
+      });
     } finally {
       cache.close();
     }
@@ -381,6 +449,7 @@ describe("local cache", () => {
 
 function snapshot({
   account = { id: "U_account", login: "octo-user" },
+  createdAt,
   fetchedAt = "2026-08-23T10:00:00.000Z",
   itemId = "I_issue_1",
   labels = [{ id: "L_ready", name: "ready-for-agent" }],
@@ -400,6 +469,7 @@ function snapshot({
   title = "First",
 }: {
   account?: SuccessfulSnapshot["account"];
+  createdAt?: string;
   fetchedAt?: string;
   itemId?: string;
   itemType?: CacheItem["type"];
@@ -418,6 +488,7 @@ function snapshot({
     items: [itemType === "pull_request"
       ? {
         body: "Fictional issue body",
+        createdAt,
         id: itemId,
         labels,
         number: 17,
@@ -433,6 +504,7 @@ function snapshot({
       }
       : {
         body: "Fictional issue body",
+        createdAt,
         id: itemId,
         labels,
         number: 17,

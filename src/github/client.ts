@@ -3,12 +3,12 @@ import {
 } from "./connection.js";
 import {
   BODY_EXCERPT_LIMIT,
+  INCREMENTAL_RECONCILIATION_OVERLAP_MINUTES,
   LABEL_LIMIT,
+  RECONCILIATION_PAGE_SIZE,
   RELATIONSHIP_LIMIT,
   RELATIONSHIP_SUBJECT_LIMIT,
-  SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY,
-  SNAPSHOT_ITEM_LIMIT,
-  SNAPSHOT_REPOSITORY_LIMIT,
+  SEARCH_RESULT_LIMIT,
   type AccountSnapshot,
   type AccountSnapshotRead,
   type FocusedItemRead,
@@ -38,10 +38,9 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
       const data = await readGraphQL(fetch, token, "OwnedRepositoryCapabilities", REPOSITORIES_QUERY, {});
       return parseRepositoryPage(data.viewer).repositories;
     },
-    async readAccountSnapshot(): Promise<AccountSnapshotRead> {
+    async readAccountSnapshot({ updatedSince } = { updatedSince: null }): Promise<AccountSnapshotRead> {
       try {
-        const data = await readWorkGraphQL(fetch, token, "BoundedAccountSnapshot", SNAPSHOT_QUERY, {});
-        return parseAccountSnapshot(data);
+        return await readAccountSnapshot(fetch, token, updatedSince);
       } catch (error) {
         return unavailableRead(error);
       }
@@ -67,7 +66,9 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
           requestedCount: requested.length,
           readCount: readNodeIds.length,
           subjectLimit: RELATIONSHIP_SUBJECT_LIMIT,
-          status: requested.length === readNodeIds.length ? "complete" : "partial",
+          status: requested.length === readNodeIds.length && subjects.every(hasCompleteExpectedRelationshipCoverage)
+            ? "complete"
+            : "partial",
           rateLimit,
           subjects: [...subjects, ...requested.slice(readNodeIds.length).map((nodeId) => ({
             nodeId,
@@ -88,7 +89,7 @@ const VIEWER_QUERY = `query AuthenticatedViewer {
 
 const REPOSITORIES_QUERY = `query OwnedRepositoryCapabilities {
   viewer {
-    repositories(first: ${SNAPSHOT_REPOSITORY_LIMIT}, affiliations: OWNER) {
+    repositories(first: ${RECONCILIATION_PAGE_SIZE}, affiliations: OWNER) {
       nodes {
         id
         nameWithOwner
@@ -107,6 +108,7 @@ const WORK_ITEM_FIELDS = `
   title
   body
   url
+  createdAt
   updatedAt
   repository { id nameWithOwner owner { id } }
   labels(first: ${LABEL_LIMIT}) { nodes { id name } pageInfo { hasNextPage endCursor } }
@@ -128,25 +130,24 @@ const RELATIONSHIP_QUERY = `query EnrichWorkItemRelationships($ids: [ID!]!) {
   rateLimit { cost remaining resetAt }
 }`;
 
-const SNAPSHOT_QUERY = `query BoundedAccountSnapshot {
+const ACCOUNT_QUERY = `query AccountSearchViewer {
+  viewer { id login }
+  rateLimit { cost remaining resetAt }
+}`;
+
+const ACCOUNT_SEARCH_QUERY = `query AccountSearchPage($query: String!, $after: String) {
   viewer {
     id
     login
-    repositories(first: ${SNAPSHOT_REPOSITORY_LIMIT}, affiliations: OWNER) {
-      nodes {
-        id
-        nameWithOwner
-        issues(first: ${SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY}, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
-          nodes { ${WORK_ITEM_FIELDS} }
-          pageInfo { hasNextPage endCursor }
-        }
-        pullRequests(first: ${SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY}, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
-          nodes { ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-      pageInfo { hasNextPage endCursor }
+  }
+  search(query: $query, type: ISSUE, first: ${RECONCILIATION_PAGE_SIZE}, after: $after) {
+    issueCount
+    nodes {
+      __typename
+      ... on Issue { ${WORK_ITEM_FIELDS} }
+      ... on PullRequest { ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
     }
+    pageInfo { hasNextPage endCursor }
   }
   rateLimit { cost remaining resetAt }
 }`;
@@ -293,48 +294,118 @@ function unavailableRelationshipSubject(nodeId: string, type?: unknown): Relatio
   };
 }
 
-function parseAccountSnapshot(data: Record<string, unknown>): AccountSnapshot {
-  if (!isObject(data.viewer) || !isString(data.viewer.id) || !isString(data.viewer.login)) {
+function hasCompleteExpectedRelationshipCoverage(subject: RelationshipEnrichmentSubject): boolean {
+  return subject.coverage.blocker === "complete" || subject.coverage.closing_issue === "complete";
+}
+
+async function readAccountSnapshot(
+  fetch: Fetch,
+  token: string,
+  updatedSince: string | null,
+): Promise<AccountSnapshot> {
+  const identityData = await readWorkGraphQL(fetch, token, "AccountSearchViewer", ACCOUNT_QUERY, {});
+  if (!isObject(identityData.viewer) || !isString(identityData.viewer.id) || !isString(identityData.viewer.login)) {
     throw new WorkReadFailure("invalid_response");
   }
-  const repositoriesConnection = parseConnection(data.viewer.repositories);
-  const partialReasons: SnapshotPartialReason[] = repositoriesConnection.pageInfo.hasNextPage
-    ? [{ kind: "repository_limit" }]
-    : [];
-  const repositories: GitHubRepository[] = [];
-  const items: GitHubWorkItem[] = [];
+  const account = { id: identityData.viewer.id, login: identityData.viewer.login };
+  const reconciliation = updatedSince === null ? "full" as const : "incremental" as const;
+  const queries = [
+    { itemType: "issue" as const, query: accountSearchQuery(account.login, "issue", updatedSince) },
+    { itemType: "pull_request" as const, query: accountSearchQuery(account.login, "pull_request", updatedSince) },
+  ];
+  const items = new Map<string, SearchWorkItem>();
+  const partialReasons: SnapshotPartialReason[] = [];
+  let rateLimit = parseRateLimit(identityData.rateLimit);
 
-  for (const rawRepository of repositoriesConnection.nodes) {
-    if (!isObject(rawRepository) || !isString(rawRepository.id) || !isString(rawRepository.nameWithOwner)) {
-      throw new WorkReadFailure("invalid_response");
-    }
-    repositories.push({ id: rawRepository.id, nameWithOwner: rawRepository.nameWithOwner });
-    for (const [type, rawItems] of [["issue", rawRepository.issues], ["pull_request", rawRepository.pullRequests]] as const) {
-      const connection = parseConnection(rawItems);
-      if (connection.pageInfo.hasNextPage) {
-        partialReasons.push({ kind: "item_limit", repositoryId: rawRepository.id, itemType: type });
+  for (const search of queries) {
+    let after: string | null = null;
+    let resultCount = 0;
+    let issueCount: number | null = null;
+    do {
+      const data = await readWorkGraphQL(fetch, token, "AccountSearchPage", ACCOUNT_SEARCH_QUERY, {
+        after,
+        query: search.query,
+      });
+      rateLimit = addRateLimit(rateLimit, parseRateLimit(data.rateLimit));
+      if (!isObject(data.search) || !Number.isInteger(data.search.issueCount)) {
+        throw new WorkReadFailure("invalid_response");
       }
-      for (const rawItem of connection.nodes) {
-        items.push(parseWorkItem(rawItem, type, partialReasons));
+      const connection = parseConnection(data.search);
+      issueCount = data.search.issueCount as number;
+      resultCount += connection.nodes.length;
+      for (const node of connection.nodes) {
+        const item = parseOwnedSearchItem(node, search.itemType, account.id, partialReasons);
+        if (item) {
+          items.set(item.id, item);
+        }
       }
-    }
+      after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+      if (after === null && issueCount > resultCount) {
+        partialReasons.push({ kind: "search_result_limit", itemType: search.itemType });
+      }
+    } while (after !== null);
   }
 
+  const repositories = new Map<string, GitHubRepository>();
+  for (const item of items.values()) {
+    const repository = item.repositoryId;
+    repositories.set(repository, { id: repository, nameWithOwner: item.repositoryNameWithOwner });
+  }
+  const cleanItems = [...items.values()].map(({ repositoryNameWithOwner: _repositoryNameWithOwner, ...item }) => item);
   return {
-    account: { id: data.viewer.id, login: data.viewer.login },
+    account,
     fetchedAt: new Date().toISOString(),
-    rateLimit: parseRateLimit(data.rateLimit),
-    repositories,
-    items,
+    rateLimit,
+    repositories: [...repositories.values()].sort((left, right) => left.nameWithOwner.localeCompare(right.nameWithOwner)),
+    items: cleanItems,
     scope: {
-      repositoryLimit: SNAPSHOT_REPOSITORY_LIMIT,
-      repositoryCount: repositories.length,
-      itemLimit: SNAPSHOT_ITEM_LIMIT,
-      itemCount: items.length,
+      reconciliation,
+      lastFullReconciliationAt: reconciliation === "full" && !partialReasons.some((reason) => reason.kind === "search_result_limit")
+        ? new Date().toISOString()
+        : updatedSince,
+      inventoryComplete: !partialReasons.some((reason) => reason.kind === "search_result_limit"),
+      searchPageSize: RECONCILIATION_PAGE_SIZE,
+      searchResultLimit: SEARCH_RESULT_LIMIT,
+      repositoryCount: repositories.size,
+      itemCount: cleanItems.length,
       status: partialReasons.length === 0 ? "complete" : "partial",
       partialReasons,
     },
   };
+}
+
+function accountSearchQuery(login: string, type: "issue" | "pull_request", updatedSince: string | null): string {
+  const typeQualifier = type === "issue" ? "is:issue" : "is:pr";
+  const overlap = updatedSince === null
+    ? null
+    : new Date(new Date(updatedSince).getTime() - INCREMENTAL_RECONCILIATION_OVERLAP_MINUTES * 60_000).toISOString();
+  return [
+    `user:${login}`,
+    "is:open",
+    typeQualifier,
+    "sort:updated-asc",
+    overlap ? `updated:>=${overlap}` : null,
+  ].filter(Boolean).join(" ");
+}
+
+function parseOwnedSearchItem(
+  value: unknown,
+  type: "issue" | "pull_request",
+  accountId: string,
+  partialReasons: SnapshotPartialReason[],
+): SearchWorkItem | null {
+  if (!isObject(value) || !isObject(value.repository) || !isObject(value.repository.owner) || value.repository.owner.id !== accountId) {
+    return null;
+  }
+  const item = parseWorkItem(value, type, partialReasons);
+  if (!isString(value.repository.nameWithOwner)) throw new WorkReadFailure("invalid_response");
+  return { ...item, repositoryNameWithOwner: value.repository.nameWithOwner };
+}
+
+type SearchWorkItem = GitHubWorkItem & { repositoryNameWithOwner: string };
+
+function addRateLimit(previous: GitHubRateLimit, next: GitHubRateLimit): GitHubRateLimit {
+  return { cost: previous.cost + next.cost, remaining: next.remaining, resetAt: next.resetAt };
 }
 
 function parseFocusedItem(data: Record<string, unknown>): FocusedItemRead {
@@ -377,7 +448,7 @@ function parseWorkItem(
   type: "issue" | "pull_request",
   partialReasons: SnapshotPartialReason[],
 ): GitHubWorkItem {
-  if (!isObject(value) || !isString(value.id) || !Number.isInteger(value.number) || !isString(value.title) || !isString(value.url) || !isString(value.updatedAt) || (value.body !== null && !isString(value.body)) || !isObject(value.repository) || !isString(value.repository.id)) {
+  if (!isObject(value) || !isString(value.id) || !Number.isInteger(value.number) || !isString(value.title) || !isString(value.url) || !isString(value.createdAt) || !isString(value.updatedAt) || (value.body !== null && !isString(value.body)) || !isObject(value.repository) || !isString(value.repository.id)) {
     throw new WorkReadFailure("invalid_response");
   }
   const labels = parseLabelConnection(value.labels, value.id, partialReasons);
@@ -388,6 +459,7 @@ function parseWorkItem(
     title: value.title,
     bodyExcerpt: value.body === null ? null : excerpt(value.body),
     url: value.url,
+    createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     labels,
     relationships: [] as GitHubWorkItem["relationships"],
@@ -471,7 +543,7 @@ function parseConnection(value: unknown) {
   if (!isObject(value) || !Array.isArray(value.nodes) || !isObject(value.pageInfo) || typeof value.pageInfo.hasNextPage !== "boolean" || (value.pageInfo.hasNextPage && !isString(value.pageInfo.endCursor))) {
     throw new WorkReadFailure("invalid_response");
   }
-  return { nodes: value.nodes, pageInfo: { hasNextPage: value.pageInfo.hasNextPage } };
+  return { nodes: value.nodes, pageInfo: { hasNextPage: value.pageInfo.hasNextPage, endCursor: value.pageInfo.endCursor as string | null } };
 }
 
 function parseRateLimit(value: unknown): GitHubRateLimit {

@@ -14,7 +14,7 @@ describe("work queue overview", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the sampled Now view with complete queue counts", async () => {
+  it("shows the reconciled Now view with complete queue counts", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -50,8 +50,8 @@ describe("work queue overview", () => {
     expect(screen.getByRole("button", { name: "Needs me 1" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Triage 2" })).toBeTruthy();
     expect(screen.getByText("Issues")).toBeTruthy();
-    expect(screen.getByText(/Sampled .* · 6 items from 2 repositories · Partial result/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Sync sampled view" })).toBeTruthy();
+    expect(screen.getByText(/Synced .* · 6 items from 2 repositories · Partial result/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sync account" })).toBeTruthy();
     expect(screen.queryByText("Current work")).toBeNull();
   });
 
@@ -107,10 +107,10 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByText("Add a fictional seed");
-    const refreshButton = screen.getByRole("button", { name: "Sync sampled view" });
+    const refreshButton = screen.getByRole("button", { name: "Sync account" });
     await user.click(refreshButton);
 
-    const syncingButton = screen.getByRole("button", { name: "Syncing sampled view…" });
+    const syncingButton = screen.getByRole("button", { name: "Syncing account…" });
     expect(syncingButton.hasAttribute("disabled")).toBe(true);
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
 
@@ -120,7 +120,7 @@ describe("work queue overview", () => {
       scope: readyOverview().scope,
     }));
 
-    expect(await screen.findByText("Sample synced just now.")).toBeTruthy();
+    expect(await screen.findByText("Account synced just now.")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -140,9 +140,9 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByText("Add a fictional seed");
-    await user.click(screen.getByRole("button", { name: "Sync sampled view" }));
+    await user.click(screen.getByRole("button", { name: "Sync account" }));
 
-    expect(await screen.findByText("Sync failed. Showing the previous sample. Try again.")).toBeTruthy();
+    expect(await screen.findByText("Sync failed. Showing the previous account cache. Try again.")).toBeTruthy();
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
   });
 
@@ -183,7 +183,7 @@ describe("work queue overview", () => {
     expect(screen.getByText("Water the fictional garden")).toBeTruthy();
   });
 
-  it("shows partial sampled sync as a warning without clearing the queue", async () => {
+  it("shows partial account sync as a warning without clearing the queue", async () => {
     const user = userEvent.setup();
     const partialOverview = { ...readyOverview(), scope: { ...readyOverview().scope, truncatedReason: "item_limit" } };
     vi.stubGlobal(
@@ -197,9 +197,9 @@ describe("work queue overview", () => {
     render(<App />);
 
     await screen.findByText("Add a fictional seed");
-    await user.click(screen.getByRole("button", { name: "Sync sampled view" }));
+    await user.click(screen.getByRole("button", { name: "Sync account" }));
 
-    expect(await screen.findByText("Sample synced with a partial result.")).toBeTruthy();
+    expect(await screen.findByText("Account synced with a partial result.")).toBeTruthy();
     expect(screen.getByText(/Partial result/)).toBeTruthy();
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
   });

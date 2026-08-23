@@ -20,8 +20,8 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 
 | Module | Responsibility |
 | --- | --- |
-| GitHub client | Fetches pull requests, issues, labels, parent relationships, blockers, and closing issues only for repositories owned by the authenticated personal account. |
-| Snapshot service (`src/sync`) | Builds a bounded account overview and records its freshness and partial-result state. |
+| GitHub client | Paginates account-scoped searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. |
+| Snapshot service (`src/sync`) | Reconciles the open account inventory, records the last complete reconciliation, and uses an overlapping update-time read between full reconciliations. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
@@ -33,7 +33,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 Use GitHub node IDs as primary keys. Repository name plus item type plus number
 is a useful display key, but numbers collide across repositories.
 
-An item stores its GitHub facts, cache freshness, labels, a bounded source-text
+An item stores its GitHub facts, including its creation and update times, cache freshness, labels, a bounded source-text
 excerpt, linked closing issues, and open blockers. The server derives that
 excerpt for the view; it does not persist a raw GitHub body or response. A
 relationship record stores both endpoints and the relationship type. Keep only
@@ -54,16 +54,29 @@ could see them.
 
 ## Data flow
 
-1. A sampled sync filters to repositories owned by the connected personal
-   account, then gets a bounded set of their open pull requests and issues.
-2. The server enriches only the selected or displayed items with blockers,
-   parent links, and closing-issue relationships.
+1. An initial sync paginates two account-scoped searches: all open issues and
+   all open pull requests. Both use `sort:updated-asc`, which gives cursor
+   traversal a monotonic order instead of GitHub's moving default. Every result
+   must still name a repository owned by the connected personal account before
+   it enters the cache.
+2. The server enriches every returned item in small batches with blockers and
+   closing-issue relationships. A failed or incomplete enrichment marks that
+   dependency status unavailable. It never guesses that an issue is unblocked.
 3. The workflow classifier maps each item to a configured queue. Missing and
    unknown labels go to the configured default, initially Triage.
-4. The snapshot service writes the result as one cache generation. The UI keeps
-   the previous generation if the next sync fails.
+4. The snapshot service writes the result as one cache generation only after
+   all reads finish. The UI keeps the previous generation if a sync read fails.
 5. A focused refresh reads one GitHub node, updates its normalized records, and
    returns the new detail state.
+
+After a complete inventory reconciliation, a user-triggered sync uses
+`updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
+these upserts idempotent. A full reconciliation runs on the next explicit sync
+once the prior full one is 24 hours old. There is no background polling. The
+full pass removes open-cache entries that were closed, deleted, or became
+inaccessible. GitHub search exposes at most 1,000 results per query, so a type
+that reaches that cap is recorded as partial rather than presented as a full
+inventory.
 
 After a successful refresh proves that an item left the open version-one scope,
 the cache deletes that item and its dependent relationships. When repository
@@ -76,8 +89,8 @@ longer qualifies.
 ## Rate-limit and failure rules
 
 - Use GraphQL field selection and batching. Do not issue one request per row.
-- Put a fixed item and repository budget on a sampled sync. Display partial
-  data and the scope used when the budget is reached.
+- Search pages contain at most 100 results. Paginate until GitHub finishes the
+  connection, and report its 1,000-result search cap as partial data.
 - Track GitHub's remaining rate limit and reset time. Delay an automatic retry
   rather than hammering the API.
 - A focused refresh has its own small request budget. It must not trigger a

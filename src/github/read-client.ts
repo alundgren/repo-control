@@ -1,6 +1,6 @@
-export const SNAPSHOT_REPOSITORY_LIMIT = 50;
-export const SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY = 2;
-export const SNAPSHOT_ITEM_LIMIT = SNAPSHOT_REPOSITORY_LIMIT * SNAPSHOT_ITEMS_PER_TYPE_PER_REPOSITORY * 2;
+export const RECONCILIATION_PAGE_SIZE = 100;
+export const SEARCH_RESULT_LIMIT = 1_000;
+export const INCREMENTAL_RECONCILIATION_OVERLAP_MINUTES = 5;
 export const BODY_EXCERPT_LIMIT = 500;
 export const LABEL_LIMIT = 20;
 export const RELATIONSHIP_LIMIT = 25;
@@ -23,7 +23,7 @@ export type RepositoryCapability = {
 export type GitHubReadClient = {
   getViewer(): Promise<GitHubViewer>;
   readOwnedRepositoryCapabilities(): Promise<RepositoryCapability[]>;
-  readAccountSnapshot(): Promise<AccountSnapshotRead>;
+  readAccountSnapshot(input?: { updatedSince: string | null }): Promise<AccountSnapshotRead>;
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
 };
@@ -88,10 +88,12 @@ type BaseWorkItem = {
   title: string;
   bodyExcerpt: string | null;
   url: string;
+  createdAt?: string;
   updatedAt: string;
   labels: GitHubLabel[];
   relationships: GitHubRelationship[];
   relationshipCoverage: RelationshipCoverageByType;
+  relatedItems?: RelatedWorkItem[];
 };
 
 export type GitHubWorkItem =
@@ -118,19 +120,28 @@ export type GitHubPullRequestFacts = {
 };
 
 export type SnapshotScope = {
-  repositoryLimit: number;
+  reconciliation?: "full" | "incremental";
+  lastFullReconciliationAt?: string | null;
+  inventoryComplete?: boolean;
+  searchPageSize?: number;
+  searchResultLimit?: number;
   repositoryCount: number;
-  itemLimit: number;
   itemCount: number;
+  /** @deprecated Reconciliation no longer stops at a repository or item budget. */
+  repositoryLimit?: number;
+  /** @deprecated Reconciliation no longer stops at a repository or item budget. */
+  itemLimit?: number;
   status: "complete" | "partial";
   partialReasons: SnapshotPartialReason[];
 };
 
 export type SnapshotPartialReason =
+  | { kind: "search_result_limit"; itemType: "issue" | "pull_request" }
   | { kind: "repository_limit" }
   | { kind: "item_limit"; repositoryId: string; itemType: "issue" | "pull_request" }
   | { kind: "label_limit"; itemId: string }
-  | { kind: "relationship_limit"; itemId: string; relationshipType: RelationshipType };
+  | { kind: "relationship_limit"; itemId: string; relationshipType: RelationshipType }
+  | { kind: "relationship_enrichment_failed" };
 
 export type FocusedReadScope = {
   status: "complete" | "partial";

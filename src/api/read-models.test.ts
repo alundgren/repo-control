@@ -106,6 +106,7 @@ describe("api read models", () => {
             title: "Fictional title",
             excerpt: "Fictional body",
             url: "https://github.test/fictional/pull/17",
+            createdAt: null,
             updatedAt: "2026-08-23T10:00:00.000Z",
             observedAt: "2026-08-23T10:00:00.000Z",
             isDraft: false,
@@ -225,11 +226,12 @@ describe("api read models", () => {
         const [pullRequestRead] = overview.pullRequests;
 
         expect(Object.keys(issueRead!).sort()).toEqual(
-          ["excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
+          ["createdAt", "excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(pullRequestRead!).sort()).toEqual(
           [
             "additions",
+            "createdAt",
             "deletions",
             "closingIssues",
             "excerpt",

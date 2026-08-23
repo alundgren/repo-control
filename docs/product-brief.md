@@ -19,11 +19,11 @@ Version one is read-only.
 - Show open issues in three queues: ready for agent, needs me, and triage.
 - Show open blockers and linked closing issues when GitHub supplies them.
 - Make repository identity and data freshness visible.
-- Support one sampled account-wide refresh and a focused refresh for one pull
+- Support one reconciled account-wide refresh and a focused refresh for one pull
   request or issue.
 - Show dedicated full-list views for every item in the current cache
-  generation. A full list is not a claim that a sampled GitHub refresh was
-  exhaustive; the view keeps its sampled scope and partial-result state.
+  generation. A full list reflects the last reconciliation; the view still
+  exposes a partial-result state when GitHub's search cap prevents a full inventory.
 - Work for any person who connects their own GitHub account. Version one
   includes only repositories whose owner is that personal account, even if the
   token can read organization-owned repositories. Production code derives
@@ -53,7 +53,8 @@ not guess.
 
 ## Refresh rules
 
-The account-wide refresh is deliberately sampled and bounded. It updates the
+The account-wide refresh reconciles every open issue and pull request that
+GitHub search returns for the personal account. It updates the
 cached overview without making a request per visible row.
 
 A focused refresh fetches one selected pull request or issue after the person
