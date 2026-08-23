@@ -5,24 +5,26 @@
 Repo Control has three parts:
 
 ```text
-Browser UI -> application server -> GitHub GraphQL API
-                     |
-                 local cache
+host environment -- token injection --> application server --> GitHub GraphQL API
+                                         ^        |
+                                         |        v
+Browser UI -> named private API ---------+  private persistent SQLite cache
 ```
 
 The browser talks only to the application server. The server owns GitHub
 credentials, rate-limit handling, cache reads, and refresh work. The browser
-never receives a GitHub token.
+never receives a GitHub token, and the API exposes purpose-built cache and
+refresh operations rather than a generic GitHub GraphQL proxy.
 
 ## Modules
 
 | Module | Responsibility |
 | --- | --- |
-| GitHub client | Fetches account-scoped pull requests, issues, labels, parent relationships, blockers, and closing issues. |
+| GitHub client | Fetches pull requests, issues, labels, parent relationships, blockers, and closing issues only for repositories owned by the authenticated personal account. |
 | Snapshot service | Builds a bounded account overview and records its freshness and partial-result state. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
-| Local cache | Stores normalized GitHub nodes and the last successful snapshot. It never becomes a second issue tracker. |
+| Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
 | Web UI | Renders queues and item detail. It does not derive readiness from issue text. |
 
@@ -31,25 +33,29 @@ never receives a GitHub token.
 Use GitHub node IDs as primary keys. Repository name plus item type plus number
 is a useful display key, but numbers collide across repositories.
 
-An item stores its GitHub facts, cache freshness, labels, body text, linked
-closing issues, and open blockers. A relationship record stores both endpoints
-and the relationship type. Keep raw GitHub fields only where a view needs
-them. Normalize enough to update one item without rebuilding every list.
+An item stores its GitHub facts, cache freshness, labels, a bounded source-text
+excerpt, linked closing issues, and open blockers. The server derives that
+excerpt for the view; it does not persist a raw GitHub body or response. A
+relationship record stores both endpoints and the relationship type. Keep only
+the fields with an active product or operational need, and normalize enough to
+update one item without rebuilding every list.
 
 Store instance configuration separately from GitHub facts and cache generations.
 It contains the label-to-queue mapping, default queue for absent or unknown
-labels, and local focus. A default mapping may use `ready-for-agent`,
-`ready-for-human`, and `needs-refinement`, but every installation can change
-or remove those labels. The workflow classifier applies this configuration on
-the server, so the browser receives a queue rather than inventing one.
+labels. A default mapping may use `ready-for-agent`,
+`ready-for-human`; every installation can change or remove those labels. The
+workflow classifier applies this configuration on the server, so the browser
+receives a queue rather than inventing one.
 
-The cache also stores the connected account, repositories visible to that
-connection, and refresh outcome. Do not persist a GitHub token in this model.
+The cache also stores the connected account, the personal-account-owned
+repositories in scope, and refresh outcome. Do not persist a GitHub token in
+this model. Organization-owned repositories are excluded even when the token
+could see them.
 
 ## Data flow
 
-1. A sampled sync gets a bounded set of open pull requests and issues from the
-   connected account's visible repositories.
+1. A sampled sync filters to repositories owned by the connected personal
+   account, then gets a bounded set of their open pull requests and issues.
 2. The server enriches only the selected or displayed items with blockers,
    parent links, and closing-issue relationships.
 3. The workflow classifier maps each item to a configured queue. Missing and
@@ -58,6 +64,14 @@ connection, and refresh outcome. Do not persist a GitHub token in this model.
    the previous generation if the next sync fails.
 5. A focused refresh reads one GitHub node, updates its normalized records, and
    returns the new detail state.
+
+After a successful refresh proves that an item left the open version-one scope,
+the cache deletes that item and its dependent relationships. When repository
+access disappears, it deletes that repository's cached slice. Failed and
+partial refreshes never infer deletion. Later releases must keep the same lean
+data rule: retain data only while it has an active product or operational need,
+bound history and metadata, and explicitly archive or delete data that no
+longer qualifies.
 
 ## Rate-limit and failure rules
 
@@ -70,17 +84,20 @@ connection, and refresh outcome. Do not persist a GitHub token in this model.
   world sync.
 - Show cached data with its last successful refresh time when GitHub fails.
 - Treat missing dependency relationships as unavailable, not as unblocked.
+- Private API responses use `Cache-Control: no-store`.
+- Never log raw GitHub payloads. Committed fixtures are fictional.
 
-## Authentication and hosting decision
+## Credential and hosting contract
 
-This needs an early design choice, not an implementation guess. A single-user
-deployment can start with a fine-grained personal access token stored only by
-the server. A GitHub App becomes preferable if a public self-hosting path needs
-least-privilege installation flow and account switching.
+Version one uses a fine-grained personal access token with **Metadata**,
+**Issues**, and **Pull requests** read permissions. Piploy's host-managed
+environment injects it as `${hostEnv:REPO_CONTROL_GITHUB_TOKEN}` when starting
+the application. Only server-side code reads it; it is never returned to the
+browser or stored in SQLite.
 
-The first implementation issue should choose one route, define the encrypted
-credential store, list exact GitHub permissions, and prove that browser code
-cannot read the secret.
+SQLite runs on a private persistent host volume, and the deployment is
+Tailnet-restricted. The [README](../README.md) is the operator runbook for
+finite token expiry, revocation, and rotation.
 
 ## Future mutations
 
