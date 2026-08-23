@@ -1,51 +1,37 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
-import { getOverview, syncOverview } from "./api.js";
+import { getOverview, refreshItem, syncOverview } from "./api.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
+type ItemRefreshState = "idle" | "busy" | "success" | "partial" | "failed" | "removed";
 
 type ViewDetails = {
   title: string;
-  description: string;
   sectionTitle?: string;
-  sectionNote?: string;
-  fullListLabel?: string;
   queue?: string;
 };
 
 const views: Record<View, ViewDetails> = {
-  now: { title: "Now", description: "The few things worth looking at first." },
+  now: { title: "Now" },
   pullRequests: {
     title: "Pull requests",
-    description: "Open changes, with enough context to decide where to click.",
     sectionTitle: "Open pull requests",
-    sectionNote: "Across your repositories",
-    fullListLabel: "See all open pull requests",
   },
   agent: {
     title: "Ready for agent",
-    description: "Issues with a workflow label. A blocker still wins over that label.",
     sectionTitle: "Ready for agent",
-    sectionNote: "A blocker still wins over the workflow label",
-    fullListLabel: "See all ready-for-agent issues",
     queue: "agent",
   },
   human: {
     title: "Needs me",
-    description: "A decision, access, or hands-on work belongs here.",
     sectionTitle: "Needs me",
-    sectionNote: "A decision, access, or hands-on work",
-    fullListLabel: "See all human work",
     queue: "human",
   },
   triage: {
     title: "Triage",
-    description: "Open work that needs sorting before it becomes a task.",
     sectionTitle: "Triage",
-    sectionNote: "Open work that needs sorting",
-    fullListLabel: "See all triage",
     queue: "triage",
   },
 };
@@ -60,20 +46,41 @@ export function App() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [loadMessage, setLoadMessage] = useState("");
+  const [itemMessage, setItemMessage] = useState("");
   const [syncState, setSyncState] = useState<SyncState>("idle");
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [itemRefreshStates, setItemRefreshStates] = useState<Record<string, ItemRefreshState>>({});
+  const [compactLayout, setCompactLayout] = useState(false);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const quickReadHeadingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     void loadOverview();
   }, []);
 
+  useEffect(() => {
+    if (compactLayout && selectedItemId) {
+      window.requestAnimationFrame(() => quickReadHeadingRef.current?.focus());
+    }
+  }, [compactLayout, selectedItemId]);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(max-width: 64rem)");
+    const update = () => setCompactLayout(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
   async function loadOverview() {
+    setLoading(true);
     try {
       const response = await getOverview();
       setOverview(response.status === "ready" ? response : null);
       setLoadMessage("");
     } catch {
-      setLoadMessage("The sampled work queue is unavailable. Try again.");
+      setLoadMessage("The sampled work queue is unavailable.");
     } finally {
       setLoading(false);
     }
@@ -82,6 +89,7 @@ export function App() {
   function changeView(nextView: View) {
     setView(nextView);
     setQuery("");
+    setSelectedItemId(null);
     window.requestAnimationFrame(() => titleRef.current?.focus());
   }
 
@@ -101,10 +109,69 @@ export function App() {
     }
   }
 
+  async function refreshFocusedItem(nodeId: string) {
+    setItemMessage("");
+    setItemRefreshStates((states) => ({ ...states, [nodeId]: "busy" }));
+    try {
+      const response = await refreshItem(nodeId);
+      if (response.status === "updated") {
+        setOverview((current) => current ? replaceOverviewItem(current, response.item) : current);
+        setItemRefreshStates((states) => ({ ...states, [nodeId]: response.relationshipStatus === "fresh" ? "success" : "partial" }));
+        const currentQueue = views[view].queue;
+        const movedQueue = response.item.type === "issue"
+          && currentQueue !== undefined
+          && response.item.queue !== currentQueue
+          ? response.item.queue
+          : null;
+        if (movedQueue && selectedItemId === nodeId) {
+          setSelectedItemId(null);
+          setItemMessage(`Item refreshed and moved to ${queueTitle(movedQueue)}.`);
+          focusNextRowOrPageHeading();
+        }
+        return;
+      }
+      if (response.status === "removed" || response.status === "not_found") {
+        setOverview((current) => current ? removeOverviewItem(current, nodeId) : current);
+        setSelectedItemId((current) => current === nodeId ? null : current);
+        setItemMessage("This item is no longer in the loaded work.");
+        setItemRefreshStates((states) => ({ ...states, [nodeId]: "removed" }));
+        focusNextRowOrPageHeading();
+        return;
+      }
+      setOverview((current) => current ? replaceOverviewItem(current, response.item) : current);
+      setItemRefreshStates((states) => ({ ...states, [nodeId]: "failed" }));
+    } catch {
+      setItemRefreshStates((states) => ({ ...states, [nodeId]: "failed" }));
+    }
+  }
+
+  function focusNextRowOrPageHeading() {
+    window.requestAnimationFrame(() => {
+      const nextRow = document.querySelector<HTMLButtonElement>(".itemRow");
+      if (nextRow) {
+        nextRow.focus();
+      } else {
+        titleRef.current?.focus();
+      }
+    });
+  }
+
   const currentView = views[view];
   const items = overview ? itemsForView(overview, view) : [];
   const filteredItems = overview ? filterItems(items, query, overview) : [];
-  const statusMessage = loadMessage || syncStatusMessage(syncState);
+  const selectedItem = filteredItems.find((item) => item.id === selectedItemId) ?? null;
+  const statusMessage = itemMessage || syncStatusMessage(syncState);
+
+  function selectItem(nodeId: string) {
+    setItemMessage("");
+    setSelectedItemId(nodeId);
+  }
+
+  function returnToList() {
+    const previousSelection = selectedItemId;
+    setSelectedItemId(null);
+    window.requestAnimationFrame(() => document.getElementById(`item-row-${previousSelection}`)?.focus());
+  }
 
   return (
     <main className="appShell">
@@ -137,7 +204,6 @@ export function App() {
           <header className="pageHeader">
             <div>
               <h1 ref={titleRef} tabIndex={-1}>{currentView.title}</h1>
-              <p className="description">{currentView.description}</p>
             </div>
             <div className="syncArea">
               {overview ? (
@@ -159,7 +225,12 @@ export function App() {
           <p aria-live="polite" className={`statusMessage ${syncState}`}>{statusMessage}</p>
 
           {loading ? <p>Loading the sampled work queue…</p> : null}
-          {!loading && !overview ? <p className="emptyState">No sampled work is available yet.</p> : null}
+          {!loading && !overview ? (
+            <p className="emptyState">
+              {loadMessage || "No sampled work is available yet."}
+              {loadMessage ? <button className="quietButton retryButton" onClick={() => void loadOverview()} type="button">Try again</button> : null}
+            </p>
+          ) : null}
 
           {overview ? (
             <>
@@ -171,11 +242,29 @@ export function App() {
                 type="search"
                 value={query}
               />
-              {view === "now" ? (
-                <NowView overview={overview} query={query} filteredItems={filteredItems} onNavigate={changeView} />
-              ) : (
-                <ListSection items={filteredItems} overview={overview} title={currentView.title} />
-              )}
+              <p aria-live="polite" className="visuallyHidden">{selectedItem ? `Showing ${selectedItem.title}.` : ""}</p>
+              <div className="workArea">
+                {!compactLayout || !selectedItem ? <div className="workList">
+                  {view === "now" ? (
+                    <NowView
+                      onSelect={selectItem}
+                      overview={overview}
+                      query={query}
+                      selectedItemId={selectedItemId}
+                      filteredItems={filteredItems}
+                    />
+                  ) : (
+                    <ListSection
+                      items={filteredItems}
+                      onSelect={selectItem}
+                      overview={overview}
+                      selectedItemId={selectedItemId}
+                      title={currentView.title}
+                    />
+                  )}
+                </div> : null}
+                {!compactLayout || selectedItem ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
+              </div>
             </>
           ) : null}
         </div>
@@ -219,15 +308,17 @@ function NowView({
   overview,
   query,
   filteredItems,
-  onNavigate,
+  onSelect,
+  selectedItemId,
 }: {
   overview: Extract<OverviewResponse, { status: "ready" }>;
   query: string;
   filteredItems: ApiItem[];
-  onNavigate: (view: View) => void;
+  onSelect: (nodeId: string) => void;
+  selectedItemId: string | null;
 }) {
   if (query.trim()) {
-    return <ListSection items={filteredItems} overview={overview} showKind title="Search results" />;
+    return <ListSection items={filteredItems} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind title="Search results" />;
   }
 
   const previewViews: View[] = ["pullRequests", "agent", "human", "triage"];
@@ -240,12 +331,8 @@ function NowView({
           <section className="queueSection" key={view}>
             <div className="sectionHeading">
               <h2>{details.sectionTitle}</h2>
-              {details.sectionNote ? <p className="sectionNote">{details.sectionNote}</p> : null}
             </div>
-            <ItemList items={items.slice(0, previewLimit)} overview={overview} />
-            <button className="quietButton viewAll" onClick={() => onNavigate(view)} type="button">
-              {details.fullListLabel}
-            </button>
+            <ItemList items={items.slice(0, previewLimit)} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} />
           </section>
         );
       })}
@@ -255,18 +342,22 @@ function NowView({
 
 function ListSection({
   items,
+  onSelect,
   overview,
+  selectedItemId,
   showKind = false,
   title,
 }: {
   items: ApiItem[];
+  onSelect: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
+  selectedItemId: string | null;
   showKind?: boolean;
   title: string;
 }) {
   return (
     <section className="queueSection fullList" aria-label={title}>
-      <ItemList items={items} overview={overview} showKind={showKind} />
+      <ItemList items={items} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind={showKind} />
       {items.length === 0 ? <p className="emptyState">No loaded items match this view.</p> : null}
     </section>
   );
@@ -274,33 +365,41 @@ function ListSection({
 
 function ItemList({
   items,
+  onSelect,
   overview,
+  selectedItemId,
   showKind = false,
 }: {
   items: ApiItem[];
+  onSelect: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
+  selectedItemId: string | null;
   showKind?: boolean;
 }) {
   return (
     <ul className="itemList">
-      {items.map((item) => <ItemRow item={item} key={item.id} overview={overview} showKind={showKind} />)}
+      {items.map((item) => <ItemRow item={item} key={item.id} onSelect={onSelect} overview={overview} selected={selectedItemId === item.id} showKind={showKind} />)}
     </ul>
   );
 }
 
 function ItemRow({
   item,
+  onSelect,
   overview,
+  selected,
   showKind,
 }: {
   item: ApiItem;
+  onSelect: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
+  selected: boolean;
   showKind: boolean;
 }) {
   const repository = repositoryName(overview, item.repositoryId);
   return (
     <li>
-      <a className="itemRow" href={item.url} rel="noreferrer" target="_blank">
+      <button aria-label={`Select ${item.title}`} aria-pressed={selected} className="itemRow" id={`item-row-${item.id}`} onClick={() => onSelect(item.id)} type="button">
         <span className="itemNumber">{item.type === "pull_request" ? `PR${item.number}` : `#${item.number}`}</span>
         <span className="itemBody">
           <span className="itemTitle">{item.title}</span>
@@ -308,9 +407,65 @@ function ItemRow({
           <ItemFacts item={item} overview={overview} showKind={showKind} />
         </span>
         <span className="itemAge">Updated {relativeTime(item.updatedAt)}</span>
-      </a>
+      </button>
     </li>
   );
+}
+
+function QuickRead({ backLabel, headingRef, item, onBack, onRefresh, overview, refreshState }: {
+  backLabel: string;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  item: ApiItem | null;
+  onBack?: () => void;
+  onRefresh: (nodeId: string) => void;
+  overview: Extract<OverviewResponse, { status: "ready" }>;
+  refreshState: ItemRefreshState;
+}) {
+  if (!item) {
+    return <aside aria-label="Quick read" className="quickRead"><p className="eyebrow">Quick read</p><h2 ref={headingRef} tabIndex={-1}>Choose an item</h2><p>Read the excerpt here, then open GitHub when you need the full context.</p></aside>;
+  }
+  return (
+    <aside aria-label="Quick read" className="quickRead">
+      {onBack ? <button className="quietButton backToList" onClick={onBack} type="button">Back to {backLabel}</button> : null}
+      <p className="eyebrow">{item.type === "pull_request" ? "Pull request" : "Issue"}</p>
+      <p className="detailIdentity">{repositoryName(overview, item.repositoryId)} · {item.type === "pull_request" ? "PR" : "#"}{item.number}</p>
+      <h2 ref={headingRef} tabIndex={-1}>{item.title}</h2>
+      <p className="detailAge">Updated {relativeTime(item.updatedAt)}</p>
+      <a className="detailLink" href={item.url} rel="noreferrer" target="_blank">Open on GitHub</a>
+      <p className="itemExcerpt">{item.excerpt ?? "No text excerpt is available for this item."}</p>
+      <p className="itemContextFreshness">Item facts checked {relativeTime(item.observedAt ?? item.updatedAt)}.</p>
+      {item.type === "pull_request" ? <ClosingIssueFacts item={item} /> : <BlockerFacts item={item} overview={overview} />}
+      <div className="itemRefresh">
+        <button className="quietButton" disabled={refreshState === "busy"} onClick={() => onRefresh(item.id)} type="button">
+          {refreshState === "busy" ? "Refreshing this item…" : "Refresh this item"}
+        </button>
+        <span aria-live="polite" className={`itemRefreshMessage ${refreshState}`}>{itemRefreshMessage(refreshState)}</span>
+      </div>
+    </aside>
+  );
+}
+
+function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_request" }> }) {
+  if (item.closingIssues.status === "unavailable") return <p>Closing-issue details are unavailable.</p>;
+  if (item.closingIssues.status === "not_sampled") return <p>Closing-issue details were not sampled.</p>;
+  if (item.closingIssues.items.length === 0) return <p>No closing issue linked.</p>;
+  return <p>{item.closingIssues.items.map((issue, index) => <span key={issue.id}>{index > 0 ? ", " : "Closes "}<a href={issue.url} rel="noreferrer" target="_blank">{issue.repositoryNameWithOwner}#{issue.number}</a></span>)}</p>;
+}
+
+function BlockerFacts({ item, overview }: { item: Extract<ApiItem, { type: "issue" }>; overview: Extract<OverviewResponse, { status: "ready" }> }) {
+  if (item.readiness.kind === "unblocked") return <p>No open blockers.</p>;
+  if (item.readiness.kind === "unavailable") return <p>Dependency status unavailable.</p>;
+  const known = item.readiness.blockers.filter((blocker) => blocker.status === "known");
+  if (known.length === 0) return <p>Blocker details are unavailable.</p>;
+  return <p>Blocked by {known.map((blocker, index) => blocker.status === "known" ? <span key={blocker.id}>{index > 0 ? ", " : ""}<a href={blocker.url} rel="noreferrer" target="_blank">{blocker.repositoryNameWithOwner ?? repositoryName(overview, blocker.repositoryId)}#{blocker.number}</a></span> : null)}</p>;
+}
+
+function itemRefreshMessage(state: ItemRefreshState) {
+  if (state === "success") return "Item refreshed just now.";
+  if (state === "partial") return "Item refreshed; relationship details could not be updated.";
+  if (state === "failed") return "Refresh failed. Showing the previous item context.";
+  if (state === "removed") return "This item is no longer in the loaded work.";
+  return "";
 }
 
 function ItemFacts({
@@ -361,7 +516,7 @@ function readinessFact(
   const suffix = remaining > 0 ? ` +${remaining} more` : "";
   return {
     className: "warning",
-    text: `Blocked by ${repositoryName(overview, knownBlocker.repositoryId)}#${knownBlocker.number}${suffix}`,
+    text: `Blocked by ${knownBlocker.repositoryNameWithOwner ?? repositoryName(overview, knownBlocker.repositoryId)}#${knownBlocker.number}${suffix}`,
   };
 }
 
@@ -416,6 +571,53 @@ function repositoryName(overview: Extract<OverviewResponse, { status: "ready" }>
 function queueTitle(queue: string) {
   const view = issueViews.find((name) => views[name].queue === queue);
   return view ? views[view].title : queue;
+}
+
+function replaceOverviewItem(
+  overview: Extract<OverviewResponse, { status: "ready" }>,
+  updated: ApiItem,
+): Extract<OverviewResponse, { status: "ready" }> {
+  return {
+    ...overview,
+    pullRequests: updated.type === "pull_request"
+      ? [...overview.pullRequests.filter((item) => item.id !== updated.id), updated].sort(comparePullRequests)
+      : overview.pullRequests.filter((item) => item.id !== updated.id),
+    queues: overview.queues.map((queue) => ({
+      ...queue,
+      issues: updated.type === "issue" && queue.name === updated.queue
+        ? [...queue.issues.filter((item) => item.id !== updated.id), updated].sort(compareIssues)
+        : queue.issues.filter((item) => item.id !== updated.id),
+    })),
+  };
+}
+
+function comparePullRequests(left: Extract<ApiItem, { type: "pull_request" }>, right: Extract<ApiItem, { type: "pull_request" }>) {
+  return left.updatedAt.localeCompare(right.updatedAt) || left.repositoryId.localeCompare(right.repositoryId) || left.number - right.number;
+}
+
+function compareIssues(left: Extract<ApiItem, { type: "issue" }>, right: Extract<ApiItem, { type: "issue" }>) {
+  return readinessBand(left.readiness) - readinessBand(right.readiness)
+    || left.updatedAt.localeCompare(right.updatedAt)
+    || left.repositoryId.localeCompare(right.repositoryId)
+    || left.number - right.number
+    || left.id.localeCompare(right.id);
+}
+
+function readinessBand(readiness: Extract<ApiItem, { type: "issue" }> ["readiness"]) {
+  if (readiness.kind === "unblocked") return 0;
+  if (readiness.kind === "unavailable") return 1;
+  return 2;
+}
+
+function removeOverviewItem(
+  overview: Extract<OverviewResponse, { status: "ready" }>,
+  nodeId: string,
+): Extract<OverviewResponse, { status: "ready" }> {
+  return {
+    ...overview,
+    pullRequests: overview.pullRequests.filter((item) => item.id !== nodeId),
+    queues: overview.queues.map((queue) => ({ ...queue, issues: queue.issues.filter((item) => item.id !== nodeId) })),
+  };
 }
 
 function relativeTime(timestamp: string) {

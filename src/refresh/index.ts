@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-import type { Cache, CacheItem } from "../cache/index.js";
+import type { Cache, CacheItem, RelatedItemSummary } from "../cache/index.js";
 import type {
   GitHubRateLimit,
   GitHubReadClient,
@@ -22,6 +22,7 @@ export type RefreshUpdated = {
   status: "updated";
   item: CacheItem;
   fetchedAt: string;
+  relationshipStatus: "fresh" | "stale";
   rateLimit: GitHubRateLimit;
 };
 
@@ -96,7 +97,8 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
   const enrichmentRead = await client.readRelationshipEnrichment({ nodeIds: [nodeId] });
   const subject = enrichmentRead.status === "unavailable" ? undefined : enrichmentRead.subjects[0];
 
-  const merged = mergeItem(previous, read.item, sampledType, subject);
+  const relationshipStatus = subject && subject.coverage[sampledType] === "complete" ? "fresh" : "stale";
+  const merged = { ...mergeItem(previous, read.item, sampledType, subject), observedAt: read.fetchedAt };
 
   try {
     cache.replaceItem(merged, read.fetchedAt);
@@ -112,7 +114,7 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
     };
   }
 
-  return { status: "updated", item: merged, fetchedAt: read.fetchedAt, rateLimit: read.rateLimit };
+  return { status: "updated", item: merged, fetchedAt: read.fetchedAt, relationshipStatus, rateLimit: read.rateLimit };
 }
 
 function mergeItem(
@@ -131,6 +133,9 @@ function mergeItem(
     ];
   }
 
+  const relatedItems: RelatedItemSummary[] | undefined = subject && subject.coverage[sampledType] === "complete"
+    ? subject.relatedItems
+    : undefined;
   const base = {
     id: fresh.id,
     repositoryId: fresh.repositoryId,
@@ -142,6 +147,7 @@ function mergeItem(
     labels: fresh.labels,
     relationships,
     relationshipCoverage,
+    ...(relatedItems ? { relatedItems } : {}),
   };
 
   if (fresh.type === "issue") {

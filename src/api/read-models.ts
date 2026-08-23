@@ -8,13 +8,27 @@ export type ApiScope = SuccessfulSnapshot["scope"];
 export type ApiRepository = SuccessfulSnapshot["repositories"][number];
 
 export type ApiBlocker =
-  | { status: "known"; id: string; repositoryId: string; number: number; title: string; url: string }
+  | { status: "known"; id: string; repositoryId: string; repositoryNameWithOwner?: string; number: number; title: string; url: string }
   | { status: "unknown"; id: string };
 
 export type ApiReadiness =
   | { kind: "unblocked" }
   | { kind: "unavailable" }
   | { kind: "blocked"; blockers: ApiBlocker[] };
+
+export type ApiRelatedItem = {
+  id: string;
+  repositoryId: string;
+  repositoryNameWithOwner: string;
+  number: number;
+  title: string;
+  url: string;
+};
+
+export type ApiRelatedItems =
+  | { status: "complete"; items: ApiRelatedItem[] }
+  | { status: "unavailable" }
+  | { status: "not_sampled" };
 
 export type ApiIssue = {
   id: string;
@@ -25,6 +39,7 @@ export type ApiIssue = {
   excerpt: string | null;
   url: string;
   updatedAt: string;
+  observedAt?: string;
   queue: string;
   readiness: ApiReadiness;
 };
@@ -38,9 +53,11 @@ export type ApiPullRequest = {
   excerpt: string | null;
   url: string;
   updatedAt: string;
+  observedAt?: string;
   isDraft: boolean;
   additions: number | null;
   deletions: number | null;
+  closingIssues: ApiRelatedItems;
 };
 
 export type ApiItem = ApiIssue | ApiPullRequest;
@@ -69,7 +86,7 @@ export type SyncResponse =
     };
 
 export type ItemRefreshResponse =
-  | { status: "updated"; item: ApiItem }
+  | { status: "updated"; item: ApiItem; fetchedAt: string; relationshipStatus: "fresh" | "stale" }
   | { status: "removed"; reason: "closed" | "repository_not_owned" }
   | { status: "not_found" }
   | { status: "permission_denied"; error: ApiError; item: ApiItem }
@@ -100,7 +117,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
     repositories: snapshot.repositories,
     scope: snapshot.scope,
     queues: groupIntoQueues(mapping, apiIssues),
-    pullRequests: pullRequests.map(toApiPullRequest).sort(comparePullRequests),
+    pullRequests: pullRequests.map((item) => toApiPullRequest(cache, item)).sort(comparePullRequests),
   };
 }
 
@@ -122,7 +139,12 @@ export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): It
     case "removed":
       return { status: "removed", reason: outcome.reason };
     case "updated":
-      return { status: "updated", item: toApiItem(cache, outcome.item) };
+      return {
+        status: "updated",
+        item: toApiItem(cache, outcome.item),
+        fetchedAt: outcome.fetchedAt,
+        relationshipStatus: outcome.relationshipStatus,
+      };
     case "permission_denied":
       return {
         status: "permission_denied",
@@ -140,7 +162,7 @@ export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): It
 
 function toApiItem(cache: Cache, item: CacheItem): ApiItem {
   if (item.type === "pull_request") {
-    return toApiPullRequest(item);
+    return toApiPullRequest(cache, item);
   }
   const mapping = cache.getQueueMapping();
   const [classified] = classifyIssues(mapping, [item]);
@@ -159,6 +181,7 @@ function toApiIssue(
     number: classified.number,
     title: classified.title,
     excerpt: classified.body,
+    observedAt: classified.observedAt,
     url: classified.url,
     updatedAt: classified.updatedAt,
     queue: classified.queue,
@@ -186,14 +209,25 @@ function resolveBlocker(cache: Cache, id: string, blockerCache: Map<string, ApiB
     return cached;
   }
   const item = cache.getItem(id);
+  const related = cache.getRelatedItem(id);
   const resolved: ApiBlocker = item
     ? { status: "known", id: item.id, repositoryId: item.repositoryId, number: item.number, title: item.title, url: item.url }
-    : { status: "unknown", id };
+    : related
+      ? {
+          status: "known",
+          id: related.id,
+          repositoryId: related.repositoryId,
+          repositoryNameWithOwner: related.repositoryNameWithOwner,
+          number: related.number,
+          title: related.title,
+          url: related.url,
+        }
+      : { status: "unknown", id };
   blockerCache.set(id, resolved);
   return resolved;
 }
 
-function toApiPullRequest(item: CacheItem & { type: "pull_request" }): ApiPullRequest {
+function toApiPullRequest(cache: Cache, item: CacheItem & { type: "pull_request" }): ApiPullRequest {
   return {
     id: item.id,
     type: "pull_request",
@@ -201,12 +235,27 @@ function toApiPullRequest(item: CacheItem & { type: "pull_request" }): ApiPullRe
     number: item.number,
     title: item.title,
     excerpt: item.body,
+    observedAt: item.observedAt,
     url: item.url,
     updatedAt: item.updatedAt,
     isDraft: item.pullRequest.isDraft,
     additions: item.pullRequest.additions,
     deletions: item.pullRequest.deletions,
+    closingIssues: toApiRelatedItems(cache, item, "closing_issue"),
   };
+}
+
+function toApiRelatedItems(cache: Cache, item: CacheItem, type: "closing_issue"): ApiRelatedItems {
+  const coverage = item.relationshipCoverage[type];
+  if (coverage !== "complete") {
+    return { status: coverage };
+  }
+  const targets = item.relationships.filter((relationship) => relationship.type === type);
+  const related = targets.map((relationship) => cache.getRelatedItem(relationship.targetId));
+  if (related.some((entry) => !entry)) {
+    return { status: "unavailable" };
+  }
+  return { status: "complete", items: related as ApiRelatedItem[] };
 }
 
 function groupIntoQueues(mapping: QueueMapping, issues: ApiIssue[]): ApiQueue[] {

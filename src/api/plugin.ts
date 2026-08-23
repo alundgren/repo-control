@@ -45,13 +45,9 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
         },
       },
     },
-    async (request, reply) => {
+    async (request) => {
       const outcome = await refreshService.refreshItem({ nodeId: request.params.nodeId });
-      const response = toItemRefreshResponse(cache, outcome);
-      if (response.status === "not_found") {
-        reply.code(404);
-      }
-      return response;
+      return toItemRefreshResponse(cache, outcome);
     },
   );
 };

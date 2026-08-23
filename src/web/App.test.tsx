@@ -179,7 +179,7 @@ describe("work queue overview", () => {
     expect(screen.getByText("Dependency status unavailable")).toBeTruthy();
     expect(screen.queryByText("Water the fictional garden")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "See all open pull requests" }));
+    await user.click(screen.getByRole("button", { name: "Pull requests 3" }));
     expect(screen.getByText("Water the fictional garden")).toBeTruthy();
   });
 
@@ -202,6 +202,86 @@ describe("work queue overview", () => {
     expect(await screen.findByText("Sample synced with a partial result.")).toBeTruthy();
     expect(screen.getByText(/Partial result/)).toBeTruthy();
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
+  });
+
+  it("selects one row at a time while keeping the work list and quick read visible", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    overview.queues[0]!.issues = [
+      { ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }), excerpt: "Use <strong>plain text</strong>, not rendered markup." },
+      { ...issue({ id: "I_2", number: 23, title: "Review fictional moss" }), excerpt: "Second item context." },
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    const firstRow = screen.getByRole("button", { name: "Select Add a fictional seed" });
+    await user.click(firstRow);
+
+    expect(screen.getByText("Use <strong>plain text</strong>, not rendered markup.")).toBeTruthy();
+    expect(screen.queryByRole("strong")).toBeNull();
+    expect(screen.getByText("Review fictional moss")).toBeTruthy();
+    expect(firstRow.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("link", { name: "Open on GitHub" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Select Review fictional moss" }));
+    expect(screen.queryByText("Use <strong>plain text</strong>, not rendered markup.")).toBeNull();
+    expect(screen.getByText("Second item context.")).toBeTruthy();
+  });
+
+  it("moves a refreshed issue to its returned queue in queue order", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    const refreshed = {
+      ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }),
+      queue: "human",
+      updatedAt: "2026-08-19T10:00:00.000Z",
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(overview))
+      .mockResolvedValueOnce(response({
+        status: "updated",
+        item: refreshed,
+        fetchedAt: "2026-08-23T11:00:00.000Z",
+        relationshipStatus: "fresh",
+      })));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByText("Item refreshed and moved to Needs me.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Needs me 2" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select Add a fictional seed" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Needs me 2" }));
+    const rows = screen.getAllByRole("button", { name: /Select / });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Select Add a fictional seed",
+      "Select Choose a garden name",
+    ]);
+  });
+
+  it("removes a focused item when its refresh reports it is no longer loaded", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "not_found" })));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByText("This item is no longer in the loaded work.")).toBeTruthy();
+    expect(screen.queryByText("Add a fictional seed")).toBeNull();
   });
 });
 
@@ -269,5 +349,6 @@ function pullRequest({ id, number, title }: { id: string; number: number; title:
     isDraft: false,
     additions: 8,
     deletions: 3,
+    closingIssues: { status: "complete" as const, items: [] },
   };
 }

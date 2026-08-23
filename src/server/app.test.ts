@@ -80,16 +80,18 @@ describe("application server", () => {
         ]);
         expect(body.pullRequests).toEqual([expect.objectContaining({ id: "PR_1", type: "pull_request" })]);
         expect(Object.keys(body.queues[0].issues[0]).sort()).toEqual(
-          ["excerpt", "id", "number", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
+          ["excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(body.pullRequests[0]).sort()).toEqual(
           [
             "additions",
+            "closingIssues",
             "deletions",
             "excerpt",
             "id",
             "isDraft",
             "number",
+            "observedAt",
             "repositoryId",
             "title",
             "type",
@@ -165,7 +167,7 @@ describe("application server", () => {
   });
 
   describe("POST /api/items/:nodeId/refresh", () => {
-    it("returns 404 without a body leak when the item is not cached", async () => {
+    it("returns a successful typed response when the item is not cached", async () => {
       const { app } = await buildApp({
         refreshService: {
           async refreshItem() {
@@ -177,7 +179,7 @@ describe("application server", () => {
       try {
         const response = await app.inject({ method: "POST", url: "/api/items/I_missing/refresh" });
 
-        expect(response.statusCode).toBe(404);
+        expect(response.statusCode).toBe(200);
         expect(response.json()).toEqual({ status: "not_found" });
       } finally {
         await app.close();
@@ -257,6 +259,7 @@ describe("application server", () => {
               status: "updated",
               item: issue({ id: "I_issue_1", labels: ["ready-for-agent"] }),
               fetchedAt: "2026-08-23T10:00:00.000Z",
+              relationshipStatus: "fresh",
               rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-08-23T11:00:00.000Z" },
             };
           },

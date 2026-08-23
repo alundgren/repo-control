@@ -127,12 +127,12 @@
       </aside>
 
       <section class="content preview" aria-label="Work queues">
-        <div class="top"><div><h1 id="title">Now</h1><p class="subhead" id="description">The few things worth looking at first.</p></div><div class="sync"><span class="sync-status" id="sync-status">Sampled 12 min ago</span><button class="quiet" data-sync>Sync sampled view</button></div></div>
+        <div class="top"><div><h1 id="title">Now</h1></div><div class="sync"><span class="sync-status" id="sync-status">Sampled 12 min ago</span><button class="quiet" data-sync>Sync sampled view</button></div></div>
         <input class="search" type="search" placeholder="Filter pull requests and issues" aria-label="Filter pull requests and issues" />
-        <section class="section section-pr"><div class="section-head"><h2>Open pull requests</h2><span class="section-note">Across your repositories</span></div><div class="queue" id="pr-list"></div></section>
-        <section class="section section-agent"><div class="section-head"><h2>Ready for agent</h2><details><summary>Focus &amp; order</summary><div class="options"><label>Focus <select aria-label="Focus"><option>All work</option><option>Current focus</option></select></label><label>Order <select aria-label="Order"><option>Ready, then oldest</option><option>Oldest ready</option><option>Issue number</option></select></label></div></details></div><div class="queue" id="agent-list"></div><button class="quiet view-link" data-view-link="agent">See all ready-for-agent issues</button></section>
-        <section class="section section-human"><div class="section-head"><h2>Needs me</h2><span class="section-note">A decision, access, or hands-on work</span></div><div class="queue" id="human-list"></div><button class="quiet view-link" data-view-link="human">See all human work</button></section>
-        <section class="section section-triage"><div class="section-head"><h2>Triage</h2><span class="section-note">Open work that needs sorting</span></div><div class="queue" id="triage-list"></div><button class="quiet view-link" data-view-link="triage">See all triage</button></section>
+        <section class="section section-pr"><div class="section-head"><h2>Open pull requests</h2></div><div class="queue" id="pr-list"></div></section>
+        <section class="section section-agent"><div class="section-head"><h2>Ready for agent</h2><details><summary>Focus &amp; order</summary><div class="options"><label>Focus <select aria-label="Focus"><option>All work</option><option>Current focus</option></select></label><label>Order <select aria-label="Order"><option>Ready, then oldest</option><option>Oldest ready</option><option>Issue number</option></select></label></div></details></div><div class="queue" id="agent-list"></div></section>
+        <section class="section section-human"><div class="section-head"><h2>Needs me</h2></div><div class="queue" id="human-list"></div></section>
+        <section class="section section-triage"><div class="section-head"><h2>Triage</h2></div><div class="queue" id="triage-list"></div></section>
       </section>
 
       <aside class="detail" aria-live="polite"><div class="detail-inner" id="detail"><div class="detail-empty"><p class="eyebrow">Quick read</p><h2>Choose an item</h2><p>Inspect the body here, then open GitHub when you need the full context.</p></div></div></aside>
@@ -149,7 +149,7 @@
         { id:"issue-51", type:"triage", number:51, repo:"orbit-tools", title:"Consider a release activity view", age:"Today", tag:"Needs refinement", body:"Explore whether release activity needs a separate view or can remain in the existing release detail.", url:"https://github.com/example/orbit-tools/issues/51" },
         { id:"issue-19", type:"triage", number:19, repo:"trail-notes", title:"Clarify retention rules for imported notes", age:"12 days old", tag:"Unclassified", body:"This issue has no workflow label yet. Decide whether it needs discovery, a human decision, or implementation.", url:"https://github.com/example/trail-notes/issues/19" }
       ];
-      const views = { all:["Now","The few things worth looking at first."], pr:["Pull requests","Open changes, with enough context to decide where to click."], agent:["Ready for agent","Issues with a workflow label. A blocker still wins over that label."], human:["Needs me","A decision, access, or hands-on work belongs here."], triage:["Triage","Open work that needs sorting before it becomes a task."] };
+      const views = { all:["Now",""], pr:["Pull requests",""], agent:["Ready for agent",""], human:["Needs me",""], triage:["Triage",""] };
       const types = { all:["pr","agent","human","triage"], pr:["pr"], agent:["agent"], human:["human"], triage:["triage"] };
       const escape = value => value.replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]);
       const queued = type => items.filter(item => item.type === type).sort((a,b) => Number(a.dependency?.kind !== "unblocked") - Number(b.dependency?.kind !== "unblocked") || a.number - b.number);
@@ -174,7 +174,6 @@
       }
       document.addEventListener("click", event => { const item = event.target.closest(".item"); if (item) show(items.find(value => value.id === item.dataset.id)); });
       document.querySelectorAll(".nav button").forEach(button => button.addEventListener("click", () => { const view = button.dataset.view; document.querySelectorAll(".nav button").forEach(item => item.removeAttribute("aria-current")); button.setAttribute("aria-current","page"); document.querySelector(".content").classList.toggle("preview", view === "all"); document.querySelector("#title").textContent = views[view][0]; document.querySelector("#description").textContent = views[view][1]; ["pr","agent","human","triage"].forEach(type => document.querySelectorAll(`.section-${type}`).forEach(section => section.classList.toggle("hidden", !types[view].includes(type)))); }));
-      document.querySelectorAll("[data-view-link]").forEach(link => link.addEventListener("click", () => document.querySelector(`.nav button[data-view="${link.dataset.viewLink}"]`).click()));
       document.querySelector("[data-sync]").addEventListener("click", () => { document.querySelector("#sync-status").textContent = "Sampled just now"; });
       document.querySelector(".search").addEventListener("input", event => { const value = event.target.value.trim().toLowerCase(); document.querySelectorAll(".item").forEach(element => { const item = items.find(candidate => candidate.id === element.dataset.id); element.classList.toggle("hidden", Boolean(value) && !`${item.repo} ${item.number} ${item.title} ${item.tag || ""}`.toLowerCase().includes(value)); }); });
     </script>

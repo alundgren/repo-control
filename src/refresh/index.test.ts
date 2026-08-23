@@ -9,6 +9,7 @@ import type {
   FocusedItemRead,
   GitHubWorkItem,
   RelationshipEnrichmentRead,
+  RelatedWorkItem,
 } from "../github/read-client.js";
 import { createItemRefreshService, type RefreshClient } from "./index.js";
 
@@ -75,6 +76,45 @@ describe("focused item refresh", () => {
         { sourceId: "I_issue_1", targetId: "I_blocker", type: "blocker" },
         { sourceId: "I_issue_1", targetId: "I_old_parent", type: "parent" },
       ]);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("persists relationship targets that are not sampled work items", async () => {
+    const cache = await seededCache();
+    try {
+      const relatedItem: RelatedWorkItem = {
+        id: "I_closing",
+        repositoryId: "R_other",
+        repositoryNameWithOwner: "fictional-tools/river",
+        number: 44,
+        title: "Close the river loop",
+        url: "https://github.test/fictional-tools/river/issues/44",
+      };
+      const client = countingClient({
+        readFocusedItem: async () => {
+          const focused = openIssue();
+          return {
+            ...focused,
+            item: {
+              ...focused.item,
+              type: "pull_request" as const,
+              pullRequest: { additions: 1, changedFiles: 1, deletions: 0, isDraft: false },
+            },
+          };
+        },
+        readRelationshipEnrichment: async () => enrichment(
+          { closing_issue: "complete" },
+          [{ sourceId: "I_issue_1", targetId: relatedItem.id, type: "closing_issue" }],
+          [relatedItem],
+        ),
+      });
+      const service = createItemRefreshService({ cache, client });
+
+      await service.refreshItem({ nodeId: "I_issue_1" });
+
+      expect(cache.getRelatedItem(relatedItem.id)).toEqual(relatedItem);
     } finally {
       cache.close();
     }
@@ -361,7 +401,7 @@ function countingClient(implementation: {
   return client;
 }
 
-function openIssue(overrides: { id?: string; title?: string; repositoryId?: string } = {}): FocusedItemRead {
+function openIssue(overrides: { id?: string; title?: string; repositoryId?: string } = {}): Extract<FocusedItemRead, { status: "open" }> {
   return {
     status: "open",
     item: {
@@ -386,6 +426,7 @@ function openIssue(overrides: { id?: string; title?: string; repositoryId?: stri
 function enrichment(
   coverage: Partial<{ blocker: "complete" | "unavailable" | "not_sampled"; closing_issue: "complete" | "unavailable" | "not_sampled" }> = {},
   relationships: GitHubWorkItem["relationships"] = [],
+  relatedItems: RelatedWorkItem[] = [],
 ): RelationshipEnrichmentRead {
   return {
     requestedCount: 1,
@@ -398,7 +439,7 @@ function enrichment(
         nodeId: relationships[0]?.sourceId ?? "I_issue_1",
         coverage: { blocker: "not_sampled", closing_issue: "not_sampled", ...coverage },
         relationships,
-        relatedItems: [],
+        relatedItems,
         status: "read",
       },
     ],
