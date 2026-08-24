@@ -11,6 +11,7 @@ import type {
   RelationshipEnrichmentSubject,
 } from "../github/read-client.js";
 import { RECONCILIATION_PAGE_SIZE, RELATIONSHIP_SUBJECT_LIMIT, SEARCH_RESULT_LIMIT } from "../github/read-client.js";
+import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 
 export const FULL_RECONCILIATION_INTERVAL_HOURS = 24;
 
@@ -48,12 +49,14 @@ export function createSyncService({
   now = Date.now,
   coordinator,
   onComplete,
+  logEvent,
 }: {
   cache: Cache;
   client: SyncClient;
   now?: () => number;
   coordinator?: ReconciliationCoordinator;
   onComplete?: () => void;
+  logEvent?: LogEventSink;
 }): SyncService {
   let inFlight: Promise<SyncOutcome> | null = null;
 
@@ -62,8 +65,10 @@ export function createSyncService({
       if (inFlight) {
         return inFlight;
       }
+      const startedAt = now();
       const operation = () => runSync(cache, client, now);
       const promise = (coordinator ? coordinator.runSync(operation) : operation()).then((outcome) => {
+        logSyncOutcome(outcome, Math.max(0, now() - startedAt), logEvent);
         if (outcome.status === "complete" && outcome.scope.reconciliation === "full" && outcome.scope.inventoryComplete === true) {
           try {
             onComplete?.();
@@ -72,6 +77,15 @@ export function createSyncService({
           }
         }
         return outcome;
+      }).catch((error: unknown) => {
+        emitLogEvent(logEvent, {
+          event: "sync.finished",
+          level: "error",
+          status: "failed",
+          durationMs: Math.max(0, now() - startedAt),
+          errorCode: "unexpected_failure",
+        });
+        throw error;
       }).finally(() => {
         inFlight = null;
       });
@@ -79,6 +93,40 @@ export function createSyncService({
       return promise;
     },
   };
+}
+
+function logSyncOutcome(outcome: SyncOutcome, durationMs: number, logEvent?: LogEventSink) {
+  if (outcome.status === "failed") {
+    emitLogEvent(logEvent, {
+      event: "sync.finished",
+      level: "warn",
+      status: "failed",
+      durationMs,
+      errorCode: outcome.error.code,
+      hasActiveSnapshot: outcome.activeSnapshot !== null,
+      ...rateLimitFields(outcome.rateLimit),
+    });
+    return;
+  }
+  emitLogEvent(logEvent, {
+    event: "sync.finished",
+    level: outcome.status === "partial" ? "warn" : "info",
+    status: outcome.status,
+    durationMs,
+    reconciliation: outcome.scope.reconciliation,
+    inventoryComplete: outcome.scope.inventoryComplete,
+    repositoryCount: outcome.scope.repositoryCount,
+    itemCount: outcome.scope.itemCount,
+    truncatedReason: outcome.scope.truncatedReason,
+    generationId: outcome.generationId,
+    ...rateLimitFields(outcome.rateLimit),
+  });
+}
+
+function rateLimitFields(rateLimit: GitHubRateLimit | null) {
+  return rateLimit
+    ? { rateLimitCost: rateLimit.cost, rateLimitRemaining: rateLimit.remaining, rateLimitResetAt: rateLimit.resetAt }
+    : {};
 }
 
 async function runSync(cache: Cache, client: SyncClient, now: () => number): Promise<SyncOutcome> {

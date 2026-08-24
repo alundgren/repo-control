@@ -21,8 +21,18 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
-    request.log.error({ err: error }, "api request failed");
     const statusCode = typeof error.statusCode === "number" ? error.statusCode : 500;
+    try {
+      request.log.error({
+        event: "api.request.failed",
+        statusCode,
+        route: request.routeOptions.url,
+        requestId: request.id,
+        errorCode: statusCode >= 400 && statusCode < 500 ? "invalid_request" : "unavailable",
+      }, "api request failed");
+    } catch {
+      // Logging must not prevent the safe API error response.
+    }
     if (statusCode >= 400 && statusCode < 500) {
       reply.code(statusCode).send({ status: "error", error: { code: "invalid_request" } });
       return;

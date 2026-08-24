@@ -2,6 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { access, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { Writable } from "node:stream";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openCache } from "../cache/index.js";
 import type { GitHubConnectionClient } from "../github/connection.js";
+import { createOperationalLogger } from "../observability/index.js";
 import { startApplication, startServer } from "./start.js";
 
 const execFile = promisify(execFileCallback);
@@ -48,6 +50,7 @@ describe("server startup", () => {
       expect(shell.body).not.toContain(sentinel);
       expect(browserAssets).not.toContain(sentinel);
       const logs: string[] = [];
+      const events: Array<Record<string, unknown>> = [];
       const started = await startApplication({
         environment: environment(),
         host: "127.0.0.1",
@@ -62,10 +65,18 @@ describe("server startup", () => {
             return [];
           },
         }),
+        logEvent: (event) => events.push(event),
       }, (message) => logs.push(message));
 
       expect(started).toBe(false);
       expect(logs.join("\n")).not.toContain(sentinel);
+      expect(events).toEqual([
+        expect.objectContaining({
+          event: "startup.failed",
+          errorCode: "authentication_failed",
+          message: "GitHub rejected the connection or did not return the required read data.",
+        }),
+      ]);
     } finally {
       await app.close();
     }
@@ -74,6 +85,13 @@ describe("server startup", () => {
   it("creates the SQLite cache in the configured data directory", async () => {
     const webRoot = await createWebRoot();
     const dataDirectory = await createDataDirectory();
+    const output: string[] = [];
+    const logger = createOperationalLogger(new Writable({
+      write(chunk, _encoding, callback) {
+        output.push(chunk.toString());
+        callback();
+      },
+    }));
     const { app } = await startServer({
       environment: environment(),
       host: "127.0.0.1",
@@ -81,9 +99,14 @@ describe("server startup", () => {
       webRoot,
       dataDirectory,
       createGitHubClient: () => client(),
+      logger,
     });
 
     await app.close();
+
+    expect(output.join("\n")).not.toContain("127.0.0.1");
+    expect(output.join("\n")).not.toContain("pid");
+    expect(output.join("\n")).not.toContain("hostname");
 
     await expect(access(join(dataDirectory, "repo-control.sqlite"))).resolves.toBeUndefined();
 

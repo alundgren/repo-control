@@ -7,6 +7,7 @@ import type {
   GitHubWorkItem,
   RelationshipEnrichmentSubject,
 } from "../github/read-client.js";
+import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 
 export type RefreshClient = Pick<GitHubReadClient, "readFocusedItem" | "readRelationshipEnrichment">;
 
@@ -71,11 +72,15 @@ export function createItemRefreshService({
   client,
   onChange,
   coordinator,
+  logEvent,
+  now = Date.now,
 }: {
   cache: Cache;
   client: RefreshClient;
   onChange?: (change: RefreshChange) => void;
   coordinator?: ReconciliationCoordinator;
+  logEvent?: LogEventSink;
+  now?: () => number;
 }): ItemRefreshService {
   const inFlight = new Map<string, Promise<RefreshOutcome>>();
   const inFlightUpserts = new Map<string, Promise<UpsertOutcome>>();
@@ -87,7 +92,21 @@ export function createItemRefreshService({
       if (existing) {
         return existing;
       }
-      const promise = runItem(() => runRefresh(cache, client, nodeId, onChange)).finally(() => {
+      const startedAt = now();
+      const promise = runItem(() => runRefresh(cache, client, nodeId, onChange)).then((outcome) => {
+        logRefreshOutcome("refresh", outcome, Math.max(0, now() - startedAt), logEvent);
+        return outcome;
+      }).catch((error: unknown) => {
+        emitLogEvent(logEvent, {
+          event: "refresh.finished",
+          level: "error",
+          status: "failed",
+          mode: "refresh",
+          durationMs: Math.max(0, now() - startedAt),
+          errorCode: "unexpected_failure",
+        });
+        throw error;
+      }).finally(() => {
         inFlight.delete(nodeId);
       });
       inFlight.set(nodeId, promise);
@@ -96,13 +115,55 @@ export function createItemRefreshService({
     upsertItem({ nodeId }) {
       const existing = inFlightUpserts.get(nodeId);
       if (existing) return existing;
-      const promise = runItem(() => runUpsert(cache, client, nodeId, onChange)).finally(() => {
+      const startedAt = now();
+      const promise = runItem(() => runUpsert(cache, client, nodeId, onChange)).then((outcome) => {
+        logRefreshOutcome("upsert", outcome, Math.max(0, now() - startedAt), logEvent);
+        return outcome;
+      }).catch((error: unknown) => {
+        emitLogEvent(logEvent, {
+          event: "refresh.finished",
+          level: "error",
+          status: "failed",
+          mode: "upsert",
+          durationMs: Math.max(0, now() - startedAt),
+          errorCode: "unexpected_failure",
+        });
+        throw error;
+      }).finally(() => {
         inFlightUpserts.delete(nodeId);
       });
       inFlightUpserts.set(nodeId, promise);
       return promise;
     },
   };
+}
+
+function logRefreshOutcome(
+  mode: "refresh" | "upsert",
+  outcome: RefreshOutcome | UpsertOutcome,
+  durationMs: number,
+  logEvent?: LogEventSink,
+) {
+  const errorCode = "error" in outcome ? outcome.error.code : undefined;
+  const item = "item" in outcome ? outcome.item : "cachedItem" in outcome ? outcome.cachedItem : null;
+  const level = outcome.status === "failed" || outcome.status === "permission_denied" ? "warn" : "info";
+  emitLogEvent(logEvent, {
+    event: "refresh.finished",
+    level,
+    status: outcome.status,
+    mode,
+    durationMs,
+    ...(item ? { itemType: item.type } : {}),
+    ...("reason" in outcome ? { removalReason: outcome.reason } : {}),
+    ...(errorCode ? { errorCode } : {}),
+    ...("rateLimit" in outcome ? rateLimitFields(outcome.rateLimit) : {}),
+  });
+}
+
+function rateLimitFields(rateLimit: GitHubRateLimit | null) {
+  return rateLimit
+    ? { rateLimitCost: rateLimit.cost, rateLimitRemaining: rateLimit.remaining, rateLimitResetAt: rateLimit.resetAt }
+    : {};
 }
 
 async function runRefresh(
