@@ -27,6 +27,7 @@ import {
 } from "./read-client.js";
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
+const GITHUB_REQUEST_TIMEOUT_MS = 15_000;
 
 export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.fetch): GitHubReadClient {
   return {
@@ -171,7 +172,7 @@ async function readGraphQL(
 ) {
   let response: Response;
   try {
-    response = await fetch("https://api.github.com/graphql", {
+    response = await fetchWithTimeout(fetch, "https://api.github.com/graphql", {
       method: "POST",
       headers: {
         accept: "application/vnd.github+json",
@@ -208,7 +209,7 @@ async function readWorkGraphQL(
 ) {
   let response: Response;
   try {
-    response = await fetch("https://api.github.com/graphql", {
+    response = await fetchWithTimeout(fetch, "https://api.github.com/graphql", {
       method: "POST",
       headers: {
         accept: "application/vnd.github+json",
@@ -238,6 +239,16 @@ async function readWorkGraphQL(
     throw new WorkReadFailure("invalid_response");
   }
   return payload.data as Record<string, unknown>;
+}
+
+async function fetchWithTimeout(fetch: Fetch, input: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseRelationshipEnrichment(
@@ -320,7 +331,6 @@ async function readAccountSnapshot(
   for (const search of queries) {
     let after: string | null = null;
     let resultCount = 0;
-    let issueCount: number | null = null;
     do {
       const data = await readWorkGraphQL(fetch, token, "AccountSearchPage", ACCOUNT_SEARCH_QUERY, {
         after,
@@ -331,7 +341,7 @@ async function readAccountSnapshot(
         throw new WorkReadFailure("invalid_response");
       }
       const connection = parseConnection(data.search);
-      issueCount = data.search.issueCount as number;
+      const issueCount = data.search.issueCount as number;
       resultCount += connection.nodes.length;
       for (const node of connection.nodes) {
         const item = parseOwnedSearchItem(node, search.itemType, account.id, partialReasons);
@@ -351,7 +361,11 @@ async function readAccountSnapshot(
     const repository = item.repositoryId;
     repositories.set(repository, { id: repository, nameWithOwner: item.repositoryNameWithOwner });
   }
-  const cleanItems = [...items.values()].map(({ repositoryNameWithOwner: _repositoryNameWithOwner, ...item }) => item);
+  const cleanItems = [...items.values()].map((item) => {
+    const cleanItem = { ...item } as GitHubWorkItem;
+    delete cleanItem.repositoryNameWithOwner;
+    return cleanItem;
+  });
   return {
     account,
     fetchedAt: new Date().toISOString(),
@@ -425,7 +439,11 @@ function parseFocusedItem(data: Record<string, unknown>): FocusedItemRead {
   if (!isString(data.node.state)) throw new WorkReadFailure("invalid_response");
   if (!allowedStates.includes(data.node.state)) throw new WorkReadFailure("invalid_response");
   if (data.node.state !== "OPEN") {
-    return { status: "out_of_scope", reason: "closed", rateLimit };
+    return {
+      status: "out_of_scope",
+      reason: data.node.__typename === "PullRequest" && data.node.state === "MERGED" ? "merged" : "closed",
+      rateLimit,
+    };
   }
   if (data.node.repository.owner.id !== data.viewer.id) {
     return { status: "out_of_scope", reason: "repository_not_owned", rateLimit };
@@ -455,6 +473,8 @@ function parseWorkItem(
   const base = {
     id: value.id,
     repositoryId: value.repository.id,
+    repositoryNameWithOwner: isString(value.repository.nameWithOwner) ? value.repository.nameWithOwner : undefined,
+    repositoryOwnerId: isObject(value.repository.owner) && isString(value.repository.owner.id) ? value.repository.owner.id : undefined,
     number: value.number as number,
     title: value.title,
     bodyExcerpt: value.body === null ? null : excerpt(value.body),

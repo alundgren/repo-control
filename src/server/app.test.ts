@@ -1,11 +1,13 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
+import { createOperationalLogger } from "../observability/index.js";
 import type { SyncService } from "../sync/index.js";
 import { createApp, type AppOptions } from "./app.js";
 
@@ -251,6 +253,35 @@ describe("application server", () => {
       }
     });
 
+    it("logs only a safe route template and classification when a handler throws", async () => {
+      const output: string[] = [];
+      const logger = createOperationalLogger(new Writable({
+        write(chunk, _encoding, callback) {
+          output.push(chunk.toString());
+          callback();
+        },
+      }));
+      const sentinel = "fixture-error-must-not-be-logged";
+      const { app } = await buildApp({
+        logger,
+        refreshService: {
+          async refreshItem() {
+            throw new Error(sentinel);
+          },
+        },
+      });
+
+      try {
+        await app.inject({ method: "POST", url: "/api/items/I_fixture/refresh" });
+
+        expect(output.join("\n")).toContain('"event":"api.request.failed"');
+        expect(output.join("\n")).toContain('"route":"/api/items/:nodeId/refresh"');
+        expect(output.join("\n")).not.toContain(sentinel);
+      } finally {
+        await app.close();
+      }
+    });
+
     it("returns the classified item on a successful focused refresh", async () => {
       const { app, cache } = await buildApp({
         refreshService: {
@@ -284,7 +315,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -302,7 +333,7 @@ describe("application server", () => {
       },
     };
 
-    const app = await createApp({ webRoot, cache, syncService, refreshService });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, logger: overrides.logger });
     return { app, cache };
   }
 

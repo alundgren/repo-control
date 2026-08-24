@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
-import { getOverview, refreshItem, syncOverview } from "./api.js";
+import { getOverview, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
@@ -52,11 +52,42 @@ export function App() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [itemRefreshStates, setItemRefreshStates] = useState<Record<string, ItemRefreshState>>({});
   const [compactLayout, setCompactLayout] = useState(false);
+  const [liveState, setLiveState] = useState<"connected" | "unavailable">("connected");
   const titleRef = useRef<HTMLHeadingElement>(null);
   const quickReadHeadingRef = useRef<HTMLHeadingElement>(null);
+  const overviewRef = useRef<Extract<OverviewResponse, { status: "ready" }> | null>(null);
+  const selectedItemRef = useRef<string | null>(null);
+  const viewRef = useRef<View>("now");
+  const queryRef = useRef("");
+  const eventBufferRef = useRef<LiveItemEvent[]>([]);
+  const reconcilingLiveRef = useRef(false);
 
   useEffect(() => {
     void loadOverview();
+  }, []);
+
+  useEffect(() => {
+    overviewRef.current = overview;
+  }, [overview]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const source = new EventSource("/events");
+    source.addEventListener("item", (message) => {
+      try {
+        const event = JSON.parse((message as MessageEvent).data) as LiveItemEvent;
+        if (reconcilingLiveRef.current || !overviewRef.current) eventBufferRef.current.push(event);
+        else applyLiveEvent(event);
+      } catch {
+        // Ignore malformed events and preserve the loaded view.
+      }
+    });
+    source.onopen = () => {
+      setLiveState("connected");
+      void reconcileLiveOverview();
+    };
+    source.onerror = () => setLiveState("unavailable");
+    return () => source.close();
   }, []);
 
   useEffect(() => {
@@ -85,6 +116,7 @@ export function App() {
     try {
       const response = await getOverview();
       setOverview(response.status === "ready" ? response : null);
+      overviewRef.current = response.status === "ready" ? response : null;
       setLoadMessage("");
     } catch {
       setLoadMessage("The work queue is unavailable. Try again.");
@@ -95,8 +127,11 @@ export function App() {
 
   function changeView(nextView: View) {
     setView(nextView);
+    viewRef.current = nextView;
     setQuery("");
+    queryRef.current = "";
     setSelectedItemId(null);
+    selectedItemRef.current = null;
     window.requestAnimationFrame(() => titleRef.current?.focus());
   }
 
@@ -122,15 +157,20 @@ export function App() {
     try {
       const response = await refreshItem(nodeId);
       if (response.status === "updated") {
-        setOverview((current) => current ? replaceOverviewItem(current, response.item) : current);
+        const nextOverview = overviewRef.current ? replaceOverviewItem(overviewRef.current, response.item, { repositories: response.repositories, scope: response.scope }) : null;
+        if (nextOverview) {
+          overviewRef.current = nextOverview;
+          setOverview(nextOverview);
+        }
         setItemRefreshStates((states) => ({ ...states, [nodeId]: response.relationshipStatus === "fresh" ? "success" : "partial" }));
-        const currentQueue = views[view].queue;
+        const currentQueue = views[viewRef.current].queue;
         const movedQueue = response.item.type === "issue"
           && currentQueue !== undefined
           && response.item.queue !== currentQueue
           ? response.item.queue
           : null;
-        if (movedQueue && selectedItemId === nodeId) {
+        if (movedQueue && selectedItemRef.current === nodeId) {
+          selectedItemRef.current = null;
           setSelectedItemId(null);
           setItemMessage(`Item refreshed and moved to ${queueTitle(movedQueue)}.`);
           focusNextRowOrPageHeading();
@@ -138,11 +178,19 @@ export function App() {
         return;
       }
       if (response.status === "removed" || response.status === "not_found") {
-        setOverview((current) => current ? removeOverviewItem(current, nodeId) : current);
-        setSelectedItemId((current) => current === nodeId ? null : current);
-        setItemMessage("This item is no longer in the loaded work.");
+        const nextOverview = overviewRef.current ? removeOverviewItem(overviewRef.current, nodeId, response.status === "removed" ? response.scope : undefined) : null;
+        if (nextOverview) {
+          overviewRef.current = nextOverview;
+          setOverview(nextOverview);
+        }
+        const wasSelected = selectedItemRef.current === nodeId;
+        if (wasSelected) {
+          selectedItemRef.current = null;
+          setSelectedItemId(null);
+          setItemMessage("This item is no longer in the loaded work.");
+        }
         setItemRefreshStates((states) => ({ ...states, [nodeId]: "removed" }));
-        focusNextRowOrPageHeading();
+        if (wasSelected) focusNextRowOrPageHeading();
         return;
       }
       setOverview((current) => current ? replaceOverviewItem(current, response.item) : current);
@@ -171,13 +219,93 @@ export function App() {
 
   function selectItem(nodeId: string) {
     setItemMessage("");
+    selectedItemRef.current = nodeId;
     setSelectedItemId(nodeId);
   }
 
   function returnToList() {
     const previousSelection = selectedItemId;
     setSelectedItemId(null);
+    selectedItemRef.current = null;
     window.requestAnimationFrame(() => document.getElementById(`item-row-${previousSelection}`)?.focus());
+  }
+
+  async function reconcileLiveOverview() {
+    reconcilingLiveRef.current = true;
+    let reconciled = false;
+    try {
+      const response = await getOverview();
+      if (response.status === "ready") {
+        reconcileSelectionAfterOverview(overviewRef.current, response);
+        setOverview(response);
+        overviewRef.current = response;
+        reconciled = true;
+      }
+    } catch {
+      setLiveState("unavailable");
+    } finally {
+      reconcilingLiveRef.current = false;
+      if (reconciled || overviewRef.current) {
+        const buffered = eventBufferRef.current.splice(0);
+        buffered.forEach(applyLiveEvent);
+      }
+    }
+  }
+
+  function applyLiveEvent(event: LiveItemEvent) {
+    if (event.type === "updated") {
+      const current = overviewRef.current;
+      if (!current) {
+        eventBufferRef.current.push(event);
+        return;
+      }
+      const next = replaceOverviewItem(current, event.item, { repositories: event.repositories, scope: event.scope });
+      overviewRef.current = next;
+      setOverview(next);
+      if (selectedItemRef.current === event.item.id) {
+        const remainsVisible = filterItems(itemsForView(next, viewRef.current), queryRef.current, next).some((item) => item.id === event.item.id);
+        if (!remainsVisible) {
+          const previousItem = itemFromOverview(current, event.item.id);
+          selectedItemRef.current = null;
+          setSelectedItemId(null);
+          const queueMoved = previousItem?.type === "issue" && event.item.type === "issue" && previousItem.queue !== event.item.queue;
+          const nextQueue = event.item.type === "issue" ? event.item.queue : null;
+          setItemMessage(queueMoved
+            ? `Item refreshed and moved to ${queueTitle(nextQueue!)}.`
+            : queryRef.current
+              ? "Item refreshed and no longer matches this search."
+              : "Item refreshed and moved out of this view.");
+          focusNextRowOrPageHeading();
+        }
+      }
+      return;
+    }
+    const current = overviewRef.current;
+    if (current) {
+      const next = removeOverviewItem(current, event.nodeId, event.scope);
+      overviewRef.current = next;
+      setOverview(next);
+    }
+    setItemMessage(liveRemovalMessage(event));
+    if (selectedItemRef.current === event.nodeId) {
+      selectedItemRef.current = null;
+      setSelectedItemId(null);
+      setItemMessage(liveRemovalMessage(event));
+      focusNextRowOrPageHeading();
+    }
+  }
+
+  function reconcileSelectionAfterOverview(previous: Extract<OverviewResponse, { status: "ready" }> | null, next: Extract<OverviewResponse, { status: "ready" }>) {
+    const selected = selectedItemRef.current;
+    if (!selected || !previous) return;
+    const stillLoaded = itemFromOverview(next, selected);
+    const stillVisible = filterItems(itemsForView(next, viewRef.current), queryRef.current, next).some((item) => item.id === selected);
+    if (!stillLoaded || !stillVisible) {
+      selectedItemRef.current = null;
+      setSelectedItemId(null);
+      setItemMessage(stillLoaded ? "The selected item moved out of this view while live updates reconnected." : "The selected item was removed while live updates reconnected.");
+      focusNextRowOrPageHeading();
+    }
   }
 
   return (
@@ -218,6 +346,7 @@ export function App() {
                   {freshness(overview)}
                 </p>
               ) : null}
+              {liveState === "unavailable" ? <p className="freshness warning">Live updates are unavailable. Sync account still works.</p> : null}
               <button
                 className="quietButton syncButton"
                 disabled={syncState === "busy"}
@@ -244,7 +373,10 @@ export function App() {
               <label className="visuallyHidden" htmlFor="work-search">Filter pull requests and issues</label>
               <input
                 id="work-search"
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  queryRef.current = event.target.value;
+                  setQuery(event.target.value);
+                }}
                 placeholder="Filter pull requests and issues"
                 type="search"
                 value={query}
@@ -537,6 +669,10 @@ function itemsForView(overview: Extract<OverviewResponse, { status: "ready" }>, 
   return overview.queues.find((queue) => queue.name === views[view].queue)?.issues ?? [];
 }
 
+function itemFromOverview(overview: Extract<OverviewResponse, { status: "ready" }>, nodeId: string): ApiItem | null {
+  return [...overview.pullRequests, ...overview.queues.flatMap((queue) => queue.issues)].find((item) => item.id === nodeId) ?? null;
+}
+
 function countForView(overview: Extract<OverviewResponse, { status: "ready" }>, view: View) {
   return itemsForView(overview, view).length;
 }
@@ -571,6 +707,14 @@ function syncStatusMessage(syncState: SyncState) {
   }
 }
 
+function liveRemovalMessage(event: Extract<LiveItemEvent, { type: "removed" }>) {
+  const label = event.itemType === "pull_request" ? `PR #${event.number}` : `Issue #${event.number}`;
+  if (event.reason === "issue_closed") return `${label} was closed on GitHub and removed from the loaded work.`;
+  if (event.reason === "pull_request_merged") return `${label} was merged on GitHub and removed from the loaded work.`;
+  if (event.reason === "pull_request_closed") return `${label} was closed without merging on GitHub and removed from the loaded work.`;
+  return `${label} left the loaded repository scope and was removed from the loaded work.`;
+}
+
 function repositoryName(overview: Extract<OverviewResponse, { status: "ready" }>, repositoryId: string) {
   return overview.repositories.find((entry) => entry.id === repositoryId)?.nameWithOwner ?? "Repository unavailable";
 }
@@ -583,9 +727,12 @@ function queueTitle(queue: string) {
 function replaceOverviewItem(
   overview: Extract<OverviewResponse, { status: "ready" }>,
   updated: ApiItem,
+  metadata: { repositories?: Extract<OverviewResponse, { status: "ready" }> ["repositories"]; scope?: Extract<OverviewResponse, { status: "ready" }> ["scope"] } = {},
 ): Extract<OverviewResponse, { status: "ready" }> {
   return {
     ...overview,
+    repositories: metadata.repositories ?? overview.repositories,
+    scope: metadata.scope ?? { ...overview.scope, itemCount: overview.scope.itemCount },
     pullRequests: updated.type === "pull_request"
       ? [...overview.pullRequests.filter((item) => item.id !== updated.id), updated].sort(comparePullRequests)
       : overview.pullRequests.filter((item) => item.id !== updated.id),
@@ -619,9 +766,11 @@ function readinessBand(readiness: Extract<ApiItem, { type: "issue" }> ["readines
 function removeOverviewItem(
   overview: Extract<OverviewResponse, { status: "ready" }>,
   nodeId: string,
+  scope?: Extract<OverviewResponse, { status: "ready" }> ["scope"],
 ): Extract<OverviewResponse, { status: "ready" }> {
   return {
     ...overview,
+    scope: scope ?? overview.scope,
     pullRequests: overview.pullRequests.filter((item) => item.id !== nodeId),
     queues: overview.queues.map((queue) => ({ ...queue, issues: queue.issues.filter((item) => item.id !== nodeId) })),
   };

@@ -52,6 +52,9 @@ used.
   area stays in the right column; GitHub links stay in that area.
 - Sync status: a quiet success or warning dot, reconciliation scope, and an
   underlined account-wide sync action.
+- Live update availability: a quiet warning beside sync freshness when the
+  server event stream is unavailable. It never disables manual sync or focused
+  refresh.
 - Work row: a compact number, title, repository, age, and available readiness
   or change-size facts. The whole row is the selection control. The quick-read
   area carries the bounded excerpt, relationship links or their unavailable

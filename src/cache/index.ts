@@ -115,6 +115,7 @@ export type Cache = {
   getItem(nodeId: string): CacheItem | null;
   getRelatedItem(nodeId: string): RelatedItemSummary | null;
   replaceItem(item: CacheItem, observedAt: string): void;
+  upsertItem(item: CacheItem, repository: CacheRepository, repositoryOwnerId: string, observedAt: string): void;
   removeItem(nodeId: string): void;
   replaceQueueMapping(mapping: QueueMapping): void;
   getQueueMapping(): QueueMapping;
@@ -124,6 +125,7 @@ export type Cache = {
 
 export function openCache({ path }: CacheOptions): Cache {
   const database = new Database(path);
+  database.pragma("busy_timeout = 5000");
   database.pragma("foreign_keys = ON");
   migrate(database);
 
@@ -247,10 +249,64 @@ class SqliteCache implements Cache {
     })();
   }
 
+  upsertItem(item: CacheItem, repository: CacheRepository, repositoryOwnerId: string, observedAt: string): void {
+    this.database.transaction(() => {
+      const active = this.database
+        .prepare(
+          `SELECT cache_state.active_generation_id AS generationId,
+                  snapshot_generations.account_node_id AS accountId
+           FROM cache_state
+           LEFT JOIN snapshot_generations
+             ON snapshot_generations.id = cache_state.active_generation_id
+           WHERE cache_state.singleton = 1`,
+        )
+        .get() as { generationId: number | null; accountId: string | null } | undefined;
+      if (!active?.generationId || !active.accountId) {
+        throw new Error("No active cache generation");
+      }
+      if (repositoryOwnerId !== active.accountId) {
+        throw new Error("Repository owner is outside the active account");
+      }
+
+      this.database
+        .prepare(
+          `INSERT INTO repositories (node_id, account_node_id, name_with_owner, observed_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(node_id) DO UPDATE SET
+             account_node_id = excluded.account_node_id,
+             name_with_owner = excluded.name_with_owner,
+             observed_at = excluded.observed_at`,
+        )
+        .run(repository.id, active.accountId, repository.nameWithOwner, observedAt);
+      this.database
+        .prepare("INSERT OR IGNORE INTO snapshot_repositories (generation_id, repository_node_id) VALUES (?, ?)")
+        .run(active.generationId, repository.id);
+      this.writeItem(item, observedAt);
+      this.database
+        .prepare("INSERT OR IGNORE INTO snapshot_items (generation_id, item_node_id) VALUES (?, ?)")
+        .run(active.generationId, item.id);
+      this.database
+        .prepare(
+          `UPDATE snapshot_generations
+           SET repository_count = (SELECT COUNT(*) FROM snapshot_repositories WHERE generation_id = ?),
+               item_count = (SELECT COUNT(*) FROM snapshot_items WHERE generation_id = ?)
+           WHERE id = ?`,
+        )
+        .run(active.generationId, active.generationId, active.generationId);
+    })();
+  }
+
   removeItem(nodeId: string): void {
     this.database.transaction(() => {
       this.database.prepare("DELETE FROM snapshot_items WHERE item_node_id = ?").run(nodeId);
       this.database.prepare("DELETE FROM items WHERE node_id = ?").run(nodeId);
+      this.database
+        .prepare(
+          `UPDATE snapshot_generations
+           SET repository_count = (SELECT COUNT(*) FROM snapshot_repositories AS memberships WHERE memberships.generation_id = snapshot_generations.id),
+               item_count = (SELECT COUNT(*) FROM snapshot_items AS memberships WHERE memberships.generation_id = snapshot_generations.id)`,
+        )
+        .run();
       this.cleanupUnreferencedRelatedItems();
     })();
   }

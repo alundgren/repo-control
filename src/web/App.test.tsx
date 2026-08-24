@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -309,6 +309,69 @@ describe("work queue overview", () => {
     });
     expect(screen.queryByText("This item is no longer in the loaded work.")).toBeNull();
   });
+
+  it("applies live updates to the selected item and announces a normal close", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(readyOverview()));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", TestEventSource);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    TestEventSource.last?.open();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    TestEventSource.last?.emit({ type: "updated", item: issue({ id: "I_1", number: 22, title: "Updated fictional seed" }) });
+    expect(await screen.findByRole("heading", { name: "Updated fictional seed" })).toBeTruthy();
+
+    TestEventSource.last?.emit({ type: "removed", nodeId: "I_1", itemType: "issue", number: 22, reason: "issue_closed" });
+    expect(await screen.findByText("Issue #22 was closed on GitHub and removed from the loaded work.")).toBeTruthy();
+    expect(screen.queryByText("Updated fictional seed")).toBeNull();
+  });
+
+  it("announces unselected removals and distinguishes a search exit from a queue move", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(readyOverview()));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", TestEventSource);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    TestEventSource.last?.open();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    TestEventSource.last?.emit({ type: "removed", nodeId: "I_2", itemType: "issue", number: 23, reason: "issue_closed" });
+    expect(await screen.findByText("Issue #23 was closed on GitHub and removed from the loaded work.")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.type(screen.getByRole("searchbox", { name: "Filter pull requests and issues" }), "seed");
+    TestEventSource.last?.emit({ type: "updated", item: issue({ id: "I_1", number: 22, title: "A renamed item" }) });
+    expect(await screen.findByText("Item refreshed and no longer matches this search.")).toBeTruthy();
+  });
+
+  it("does not let a delayed refresh response steal a newer selection", async () => {
+    const user = userEvent.setup();
+    const refresh = deferred<ReturnType<typeof response>>();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockImplementationOnce(() => refresh.promise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+    await user.click(screen.getByRole("button", { name: "Select Review fictional moss" }));
+
+    refresh.resolve(response({ status: "not_found" }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Review fictional moss" })).toBeTruthy());
+    expect(screen.queryByText("This item is no longer in the loaded work.")).toBeNull();
+  });
 });
 
 function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
@@ -345,6 +408,31 @@ function deferred<Value>() {
 
 function response(body: unknown) {
   return { ok: true, json: async () => body };
+}
+
+class TestEventSource {
+  static last: TestEventSource | null = null;
+  private readonly listeners = new Map<string, (event: Event) => void>();
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor() {
+    TestEventSource.last = this;
+  }
+
+  addEventListener(type: string, listener: (event: Event) => void) {
+    this.listeners.set(type, listener);
+  }
+
+  open() {
+    this.onopen?.();
+  }
+
+  emit(data: unknown) {
+    this.listeners.get("item")?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  close() {}
 }
 
 function issue({ id, number, title }: { id: string; number: number; title: string }) {

@@ -1,4 +1,8 @@
-import type { ItemRefreshResponse, OverviewResponse, SyncResponse } from "../api/read-models.js";
+import type { ApiRepository, ApiScope, ItemRefreshResponse, OverviewResponse, SyncResponse } from "../api/read-models.js";
+
+export type LiveItemEvent =
+  | { type: "updated"; item: import("../api/read-models.js").ApiItem; repositories: ApiRepository[]; scope: ApiScope }
+  | { type: "removed"; nodeId: string; itemType: "issue" | "pull_request"; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope"; scope: ApiScope };
 
 export async function getOverview(): Promise<OverviewResponse> {
   return request<OverviewResponse>("/api/overview");

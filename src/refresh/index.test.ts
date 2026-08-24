@@ -22,6 +22,37 @@ describe("focused item refresh", () => {
     );
   });
 
+  it("emits one safe terminal event for a focused refresh", async () => {
+    const cache = await seededCache();
+    const events: Array<Record<string, unknown>> = [];
+
+    try {
+      const service = createItemRefreshService({
+        cache,
+        client: countingClient({
+          readFocusedItem: async () => openIssue(),
+          readRelationshipEnrichment: async () => enrichment({ blocker: "complete" }),
+        }),
+        logEvent: (event) => events.push(event),
+      });
+
+      await service.refreshItem({ nodeId: "I_issue_1" });
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          event: "refresh.finished",
+          level: "info",
+          status: "updated",
+          mode: "refresh",
+          itemType: "issue",
+        }),
+      ]);
+      expect(JSON.stringify(events)).not.toContain("I_issue_1");
+    } finally {
+      cache.close();
+    }
+  });
+
   it("updates only the selected item's facts and relationships without a sampled sync", async () => {
     const cache = await seededCache();
 
@@ -287,6 +318,7 @@ describe("focused item refresh", () => {
 
   it("dedupes concurrent refreshes of the same item into a single GitHub read", async () => {
     const cache = await seededCache();
+    const events: Array<Record<string, unknown>> = [];
 
     try {
       let resolveRead!: (value: FocusedItemRead) => void;
@@ -296,7 +328,7 @@ describe("focused item refresh", () => {
         }),
         readRelationshipEnrichment: async () => enrichment(),
       });
-      const service = createItemRefreshService({ cache, client });
+      const service = createItemRefreshService({ cache, client, logEvent: (event) => events.push(event) });
 
       const first = service.refreshItem({ nodeId: "I_issue_1" });
       const second = service.refreshItem({ nodeId: "I_issue_1" });
@@ -305,6 +337,7 @@ describe("focused item refresh", () => {
 
       expect(client.focusedCalls).toBe(1);
       expect(firstResult).toEqual(secondResult);
+      expect(events).toHaveLength(1);
     } finally {
       cache.close();
     }

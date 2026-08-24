@@ -88,8 +88,8 @@ export type SyncResponse =
     };
 
 export type ItemRefreshResponse =
-  | { status: "updated"; item: ApiItem; fetchedAt: string; relationshipStatus: "fresh" | "stale" }
-  | { status: "removed"; reason: "closed" | "repository_not_owned" }
+  | { status: "updated"; item: ApiItem; fetchedAt: string; relationshipStatus: "fresh" | "stale"; repositories?: ApiRepository[]; scope?: ApiScope }
+  | { status: "removed"; reason: "closed" | "merged" | "repository_not_owned"; scope?: ApiScope }
   | { status: "not_found" }
   | { status: "permission_denied"; error: ApiError; item: ApiItem }
   | { status: "failed"; error: ApiError; item: ApiItem };
@@ -135,18 +135,23 @@ export function toSyncResponse(outcome: SyncOutcome): SyncResponse {
 }
 
 export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): ItemRefreshResponse {
+  const active = typeof cache.getActiveSnapshot === "function" ? cache.getActiveSnapshot() : null;
   switch (outcome.status) {
     case "not_found":
       return { status: "not_found" };
     case "removed":
-      return { status: "removed", reason: outcome.reason };
+      return { status: "removed", reason: outcome.reason, ...(active ? { scope: active.scope } : {}) };
     case "updated":
+      {
+      const active = cache.getActiveSnapshot();
       return {
         status: "updated",
         item: toApiItem(cache, outcome.item),
         fetchedAt: outcome.fetchedAt,
         relationshipStatus: outcome.relationshipStatus,
+        ...(active ? { repositories: active.repositories, scope: active.scope } : {}),
       };
+      }
     case "permission_denied":
       return {
         status: "permission_denied",
@@ -162,7 +167,7 @@ export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): It
   }
 }
 
-function toApiItem(cache: Cache, item: CacheItem): ApiItem {
+export function toApiItem(cache: Cache, item: CacheItem): ApiItem {
   if (item.type === "pull_request") {
     return toApiPullRequest(cache, item);
   }
