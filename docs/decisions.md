@@ -31,9 +31,12 @@ update order keeps cursor traversal stable while the account changes, rather
 than relying on the default result order.
 
 Later user-triggered syncs read items updated since the last full pass with a
-five-minute overlap. Node-ID upserts make overlap safe. A full pass happens on
-the next explicit sync after 24 hours. Repo Control does not poll GitHub in the
-background.
+five-minute overlap. Node-ID upserts make overlap safe. An unset cursor makes
+the next explicit sync run a full pass. It is unset before the first full pass,
+after a partial full pass, and when webhook provisioning creates a repository
+hook. The last case makes the next explicit sync catch up work that existed
+before the hook. A full pass also happens after 24 hours. Repo Control does not
+poll GitHub in the background.
 
 ## A fine-grained token stays outside application storage
 

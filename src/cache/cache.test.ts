@@ -416,6 +416,29 @@ describe("local cache", () => {
     }
   });
 
+  it("clears the complete reconciliation cursor on the active generation", async () => {
+    const path = await createCachePath();
+    let cache = openCache({ path });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot({
+        scope: {
+          ...snapshot().scope,
+          lastFullReconciliationAt: "2026-08-23T10:00:00.000Z",
+        },
+      }));
+
+      cache.clearActiveGenerationLastFullReconciledAt();
+      expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBeNull();
+
+      cache.close();
+      cache = openCache({ path });
+      expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
   it("stores instance queue mappings separately from GitHub facts", async () => {
     const cache = openCache({ path: await createCachePath() });
 

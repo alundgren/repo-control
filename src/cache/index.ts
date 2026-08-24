@@ -111,6 +111,7 @@ export type CacheStatus = {
 
 export type Cache = {
   replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number;
+  clearActiveGenerationLastFullReconciledAt(): void;
   getActiveSnapshot(): ActiveSnapshot | null;
   getItem(nodeId: string): CacheItem | null;
   getRelatedItem(nodeId: string): RelatedItemSummary | null;
@@ -210,6 +211,16 @@ class SqliteCache implements Cache {
       this.prune(snapshot.fetchedAt);
       return generationId;
     })();
+  }
+
+  clearActiveGenerationLastFullReconciledAt(): void {
+    this.database
+      .prepare(
+        `UPDATE snapshot_generations
+         SET last_full_reconciled_at = NULL
+         WHERE id = (SELECT active_generation_id FROM cache_state WHERE singleton = 1)`,
+      )
+      .run();
   }
 
   getActiveSnapshot(): ActiveSnapshot | null {

@@ -95,12 +95,15 @@ GitHub response body.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
-these upserts idempotent. A full reconciliation runs on the next explicit sync
-once the prior full one is 24 hours old. There is no background polling. The
-full pass removes open-cache entries that were closed, deleted, or became
-inaccessible. GitHub search exposes at most 1,000 results per query, so a type
-that reaches that cap is recorded as partial rather than presented as a full
-inventory.
+these upserts idempotent. An unset reconciliation cursor forces a full pass on
+the next explicit sync. The cursor begins unset, stays unset after a partial
+full pass, and is cleared when webhook provisioning creates a repository hook
+so the following explicit sync catches up that repository's earlier work. A
+full reconciliation also runs once the prior full one is 24 hours old. There
+is no background polling. The full pass removes open-cache entries that were
+closed, deleted, or became inaccessible. GitHub search exposes at most 1,000
+results per query, so a type that reaches that cap is recorded as partial rather
+than presented as a full inventory.
 
 After a successful refresh proves that an item left the open version-one scope,
 the cache deletes that item and its dependent relationships. When repository
