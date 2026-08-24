@@ -135,9 +135,11 @@ Run this from the repository root:
 corepack pnpm verify:container
 ```
 
-It builds the image, verifies that the final image excludes source, docs, local
-environment files, and the test token sentinel, then creates a temporary named
-volume. It writes a harmless SQLite row, removes that temporary container, and
-reads the row from a replacement container using the same volume. The check
-deletes its test image and volume. It does not start the application, contact
-GitHub, validate host references, or prove production readiness.
+It sends a tar of the tracked repository files to Docker's Unix socket, which
+matches Piploy's Docker build route. It then verifies that the final image
+excludes source, docs, local environment files, and the test token sentinel,
+and creates a temporary named volume. It writes a harmless SQLite row, removes
+that temporary container, and reads the row from a replacement container using
+the same volume. The check deletes its test image and volume. It does not start
+the application, contact GitHub, validate host references, or prove production
+readiness.
