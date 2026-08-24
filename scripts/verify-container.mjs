@@ -19,6 +19,23 @@ function docker(...args) {
   }
 }
 
+function assertDockerfileReachesTheBuildContext() {
+  // `docker build` injects the file named by `-f` into the context, so a build
+  // that only uses the CLI cannot see a .dockerignore that excludes it. Piploy
+  // builds through the Docker API from a .dockerignore-filtered tar, where an
+  // excluded Dockerfile fails the build. Read the context the same way.
+  const result = spawnSync(
+    "docker",
+    ["build", "--quiet", "--file", "-", "--target", "context-check", "."],
+    { encoding: "utf8", input: "FROM scratch AS context-check\nCOPY Dockerfile /Dockerfile\n" },
+  );
+  assert.equal(
+    result.status,
+    0,
+    ".dockerignore excludes Dockerfile from the build context, so an API build cannot locate it",
+  );
+}
+
 function runDatabaseCheck(source) {
   docker(
     "run",
@@ -51,6 +68,7 @@ async function runImageBoundaryCheck() {
 }
 
 try {
+  assertDockerfileReachesTheBuildContext();
   docker("build", "--tag", image, ".");
   docker("volume", "create", volume);
   runDatabaseCheck(

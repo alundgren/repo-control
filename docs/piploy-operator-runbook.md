@@ -1,16 +1,16 @@
 # Piploy operator runbook
 
-## Production registration is blocked
+## Production registration: operator override recorded
 
-Do not register or poll Repo Control yet. Piploy's public registration guide
-says every `EnvironmentVariables` value is literal. Its current README
-documents one exception: a whole value in the form `${hostEnv:NAME}`. This
-runbook needs that exception for `REPO_CONTROL_GITHUB_TOKEN`.
+Piploy's public registration guide states that every `EnvironmentVariables`
+value is literal. Piploy's own README and `src/dockerPlan.ts` document and
+implement one exception: a whole value in the form `${hostEnv:NAME}`. The two
+public documents disagree, and the exception is present in the shipped code.
+This runbook needs it for `REPO_CONTROL_GITHUB_TOKEN`.
 
-Treat the public registration guide as authoritative. Continue only after that
-guide accepts the host reference, or after the operator records an explicit
-operational override. Until then, review the payload below only. Do not submit
-it.
+The operator has recorded an explicit operational override on that conflict.
+Registration and polling may proceed using the host reference. Reconcile the
+registration guide separately; this override does not amend it.
 
 The application reads `REPO_CONTROL_GITHUB_TOKEN`, not `GITHUB_TOKEN`. Do not
 use `GITHUB_TOKEN=${hostEnv:REPO_CONTROL_GITHUB_TOKEN}` as the container
@@ -88,10 +88,9 @@ source. Stop or disable the deployment if either result is wrong.
 Record the pass results without publishing hostnames, addresses, ACL contents,
 or token values.
 
-## After the contract is reconciled
+## Register and poll
 
-Registration and polling remain outside this issue. After the gate above is
-cleared, use the public workflow:
+With the override recorded, use the public workflow:
 
 ```text
 status -> approval -> register -> approval -> poll -> status
@@ -121,7 +120,7 @@ token in GitHub after the replacement is working.
 | Container exits at startup | Distinguish a missing or invalid token, owner mismatch, expired token, and insufficient read access from the fixed startup message. Then inspect only the necessary recent log lines, since logs can contain private operational identifiers. |
 | SQLite state disappears | Confirm the container mounts `repo-control-data` at `/var/lib/repo-control` and that `DATA_DIRECTORY` has the same path. |
 | New token has no effect | Confirm the daemon restarted and the container was recreated after its environment changed. |
-| Host reference stays literal | Stop. Reconcile the public guide or record the explicit operational override before registration. |
+| Host reference stays literal | Confirm the value is exactly `${hostEnv:REPO_CONTROL_GITHUB_TOKEN}` with no surrounding text, then confirm the daemon restarted and the container was recreated. |
 
 Repo Control writes logs only to stdout. Piploy and Docker own the retention
 and storage of that output, so verify the host's container log rotation and
