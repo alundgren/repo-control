@@ -41,7 +41,7 @@ export type AccountSnapshotRead = AccountSnapshot | UnavailableRead;
 
 export type FocusedItemRead =
   | { status: "open"; item: GitHubWorkItem; fetchedAt: string; rateLimit: GitHubRateLimit; scope: FocusedReadScope }
-  | { status: "out_of_scope"; reason: "closed" | "repository_not_owned"; rateLimit: GitHubRateLimit }
+  | { status: "out_of_scope"; reason: "closed" | "merged" | "repository_not_owned"; rateLimit: GitHubRateLimit }
   | UnavailableRead;
 
 export type RelationshipEnrichmentRead = {
@@ -84,6 +84,8 @@ export type GitHubRepository = {
 type BaseWorkItem = {
   id: string;
   repositoryId: string;
+  repositoryNameWithOwner?: string;
+  repositoryOwnerId?: string;
   number: number;
   title: string;
   bodyExcerpt: string | null;

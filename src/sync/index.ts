@@ -1,4 +1,5 @@
 import type { Cache, CacheItem, PullRequestFacts, SuccessfulSnapshot } from "../cache/index.js";
+import type { ReconciliationCoordinator } from "../coordination/index.js";
 import type {
   AccountSnapshot,
   GitHubRateLimit,
@@ -45,10 +46,14 @@ export function createSyncService({
   cache,
   client,
   now = Date.now,
+  coordinator,
+  onComplete,
 }: {
   cache: Cache;
   client: SyncClient;
   now?: () => number;
+  coordinator?: ReconciliationCoordinator;
+  onComplete?: () => void;
 }): SyncService {
   let inFlight: Promise<SyncOutcome> | null = null;
 
@@ -57,7 +62,17 @@ export function createSyncService({
       if (inFlight) {
         return inFlight;
       }
-      const promise = runSync(cache, client, now).finally(() => {
+      const operation = () => runSync(cache, client, now);
+      const promise = (coordinator ? coordinator.runSync(operation) : operation()).then((outcome) => {
+        if (outcome.status === "complete" && outcome.scope.reconciliation === "full" && outcome.scope.inventoryComplete === true) {
+          try {
+            onComplete?.();
+          } catch {
+            // Ledger cleanup must not turn a successful cache sync into a failed sync.
+          }
+        }
+        return outcome;
+      }).finally(() => {
         inFlight = null;
       });
       inFlight = promise;

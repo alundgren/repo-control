@@ -274,53 +274,6 @@ describe("GitHub work reads", () => {
   });
 });
 
-function snapshotPayload({
-  repositoriesPage,
-  issuePage,
-  pullRequestPage,
-  labelPage,
-}: {
-  repositoriesPage: PageInfo;
-  issuePage: PageInfo;
-  pullRequestPage: PageInfo;
-  labelPage: PageInfo;
-}) {
-  return {
-    data: {
-      viewer: {
-        id: "U_1",
-        login: "octo",
-        repositories: {
-          nodes: [{
-            id: "R_1",
-            nameWithOwner: "octo/repo",
-            issues: {
-              nodes: [{
-                __typename: "Issue",
-                ...workItem({ labels: connection([{ id: "L_1", name: "ready-for-agent" }], labelPage.hasNextPage, labelPage.endCursor) }),
-              }],
-              pageInfo: issuePage,
-            },
-            pullRequests: {
-              nodes: [{
-                __typename: "PullRequest",
-                ...workItem({ id: "PR_1", number: 22 }),
-                isDraft: false,
-                changedFiles: 4,
-                additions: 21,
-                deletions: 3,
-              }],
-              pageInfo: pullRequestPage,
-            },
-          }],
-          pageInfo: repositoriesPage,
-        },
-      },
-      rateLimit: { cost: 12, remaining: 4888, resetAt: "2026-08-24T12:00:00Z" },
-    },
-  };
-}
-
 function workItem({
   id = "I_1",
   number = 17,
@@ -362,7 +315,6 @@ function graphqlRelatedIssue(input: { id: string; number: number }) {
   return { ...issue, repository: { id: repositoryId, nameWithOwner: repositoryNameWithOwner } };
 }
 
-type PageInfo = { hasNextPage: boolean; endCursor: string | null };
 
 function connection<T>(nodes: T[], hasNextPage: boolean, endCursor: string | null = null) {
   return { nodes, pageInfo: { hasNextPage, endCursor } };

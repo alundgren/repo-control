@@ -26,6 +26,8 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
+| Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
+| Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
 | Web UI | Renders queues and item detail. It does not derive readiness from issue text. |
 
 ## Data model
@@ -68,6 +70,12 @@ could see them.
    all reads finish. The UI keeps the previous generation if a sync read fails.
 5. A focused refresh reads one GitHub node, updates its normalized records, and
    returns the new detail state.
+6. A signed issue or pull-request webhook records its delivery before
+   acknowledgement. The asynchronous worker uses focused refresh for cached
+   work and a validated focused upsert for an uncached open item.
+7. A successful item write or removal publishes one item-scoped change. The SSE
+   route sends it to connected browsers without making cache reads or manual
+   sync depend on stream delivery.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make

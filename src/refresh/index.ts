@@ -1,6 +1,5 @@
-import Database from "better-sqlite3";
-
 import type { Cache, CacheItem, RelatedItemSummary } from "../cache/index.js";
+import type { ReconciliationCoordinator } from "../coordination/index.js";
 import type {
   GitHubRateLimit,
   GitHubReadClient,
@@ -28,7 +27,7 @@ export type RefreshUpdated = {
 
 export type RefreshRemoved = {
   status: "removed";
-  reason: "closed" | "repository_not_owned";
+  reason: "closed" | "merged" | "repository_not_owned";
   rateLimit: GitHubRateLimit;
 };
 
@@ -52,12 +51,35 @@ export type RefreshFailed = {
   cachedItem: CacheItem;
 };
 
+export type UpsertOutcome =
+  | Extract<RefreshOutcome, { status: "updated" }>
+  | Extract<RefreshOutcome, { status: "removed" }>
+  | { status: "not_found" }
+  | { status: "failed"; error: RefreshError; rateLimit: GitHubRateLimit | null };
+
+export type RefreshChange =
+  | { status: "updated"; item: CacheItem }
+  | { status: "removed"; nodeId: string; itemType: CacheItem["type"]; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope" };
+
 export type ItemRefreshService = {
   refreshItem(input: { nodeId: string }): Promise<RefreshOutcome>;
+  upsertItem?(input: { nodeId: string }): Promise<UpsertOutcome>;
 };
 
-export function createItemRefreshService({ cache, client }: { cache: Cache; client: RefreshClient }): ItemRefreshService {
+export function createItemRefreshService({
+  cache,
+  client,
+  onChange,
+  coordinator,
+}: {
+  cache: Cache;
+  client: RefreshClient;
+  onChange?: (change: RefreshChange) => void;
+  coordinator?: ReconciliationCoordinator;
+}): ItemRefreshService {
   const inFlight = new Map<string, Promise<RefreshOutcome>>();
+  const inFlightUpserts = new Map<string, Promise<UpsertOutcome>>();
+  const runItem = <T>(operation: () => Promise<T>) => coordinator ? coordinator.runItem(operation) : operation();
 
   return {
     refreshItem({ nodeId }) {
@@ -65,16 +87,30 @@ export function createItemRefreshService({ cache, client }: { cache: Cache; clie
       if (existing) {
         return existing;
       }
-      const promise = runRefresh(cache, client, nodeId).finally(() => {
+      const promise = runItem(() => runRefresh(cache, client, nodeId, onChange)).finally(() => {
         inFlight.delete(nodeId);
       });
       inFlight.set(nodeId, promise);
       return promise;
     },
+    upsertItem({ nodeId }) {
+      const existing = inFlightUpserts.get(nodeId);
+      if (existing) return existing;
+      const promise = runItem(() => runUpsert(cache, client, nodeId, onChange)).finally(() => {
+        inFlightUpserts.delete(nodeId);
+      });
+      inFlightUpserts.set(nodeId, promise);
+      return promise;
+    },
   };
 }
 
-async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): Promise<RefreshOutcome> {
+async function runRefresh(
+  cache: Cache,
+  client: RefreshClient,
+  nodeId: string,
+  onChange?: (change: RefreshChange) => void,
+): Promise<RefreshOutcome> {
   const previous = cache.getItem(nodeId);
   if (!previous) {
     return { status: "not_found" };
@@ -90,6 +126,7 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
 
   if (read.status === "out_of_scope") {
     cache.removeItem(nodeId);
+    onChange?.({ status: "removed", nodeId, itemType: previous.type, number: previous.number, reason: removalReason(previous.type, read.reason) });
     return { status: "removed", reason: read.reason, rateLimit: read.rateLimit };
   }
 
@@ -101,11 +138,19 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
   const merged = { ...mergeItem(previous, read.item, enrichedType, subject), observedAt: read.fetchedAt };
 
   try {
-    cache.replaceItem(merged, read.fetchedAt);
-  } catch (error) {
-    if (!(error instanceof Database.SqliteError && error.code.startsWith("SQLITE_CONSTRAINT"))) {
-      throw error;
+    const repositoryChanged = previous.repositoryId !== merged.repositoryId;
+    if (repositoryChanged) {
+      if (!read.item.repositoryNameWithOwner || !read.item.repositoryOwnerId) throw new Error("Focused read omitted repository ownership");
+      cache.upsertItem(
+        merged,
+        { id: read.item.repositoryId, nameWithOwner: read.item.repositoryNameWithOwner },
+        read.item.repositoryOwnerId,
+        read.fetchedAt,
+      );
+    } else {
+      cache.replaceItem(merged, read.fetchedAt);
     }
+  } catch {
     return {
       status: "failed",
       error: { code: "cache_write_failed" },
@@ -114,21 +159,63 @@ async function runRefresh(cache: Cache, client: RefreshClient, nodeId: string): 
     };
   }
 
+  onChange?.({ status: "updated", item: merged });
   return { status: "updated", item: merged, fetchedAt: read.fetchedAt, relationshipStatus, rateLimit: read.rateLimit };
 }
 
+async function runUpsert(
+  cache: Cache,
+  client: RefreshClient,
+  nodeId: string,
+  onChange?: (change: RefreshChange) => void,
+): Promise<UpsertOutcome> {
+  const read = await client.readFocusedItem({ nodeId });
+  if (read.status === "unavailable") {
+    return { status: "failed", error: read.error, rateLimit: read.rateLimit ?? null };
+  }
+  if (read.status === "out_of_scope") {
+    return { status: "not_found" };
+  }
+  const enrichedType: "blocker" | "closing_issue" = read.item.type === "issue" ? "blocker" : "closing_issue";
+  const enrichmentRead = await client.readRelationshipEnrichment({ nodeIds: [nodeId] });
+  const subject = enrichmentRead.status === "unavailable" ? undefined : enrichmentRead.subjects[0];
+  const relationshipStatus = subject && subject.coverage[enrichedType] === "complete" ? "fresh" : "stale";
+  const item = mergeItem(null, read.item, enrichedType, subject);
+  const repositoryNameWithOwner = read.item.repositoryNameWithOwner;
+  if (!repositoryNameWithOwner) {
+    return { status: "failed", error: { code: "cache_write_failed" }, rateLimit: read.rateLimit };
+  }
+  try {
+    if (!read.item.repositoryOwnerId) return { status: "failed", error: { code: "cache_write_failed" }, rateLimit: read.rateLimit };
+    cache.upsertItem(item, { id: read.item.repositoryId, nameWithOwner: repositoryNameWithOwner }, read.item.repositoryOwnerId, read.fetchedAt);
+  } catch {
+    return { status: "failed", error: { code: "cache_write_failed" }, rateLimit: read.rateLimit };
+  }
+  onChange?.({ status: "updated", item });
+  return { status: "updated", item, fetchedAt: read.fetchedAt, relationshipStatus, rateLimit: read.rateLimit };
+}
+
+function removalReason(
+  itemType: CacheItem["type"],
+  reason: "closed" | "merged" | "repository_not_owned",
+): "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope" {
+  if (reason === "repository_not_owned") return "repository_out_of_scope";
+  if (itemType === "pull_request" && reason === "merged") return "pull_request_merged";
+  return itemType === "pull_request" ? "pull_request_closed" : "issue_closed";
+}
+
 function mergeItem(
-  previous: CacheItem,
+  previous: CacheItem | null,
   fresh: GitHubWorkItem,
   enrichedType: "blocker" | "closing_issue",
   subject: RelationshipEnrichmentSubject | undefined,
 ): CacheItem {
-  const relationshipCoverage = { ...previous.relationshipCoverage };
-  let relationships = previous.relationships;
+  const relationshipCoverage = { ...(previous?.relationshipCoverage ?? { blocker: "not_sampled", closing_issue: "not_sampled", parent: "not_sampled" }) };
+  let relationships = previous?.relationships ?? [];
   if (subject && subject.coverage[enrichedType] === "complete") {
     relationshipCoverage[enrichedType] = subject.coverage[enrichedType];
     relationships = [
-      ...previous.relationships.filter((relationship) => relationship.type !== enrichedType),
+      ...relationships.filter((relationship) => relationship.type !== enrichedType),
       ...subject.relationships,
     ];
   }
@@ -143,7 +230,7 @@ function mergeItem(
     title: fresh.title,
     body: fresh.bodyExcerpt,
     url: fresh.url,
-    createdAt: fresh.createdAt ?? previous.createdAt ?? null,
+    createdAt: fresh.createdAt ?? previous?.createdAt ?? null,
     updatedAt: fresh.updatedAt,
     labels: fresh.labels,
     relationships,
