@@ -17,6 +17,61 @@ describe("bounded sampled sync", () => {
     );
   });
 
+  it("emits one terminal event for the underlying sync, including its safe scope summary", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const events: Array<Record<string, unknown>> = [];
+
+    try {
+      const service = createSyncService({
+        cache,
+        client: countingClient(async () => accountSnapshot()),
+        logEvent: (event) => events.push(event),
+      });
+
+      await service.sync();
+
+      expect(events).toEqual([
+        expect.objectContaining({
+          event: "sync.finished",
+          level: "info",
+          status: "complete",
+          reconciliation: "full",
+          repositoryCount: 1,
+          itemCount: 2,
+          truncatedReason: null,
+        }),
+      ]);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("emits one event when concurrent callers join the same sync", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const events: Array<Record<string, unknown>> = [];
+    let resolveRead!: (value: AccountSnapshotRead) => void;
+
+    try {
+      const service = createSyncService({
+        cache,
+        client: {
+          readAccountSnapshot: () => new Promise<AccountSnapshotRead>((resolve) => { resolveRead = resolve; }),
+          readRelationshipEnrichment: async ({ nodeIds }) => completeEnrichment(nodeIds),
+        },
+        logEvent: (event) => events.push(event),
+      });
+
+      const first = service.sync();
+      const second = service.sync();
+      resolveRead(accountSnapshot());
+      await Promise.all([first, second]);
+
+      expect(events).toHaveLength(1);
+    } finally {
+      cache.close();
+    }
+  });
+
   it("writes a complete snapshot as one generation and reports its scope and rate limit", async () => {
     const cache = openCache({ path: await createCachePath() });
 

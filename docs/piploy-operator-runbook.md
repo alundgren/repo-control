@@ -59,8 +59,10 @@ expiry as a future UTC ISO 8601 value in the other two variables shown above.
 Do not put the token in JSON, CLI arguments, shell history, build arguments,
 image layers, source, documentation, or diagnostics. The container gets the
 value only when the daemon creates it. Repo Control does not return the token,
-write it to SQLite, or log it. Piploy application logs remain unredacted, so
-treat them as sensitive.
+write it to SQLite, or log it. It writes only structured, allow-listed
+operational events to stdout and omits raw GitHub payloads and request bodies.
+Piploy returns application output without further redaction, so treat the logs
+as sensitive anyway.
 
 ## Before registration
 
@@ -116,10 +118,15 @@ token in GitHub after the replacement is working.
 | Symptom | Next action |
 | --- | --- |
 | Image build fails | Check that the Dockerfile still uses the approved digest-pinned Docker Official image and that its root build context contains every copied file. |
-| Container exits at startup | Distinguish a missing or invalid token, owner mismatch, expired token, and insufficient read access from the fixed startup message. Then inspect only the necessary recent log lines, since logs can contain secrets. |
+| Container exits at startup | Distinguish a missing or invalid token, owner mismatch, expired token, and insufficient read access from the fixed startup message. Then inspect only the necessary recent log lines, since logs can contain private operational identifiers. |
 | SQLite state disappears | Confirm the container mounts `repo-control-data` at `/var/lib/repo-control` and that `DATA_DIRECTORY` has the same path. |
 | New token has no effect | Confirm the daemon restarted and the container was recreated after its environment changed. |
 | Host reference stays literal | Stop. Reconcile the public guide or record the explicit operational override before registration. |
+
+Repo Control writes logs only to stdout. Piploy and Docker own the retention
+and storage of that output, so verify the host's container log rotation and
+disk alerting before release. The application does not rotate or persist its
+own logs.
 
 ## Verify the local artifact
 

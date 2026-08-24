@@ -106,7 +106,10 @@ longer qualifies.
 - Show cached data with its last successful refresh time when GitHub fails.
 - Treat missing dependency relationships as unavailable, not as unblocked.
 - Private API responses use `Cache-Control: no-store`.
-- Never log raw GitHub payloads. Committed fixtures are fictional.
+- Emit one structured terminal event for each underlying sync, focused refresh,
+  and webhook delivery. Events go to stdout, use an allow-list of safe fields,
+  and never include raw GitHub payloads, request bodies, credentials, or error
+  messages. Committed fixtures are fictional.
 
 ## Credential and hosting contract
 

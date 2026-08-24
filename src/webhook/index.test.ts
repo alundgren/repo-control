@@ -43,6 +43,7 @@ describe("GitHub webhook delivery", () => {
   it("resumes pending deliveries and uses the uncached focused-upsert path", async () => {
     const store = await deliveryStore();
     const upserts: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
     const service = createWebhookService({
       cache: { getItem: () => null } as unknown as Cache,
       refreshService: {
@@ -54,17 +55,60 @@ describe("GitHub webhook delivery", () => {
       },
       secret: "fixture-secret",
       store,
+      logEvent: (event) => events.push(event),
     });
-    const body = Buffer.from(JSON.stringify(issuePayload({ action: "opened" })));
+    const payloadSentinel = "fixture-webhook-body-must-not-be-logged";
+    const body = Buffer.from(JSON.stringify(issuePayload({ action: "opened", title: payloadSentinel })));
     await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-open", eventName: "issues" });
     await service.start();
 
     expect(upserts).toEqual(["I_fixture"]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        event: "webhook.delivery.finished",
+        status: "succeeded",
+        deliveryId: "d-open",
+        eventName: "issues",
+        action: "opened",
+        itemType: "issue",
+        detail: "updated",
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain(payloadSentinel);
     const pending = store.takePending(new Date().toISOString());
     expect(pending).toEqual([]);
 
     service.stop();
     store.close();
+  });
+
+  it("keeps a persisted delivery successful when the optional logger fails", async () => {
+    const store = await deliveryStore();
+    let upsertCount = 0;
+    const service = createWebhookService({
+      cache: { getItem: () => null } as unknown as Cache,
+      refreshService: {
+        refreshItem: async () => ({ status: "not_found" }),
+        upsertItem: async () => {
+          upsertCount += 1;
+          return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+      logEvent: () => { throw new Error("logger unavailable"); },
+    });
+    const body = Buffer.from(JSON.stringify(issuePayload({ action: "opened" })));
+
+    try {
+      await service.start();
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-logger-fails", eventName: "issues" });
+      await service.stop();
+
+      expect(upsertCount).toBe(1);
+    } finally {
+      store.close();
+    }
   });
 
   it("keeps the receiver as the only webhook route and rejects non-POST requests", async () => {
@@ -141,10 +185,10 @@ function sign(body: Buffer, secret: string) {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 }
 
-function issuePayload({ action = "edited", nodeId = "I_fixture" }: { action?: string; nodeId?: string } = {}) {
+function issuePayload({ action = "edited", nodeId = "I_fixture", title = "Fixture issue" }: { action?: string; nodeId?: string; title?: string } = {}) {
   return {
     action,
-    issue: { node_id: nodeId, number: 7 },
+    issue: { node_id: nodeId, number: 7, title },
     repository: { node_id: "R_fixture" },
   };
 }

@@ -1,4 +1,4 @@
-import fastify from "fastify";
+import fastify, { LogController, type FastifyBaseLogger, type FastifyError } from "fastify";
 import fastifyStatic from "@fastify/static";
 
 import { apiPlugin, type ApiPluginOptions } from "../api/plugin.js";
@@ -8,12 +8,32 @@ import { registerWebhookRoutes, type WebhookService } from "../webhook/index.js"
 
 export type AppOptions = {
   webRoot: string;
+  logger?: FastifyBaseLogger;
   eventHub?: ChangeEventHub;
   webhookService?: WebhookService;
 } & ApiPluginOptions;
 
-export async function createApp({ webRoot, cache, syncService, refreshService, eventHub, webhookService }: AppOptions) {
-  const app = fastify();
+export async function createApp({ webRoot, logger, cache, syncService, refreshService, eventHub, webhookService }: AppOptions) {
+  const app = logger
+    ? fastify({ loggerInstance: logger, logController: new LogController({ disableRequestLogging: true }) })
+    : fastify();
+
+  app.setErrorHandler((error: FastifyError, request, reply) => {
+    const statusCode = typeof error.statusCode === "number" ? error.statusCode : 500;
+    try {
+      request.log.error({
+        event: "http.request.failed",
+        statusCode,
+        route: request.routeOptions.url,
+        requestId: request.id,
+        errorCode: statusCode >= 400 && statusCode < 500 ? "invalid_request" : "unavailable",
+      }, "http request failed");
+    } catch {
+      // Logging must not prevent the safe HTTP error response.
+    }
+    reply.code(statusCode >= 400 && statusCode < 500 ? statusCode : 500)
+      .send({ status: "error", error: { code: statusCode >= 400 && statusCode < 500 ? "invalid_request" : "unavailable" } });
+  });
 
   app.get("/health", async () => ({ status: "ok" }));
 
