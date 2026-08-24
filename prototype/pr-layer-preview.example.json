@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1",
+  "generatedFor": {
+    "repository": "sample-org/harbor",
+    "pullRequestNumber": 482,
+    "baseCommit": "ab16e9ce547c15af",
+    "headCommit": "f3c91b34d0a1f4a2",
+    "generatedAt": "2026-08-24T12:00:00Z"
+  },
+  "overview": "Adds invitation records, the API that issues and accepts them, and the members screen that lets an administrator send them.",
+  "sections": [
+    {
+      "id": "invitation-model",
+      "title": "Add the invitation record and roles",
+      "summary": "Defines the stored invitation, its expiry, and the roles a recipient may receive.",
+      "dependsOn": [],
+      "signals": ["new persisted record", "role rules"],
+      "anchors": [
+        { "path": "src/domain/invitation.ts", "startLine": 12, "endLine": 59 },
+        { "path": "src/domain/member-role.ts", "startLine": 4, "endLine": 14 }
+      ],
+      "files": [
+        { "path": "src/domain/invitation.ts", "additions": 48, "deletions": 0 },
+        { "path": "src/domain/member-role.ts", "additions": 11, "deletions": 2 }
+      ]
+    },
+    {
+      "id": "invitation-api",
+      "title": "Issue and accept invitations",
+      "summary": "Adds the guarded endpoints, token creation, expiry checks, and the invitation email.",
+      "dependsOn": ["invitation-model"],
+      "signals": ["admin-only action", "new outbound email"],
+      "anchors": [
+        { "path": "src/server/invitations/service.ts", "startLine": 28, "endLine": 81 },
+        { "path": "src/server/invitations/router.ts", "startLine": 14, "endLine": 53 },
+        { "path": "src/server/emails/invitation.ts", "startLine": 8, "endLine": 38 }
+      ],
+      "files": [
+        { "path": "src/server/invitations/service.ts", "additions": 54, "deletions": 0 },
+        { "path": "src/server/invitations/router.ts", "additions": 40, "deletions": 0 },
+        { "path": "src/server/emails/invitation.ts", "additions": 31, "deletions": 0 }
+      ]
+    },
+    {
+      "id": "members-screen",
+      "title": "Let administrators send invitations",
+      "summary": "Shows pending invitations in member settings and gives administrators the form that creates one.",
+      "dependsOn": ["invitation-api"],
+      "signals": ["new admin workflow", "uses invitation API"],
+      "anchors": [
+        { "path": "src/web/members/InviteMemberForm.tsx", "startLine": 18, "endLine": 41 },
+        { "path": "src/web/members/PendingInvitations.tsx", "startLine": 9, "endLine": 26 },
+        { "path": "src/web/members/MembersPage.tsx", "startLine": 45, "endLine": 53 }
+      ],
+      "files": [
+        { "path": "src/web/members/InviteMemberForm.tsx", "additions": 24, "deletions": 0 },
+        { "path": "src/web/members/PendingInvitations.tsx", "additions": 18, "deletions": 0 },
+        { "path": "src/web/members/MembersPage.tsx", "additions": 9, "deletions": 6 }
+      ]
+    },
+    {
+      "id": "coverage",
+      "title": "Cover expiration and permissions",
+      "summary": "Tests the failure paths that would otherwise invite a person with a stale token or insufficient rights.",
+      "dependsOn": ["invitation-api", "members-screen"],
+      "signals": ["regression coverage"],
+      "anchors": [
+        { "path": "src/server/invitations/service.test.ts", "startLine": 37, "endLine": 55 },
+        { "path": "src/web/members/MembersPage.test.tsx", "startLine": 22, "endLine": 32 }
+      ],
+      "files": [
+        { "path": "src/server/invitations/service.test.ts", "additions": 19, "deletions": 0 },
+        { "path": "src/web/members/MembersPage.test.tsx", "additions": 11, "deletions": 0 }
+      ]
+    }
+  ]
+}

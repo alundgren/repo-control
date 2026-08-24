@@ -3,179 +3,114 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Repo Control prototype</title>
+    <title>Repo Control review plan prototype</title>
     <style>
-      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
-      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
-      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:600; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
-      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
-      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Medium.woff2") format("woff2"); }
-      :root {
-        --color-background:#f2eade;
-        --color-surface:#eadfcd;
-        --color-raised:#e0d2bd;
-        --color-divider:#c1af9a;
-        --color-field:#f9f6f0;
-        --color-text:#604939;
-        --color-text-muted:#66574d;
-        --color-accent:#784f26;
-        --color-link:#3d5d71;
-        --color-success:#3d6034;
-        --color-warning:#7e5220;
-        --color-focus-ring:var(--color-accent);
-        --font-sans:"IBM Plex Sans", Aptos, "Segoe UI", sans-serif;
-        --font-mono:"IBM Plex Mono", Consolas, monospace;
-        --font-size-body:16px;
-        --font-size-secondary:13.5px;
-        --font-size-label:11px;
-        --font-weight-regular:400;
-        --font-weight-medium:500;
-        --font-weight-semibold:600;
-        --line-height-body:1.6;
-        --radius-control:8px;
-        --radius-field:10px;
-        font-synthesis:none;
-      }
+      @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url("../src/web/assets/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+      @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url("../src/web/assets/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+      @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url("../src/web/assets/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+      @font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../src/web/assets/fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
+      :root { --background:#f2eade; --surface:#eadfcd; --raised:#e0d2bd; --line:#c1af9a; --field:#f9f6f0; --text:#604939; --muted:#66574d; --accent:#784f26; --link:#3d5d71; --warning:#7e5220; --danger:#8f3a2d; --sans:"IBM Plex Sans", Aptos, sans-serif; --mono:"IBM Plex Mono", Consolas, monospace; --radius:0.625rem; font-synthesis:none; }
       * { box-sizing:border-box; }
-      body { margin:0; background:var(--color-background); color:var(--color-text); font:var(--font-weight-regular) var(--font-size-body)/var(--line-height-body) var(--font-sans); }
-      button, input, select { font:inherit; }
-      button { color:inherit; }
-      a { color:var(--color-link); }
-      button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible, summary:focus-visible { outline:3px solid var(--color-focus-ring); outline-offset:2px; }
-      .shell { display:grid; grid-template-columns:235px minmax(365px,1fr) minmax(330px,.9fr); min-height:100vh; }
-      .side, .detail { padding:28px 20px; }
-      .side { border-right:1px solid var(--color-divider); }
-      .detail { background:var(--color-surface); border-left:1px solid var(--color-divider); }
-      .brand { display:flex; align-items:center; gap:9px; margin:0 0 34px; font-size:19px; font-weight:var(--font-weight-semibold); }
-      .mark { display:grid; width:28px; height:28px; place-items:center; border-radius:9px; background:var(--color-accent); color:var(--color-field); }
-      .eyebrow { margin:0 0 7px; color:var(--color-text-muted); font:var(--font-weight-medium) var(--font-size-label)/1.4 var(--font-mono); letter-spacing:.07em; text-transform:uppercase; }
-      .nav { display:grid; gap:4px; }
-      .nav + .nav { margin-top:28px; }
-      .nav button { display:flex; justify-content:space-between; width:100%; padding:9px 10px; border:0; border-radius:var(--radius-control); background:transparent; cursor:pointer; text-align:left; }
-      .nav button:hover, .nav [aria-current="page"] { background:var(--color-raised); }
-      .nav [aria-current="page"] { font-weight:var(--font-weight-semibold); }
-      .count, .side-foot { color:var(--color-text-muted); font-size:var(--font-size-secondary); font-variant-numeric:tabular-nums; }
-      .side-foot { position:fixed; bottom:24px; width:195px; }
-      .content { min-width:0; padding:27px 32px 60px; }
-      .top { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
-      h1, h2, h3, p { margin-top:0; }
-      h1 { margin-bottom:5px; font-size:clamp(28px,4vw,40px); font-weight:var(--font-weight-semibold); line-height:1.1; letter-spacing:-.015em; }
-      h2 { margin:0; font-size:22px; font-weight:var(--font-weight-semibold); letter-spacing:-.01em; }
-      h3 { margin:0; font-size:17px; font-weight:var(--font-weight-semibold); }
-      .subhead, .section-note, .item-meta, .detail-meta { color:var(--color-text-muted); }
-      .sync { display:flex; align-items:center; gap:10px; color:var(--color-text-muted); font-size:var(--font-size-secondary); white-space:nowrap; }
-      .sync-status::before { content:""; display:inline-block; width:7px; height:7px; margin:0 7px 1px 0; border-radius:50%; background:var(--color-success); }
-      .quiet { padding:2px 0; border:0; background:transparent; color:var(--color-link); cursor:pointer; font-size:var(--font-size-secondary); text-decoration:underline; }
-      .search { width:100%; margin:25px 0 30px; padding:12px 14px; border:1px solid var(--color-divider); border-radius:var(--radius-field); background:var(--color-field); color:var(--color-text); }
-      .search::placeholder { color:var(--color-text-muted); opacity:1; }
-      .section { margin-top:34px; }
-      .section-head { display:flex; align-items:baseline; justify-content:space-between; gap:15px; margin-bottom:10px; }
-      .queue { border-top:1px solid var(--color-divider); }
-      .item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; width:100%; padding:15px 9px; border:0; border-bottom:1px solid var(--color-divider); background:transparent; cursor:pointer; text-align:left; }
-      .item:hover, .item.selected { background:var(--color-surface); }
-      .item.selected { box-shadow:inset 3px 0 0 var(--color-link); }
-      .number { padding-top:1px; color:var(--color-text-muted); font:13px var(--font-mono); }
-      .item-title { display:block; font-weight:var(--font-weight-semibold); line-height:1.32; }
-      .item-meta { display:block; margin-top:5px; font-size:var(--font-size-secondary); line-height:1.35; }
-      .item-age { color:var(--color-text-muted); font-size:12px; white-space:nowrap; }
-      .tag { display:inline-block; margin:6px 5px 0 0; padding:2px 7px; border:1px solid currentColor; border-radius:999px; color:var(--color-success); font-size:var(--font-size-label); font-weight:var(--font-weight-medium); line-height:1.4; }
-      .tag.blocked { color:var(--color-warning); }
-      .tag.triage, .tag.oldest { color:var(--color-text-muted); }
-      .preview .item:nth-child(n+3) { display:none; }
-      .view-link { margin-top:12px; }
-      details { position:relative; color:var(--color-text-muted); font-size:var(--font-size-secondary); }
-      summary { cursor:pointer; list-style:none; }
-      summary::-webkit-details-marker { display:none; }
-      summary::after { content:"⌄"; margin-left:5px; }
-      details[open] summary::after { content:"⌃"; }
-      .options { position:absolute; z-index:1; top:25px; right:0; display:grid; gap:8px; min-width:248px; padding:11px; border:1px solid var(--color-divider); border-radius:var(--radius-control); background:var(--color-field); }
-      .options label { display:flex; justify-content:space-between; gap:14px; }
-      select { padding:4px 22px 4px 7px; border:1px solid var(--color-divider); border-radius:6px; background:var(--color-field); color:var(--color-text); }
-      .detail-inner { position:sticky; top:28px; max-width:560px; }
-      .detail-empty { padding-top:110px; color:var(--color-text-muted); }
-      .detail-kind, .detail-repo { margin:0 0 8px; color:var(--color-text-muted); font:12px var(--font-mono); }
-      .detail-kind { text-transform:uppercase; letter-spacing:.07em; }
-      .detail-title { margin-bottom:12px; font-size:28px; line-height:1.16; }
-      .detail-meta { margin-bottom:24px; font-size:var(--font-size-secondary); }
-      .actions { display:flex; flex-wrap:wrap; gap:9px; margin-bottom:8px; }
-      .action { display:inline-flex; align-items:center; min-height:38px; padding:7px 11px; border:1px solid var(--color-divider); border-radius:var(--radius-control); background:var(--color-field); color:var(--color-link); cursor:pointer; text-decoration:none; }
-      .action.secondary { background:transparent; color:var(--color-text); }
-      .refreshed { min-height:20px; margin:0 0 20px; color:var(--color-text-muted); font-size:var(--font-size-secondary); }
-      .fact { padding:19px 0; border-top:1px solid var(--color-divider); }
-      .body { display:none; max-height:270px; overflow:auto; white-space:pre-line; }
-      .body.open { display:block; }
-      .hidden { display:none !important; }
-      @media (max-width:980px) { .shell { grid-template-columns:190px minmax(0,1fr); } .detail { grid-column:1 / -1; border-top:1px solid var(--color-divider); border-left:0; } .detail-inner { position:static; max-width:none; } .side-foot { width:155px; } }
-      @media (max-width:660px) { .shell { display:block; } .side { border-right:0; border-bottom:1px solid var(--color-divider); padding:20px; } .brand { margin-bottom:18px; } .nav { grid-template-columns:repeat(2,minmax(0,1fr)); } .nav + .nav { margin-top:12px; } .side-foot { display:none; } .content, .detail { padding:23px 20px 42px; } .top { align-items:flex-start; flex-direction:column; gap:5px; } .item { grid-template-columns:auto minmax(0,1fr); } .item-age { grid-column:2; } }
+      body { margin:0; background:var(--background); color:var(--text); font:400 1rem/1.55 var(--sans); }
+      h1,h2,h3,p { margin:0; } h1 { font-size:clamp(1.75rem,4vw,2.5rem); font-weight:600; letter-spacing:-0.015em; line-height:1.1; } h2 { font-size:1.375rem; font-weight:600; line-height:1.15; } h3 { font-size:1.0625rem; font-weight:600; } a { color:var(--link); } button { color:inherit; font:inherit; } button:focus-visible,a:focus-visible,summary:focus-visible { outline:0.1875rem solid var(--accent); outline-offset:0.125rem; }
+      .eyebrow { color:var(--muted); font:500 0.6875rem/1.4 var(--mono); letter-spacing:.07em; text-transform:uppercase; } .muted { color:var(--muted); font-size:.84375rem; }
+      .shell { display:grid; grid-template-columns:14.6875rem minmax(0,1fr); min-height:100vh; } .navigation { min-height:100vh; padding:1.75rem 1.25rem; border-right:1px solid var(--line); } .brand { display:flex; align-items:center; gap:.5625rem; font-size:1.1875rem; font-weight:600; } .brand-mark { display:grid; width:1.75rem; height:1.75rem; place-items:center; border-radius:.5625rem; background:var(--accent); color:var(--field); } .navigation nav { display:grid; gap:.25rem; margin-top:2rem; } .navigation button { display:flex; justify-content:space-between; width:100%; padding:.5625rem .625rem; border:0; border-radius:.5rem; background:transparent; cursor:pointer; text-align:left; } .navigation button[aria-current="page"] { background:var(--raised); font-weight:600; } .count { color:var(--muted); font:.8125rem var(--mono); }
+      .workspace { display:grid; grid-template-columns:minmax(22rem,1fr) minmax(20.625rem,.9fr); min-width:0; } .pr-list { min-width:0; padding:1.6875rem 2rem 5rem; } .page-header { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; } .page-header p+h1 { margin-top:.25rem; } .search { width:100%; margin:1.5rem 0 1.625rem; padding:.75rem .875rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--field); color:var(--text); } .item-list { margin:0; padding:0; border-top:1px solid var(--line); list-style:none; } .item-list li { border-bottom:1px solid var(--line); } .pr-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:.75rem; width:100%; padding:.9375rem .5625rem; border:0; background:transparent; cursor:pointer; text-align:left; } .pr-row:hover,.pr-row[aria-pressed="true"] { background:var(--surface); } .pr-row[aria-pressed="true"] { box-shadow:inset .1875rem 0 var(--link); } .pr-number { color:var(--muted); font:.8125rem var(--mono); } .pr-title { display:block; font-weight:600; line-height:1.32; } .pr-meta { display:block; margin-top:.25rem; color:var(--muted); font-size:.84375rem; } .pr-age { color:var(--muted); font-size:.75rem; white-space:nowrap; }
+      .quick-read { min-width:0; padding:1.75rem 1.25rem 6rem; border-left:1px solid var(--line); background:var(--surface); } .quick-read-inner { position:sticky; top:1.75rem; max-width:34rem; } .quick-read h2 { margin-top:.5rem; } .identity { margin-top:.375rem; color:var(--muted); font-size:.84375rem; } .summary { margin-top:1rem; } .actions { display:flex; flex-wrap:wrap; gap:.75rem; align-items:baseline; margin-top:1.125rem; } .button { padding:.5rem .7rem; border:1px solid var(--accent); border-radius:.5rem; background:var(--accent); color:var(--field); cursor:pointer; font-weight:500; } .quiet { padding:.125rem 0; border:0; background:transparent; color:var(--link); cursor:pointer; font-size:.84375rem; text-decoration:underline; }
+      .layer-peek { margin-top:1.5rem; border-top:1px solid var(--line); } .layer-peek ol { margin:0; padding:0; list-style:none; } .layer-peek li { padding:.75rem 0; border-bottom:1px solid var(--line); } .layer-peek p { margin-top:.2rem; color:var(--muted); font-size:.84375rem; } .number { margin-right:.5rem; color:var(--muted); font:.75rem var(--mono); }
+      .shell[data-expanded="true"] .workspace { grid-template-columns:15.75rem minmax(0,1fr); } .shell[data-expanded="true"] .pr-list { padding:1.6875rem 1rem 5rem; border-right:1px solid var(--line); } .shell[data-expanded="true"] .page-header,.shell[data-expanded="true"] .pr-row { display:block; } .shell[data-expanded="true"] .page-header .muted,.shell[data-expanded="true"] .search,.shell[data-expanded="true"] .pr-age { display:none; } .shell[data-expanded="true"] .pr-number { display:block; margin-bottom:.25rem; } .shell[data-expanded="true"] .quick-read { padding:1.6875rem 2rem 8rem; border-left:0; background:var(--background); } .shell[data-expanded="true"] .quick-read-inner { position:static; max-width:none; }
+      .layer-header { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; } .layer-header h2 { margin-top:.3rem; font-size:clamp(1.375rem,2.7vw,2rem); } .header-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:.75rem; } .stale { display:flex; gap:.625rem; margin:1.125rem 0; padding:.75rem .875rem; border:1px solid var(--warning); border-radius:.5rem; background:var(--raised); color:var(--warning); font-size:.84375rem; } .stale[hidden] { display:none; }
+      .layers { display:grid; grid-template-columns:minmax(13.5rem,.37fr) minmax(0,1fr); gap:1.5rem; margin-top:1.5rem; } .outline { margin:0; padding:0; border-top:1px solid var(--line); list-style:none; } .outline li { border-bottom:1px solid var(--line); } .outline button { display:grid; grid-template-columns:auto minmax(0,1fr); gap:.625rem; width:100%; padding:.75rem .5rem; border:0; background:transparent; cursor:pointer; text-align:left; } .outline button[aria-pressed="true"] { background:var(--surface); box-shadow:inset .1875rem 0 var(--link); } .outline strong { display:block; } .outline small { display:block; margin-top:.16rem; color:var(--muted); font-size:.75rem; } .layer-detail { padding:1.25rem; border-radius:var(--radius); background:var(--surface); } .layer-detail>p { margin-top:.75rem; max-width:68ch; } .layer-detail section { margin-top:1.25rem; } .file-list { margin:.5rem 0 0; padding:0; border-top:1px solid var(--line); list-style:none; } .file-list li { display:flex; justify-content:space-between; gap:1rem; padding:.55rem 0; border-bottom:1px solid var(--line); } .path { overflow-wrap:anywhere; font:.75rem/1.45 var(--mono); } .change { flex:0 0 auto; color:var(--muted); font:.75rem var(--mono); } .signals { display:flex; flex-wrap:wrap; gap:.4rem; margin:.5rem 0 0; padding:0; list-style:none; } .signals li { padding:.14rem .4rem; border:1px solid var(--line); border-radius:999px; color:var(--muted); font-size:.75rem; }
+      .story { display:grid; gap:1rem; margin-top:1.5rem; } .story-card { display:grid; grid-template-columns:2rem minmax(0,1fr); gap:.875rem; padding-bottom:1rem; border-bottom:1px solid var(--line); } .story-card:last-child { border-bottom:0; } .story-card .number { display:grid; width:1.75rem; height:1.75rem; place-items:center; border-radius:50%; background:var(--raised); } .story-card p { margin-top:.35rem; } .story-files { color:var(--muted); font:.75rem/1.5 var(--mono); } .file-groups { margin-top:1.5rem; } .file-group { padding:1rem 0; border-top:1px solid var(--line); } .file-group p { margin-top:.25rem; }
+      details { margin-top:2rem; color:var(--muted); font-size:.84375rem; } summary { cursor:pointer; } pre { max-height:29rem; margin:.75rem 0 0; padding:1rem; overflow:auto; border-radius:.5rem; background:var(--field); color:var(--text); font:.75rem/1.55 var(--mono); white-space:pre-wrap; }
+      .switcher { position:fixed; right:1rem; bottom:1rem; left:1rem; display:flex; justify-content:center; gap:.5rem; padding:.5rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--field); box-shadow:0 .35rem 1rem rgba(96,73,57,.14); } .switcher span { margin-right:.25rem; color:var(--muted); font:500 .6875rem var(--mono); letter-spacing:.07em; text-transform:uppercase; } .switcher button { padding:.35rem .55rem; border:0; border-radius:.5rem; background:transparent; cursor:pointer; font-size:.84375rem; } .switcher button[aria-pressed="true"] { background:var(--raised); font-weight:600; }
+      .merge { padding:.5rem .7rem; border:1px solid var(--danger); border-radius:.5rem; background:var(--danger); color:var(--field); cursor:pointer; font-weight:500; } .file-button { display:flex; justify-content:space-between; gap:1rem; width:100%; padding:0; border:0; background:transparent; color:var(--text); cursor:pointer; text-align:left; } .file-button:hover .path { color:var(--link); text-decoration:underline; } .file-viewer { margin-top:1.5rem; padding:1.25rem; border:1px solid var(--line); border-radius:var(--radius); background:var(--field); } .file-viewer header { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; } .file-tabs { display:flex; gap:.5rem; margin-top:1rem; } .file-tabs button { padding:.35rem .55rem; border:0; border-radius:.5rem; background:transparent; cursor:pointer; } .file-tabs button[aria-pressed="true"] { background:var(--raised); font-weight:600; } .code { margin:1rem 0 0; padding:1rem; overflow:auto; background:var(--background); color:var(--text); font:.8125rem/1.55 var(--mono); white-space:pre; } .code .removed { display:block; background:#ead2cb; color:var(--danger); } .code .added { display:block; background:#dce8d7; color:#3d6034; }
+      .shell[data-expanded="true"] { display:block; } .shell[data-expanded="true"] .navigation, .shell[data-expanded="true"] .pr-list { display:none; } .shell[data-expanded="true"] .workspace { display:block; } .shell[data-expanded="true"] .quick-read { min-height:100vh; padding:1.75rem clamp(1.25rem,5vw,5rem) 8rem; border:0; }
+      @media (max-width:64rem) { .workspace,.shell[data-expanded="true"] .workspace { grid-template-columns:1fr; } .quick-read { border-top:1px solid var(--line); border-left:0; } .shell[data-expanded="true"] .pr-list { padding:1.6875rem 2rem 1rem; border-right:0; } .shell[data-expanded="true"] .page-header { display:flex; } .shell[data-expanded="true"] .page-header .muted,.shell[data-expanded="true"] .search,.shell[data-expanded="true"] .pr-age { display:initial; } .shell[data-expanded="true"] .pr-row { display:grid; } .shell[data-expanded="true"] .pr-number { display:inline; } }
+      @media (max-width:44rem) { .shell { display:block; } .navigation { min-height:0; padding:1.25rem; border-right:0; border-bottom:1px solid var(--line); } .navigation nav { grid-template-columns:repeat(2,minmax(0,1fr)); margin-top:1rem; } .pr-list,.quick-read,.shell[data-expanded="true"] .pr-list,.shell[data-expanded="true"] .quick-read { padding:1.25rem 1.25rem 6.5rem; } .layer-header,.layers { display:block; } .header-actions { justify-content:flex-start; margin-top:1rem; } .outline { margin-top:1.25rem; } .layer-detail { margin-top:1.25rem; } .switcher { justify-content:flex-start; overflow-x:auto; } .switcher span { display:none; } }
     </style>
   </head>
   <body>
-    <main class="shell">
-      <aside class="side">
-        <p class="brand"><span class="mark">↗</span> Repo Control</p>
-        <nav class="nav" aria-label="Main views">
-          <button aria-current="page" data-view="all">Now <span class="count">9</span></button>
-          <button data-view="pr">Pull requests <span class="count">2</span></button>
+    <main class="shell" id="shell" data-expanded="false">
+      <aside class="navigation">
+        <div class="brand"><span class="brand-mark">R</span>Repo Control</div>
+        <nav aria-label="Work views">
+          <button type="button"><span>Now</span><span class="count">8</span></button>
+          <button aria-current="page" type="button"><span>Pull requests</span><span class="count">3</span></button>
+          <button type="button"><span>Ready for agent</span><span class="count">4</span></button>
+          <button type="button"><span>Needs me</span><span class="count">1</span></button>
         </nav>
-        <nav class="nav" aria-label="Issue queues">
-          <p class="eyebrow">Issues</p>
-          <button data-view="agent">Ready for agent <span class="count">3</span></button>
-          <button data-view="human">Needs me <span class="count">2</span></button>
-          <button data-view="triage">Triage <span class="count">2</span></button>
-        </nav>
-        <p class="side-foot">Fictional sample data<br />Read-only prototype</p>
       </aside>
-
-      <section class="content preview" aria-label="Work queues">
-        <div class="top"><div><h1 id="title">Now</h1></div><div class="sync"><span class="sync-status" id="sync-status">Sampled 12 min ago</span><button class="quiet" data-sync>Sync sampled view</button></div></div>
-        <input class="search" type="search" placeholder="Filter pull requests and issues" aria-label="Filter pull requests and issues" />
-        <section class="section section-pr"><div class="section-head"><h2>Open pull requests</h2></div><div class="queue" id="pr-list"></div></section>
-        <section class="section section-agent"><div class="section-head"><h2>Ready for agent</h2><details><summary>Focus &amp; order</summary><div class="options"><label>Focus <select aria-label="Focus"><option>All work</option><option>Current focus</option></select></label><label>Order <select aria-label="Order"><option>Ready, then oldest</option><option>Oldest ready</option><option>Issue number</option></select></label></div></details></div><div class="queue" id="agent-list"></div></section>
-        <section class="section section-human"><div class="section-head"><h2>Needs me</h2></div><div class="queue" id="human-list"></div></section>
-        <section class="section section-triage"><div class="section-head"><h2>Triage</h2></div><div class="queue" id="triage-list"></div></section>
-      </section>
-
-      <aside class="detail" aria-live="polite"><div class="detail-inner" id="detail"><div class="detail-empty"><p class="eyebrow">Quick read</p><h2>Choose an item</h2><p>Inspect the body here, then open GitHub when you need the full context.</p></div></div></aside>
+      <div class="workspace">
+        <section class="pr-list" aria-label="Open pull requests">
+          <header class="page-header"><div><p class="eyebrow">Pull requests</p><h1>Open pull requests</h1></div><p class="muted">3 loaded</p></header>
+          <input class="search" aria-label="Filter pull requests" placeholder="Filter pull requests" type="search" />
+          <p class="muted" id="notice" aria-live="polite"></p>
+          <ul class="item-list" id="pr-list"></ul>
+        </section>
+        <aside class="quick-read" aria-live="polite" id="quick-read"></aside>
+      </div>
     </main>
+    <div class="switcher" aria-label="Prototype layout">
+      <span>Prototype layout</span>
+      <button data-layout="story" type="button">Story</button>
+      <button data-layout="files" type="button">Files first</button>
+    </div>
     <script>
-      const items = [
-        { id:"pr-48", type:"pr", number:48, repo:"orbit-tools", title:"Document the bootstrap command for a fresh machine", age:"Opened 2 days ago", size:"Small · +18 −0 · 1 file", body:"Adds the missing bootstrap command to the setup guide. This PR has no linked closing issue.", url:"https://github.com/example/orbit-tools/pull/48" },
-        { id:"pr-17", type:"pr", number:17, repo:"trail-notes", title:"Fix the duplicate export in the weekly digest", age:"Opened today", size:"Small · +9 −4 · 2 files", body:"Removes a duplicate weekly export from the digest job. Closes trail-notes#12.", closing:{label:"trail-notes#12",url:"https://github.com/example/trail-notes/issues/12"}, url:"https://github.com/example/trail-notes/pull/17" },
-        { id:"issue-31", type:"agent", number:31, repo:"orbit-tools", title:"Add a safe cleanup command", age:"9 days old", dependency:{kind:"unblocked", text:"Unblocked"}, oldest:true, body:"Add a cleanup command that removes only state the tool can prove it owns. Leave unknown files in place and report them.", url:"https://github.com/example/orbit-tools/issues/31" },
-        { id:"issue-42", type:"agent", number:42, repo:"trail-notes", title:"Build the first import screen", age:"Today", dependency:{kind:"unblocked", text:"Unblocked"}, body:"Build the first screen for importing a set of trail notes. Keep the import read-only for the first release.", url:"https://github.com/example/trail-notes/issues/42" },
-        { id:"issue-33", type:"agent", number:33, repo:"orbit-tools", title:"Store cleanup evidence before deleting anything", age:"9 days old", dependency:{kind:"blocked", text:"Blocked by orbit-tools#31"}, body:"Record the proof that a file belongs to the tool before any cleanup flow can remove it.", url:"https://github.com/example/orbit-tools/issues/33" },
-        { id:"issue-28", type:"human", number:28, repo:"orbit-tools", title:"Choose where release backups live", age:"4 days old", dependency:{kind:"unblocked", text:"Unblocked"}, body:"Pick a backup location for release artifacts. This needs an account owner decision before implementation starts.", url:"https://github.com/example/orbit-tools/issues/28" },
-        { id:"issue-45", type:"human", number:45, repo:"trail-notes", title:"Connect a production mail account", age:"Today", dependency:{kind:"blocked", text:"Blocked by trail-notes#42"}, body:"Connect the production mail account after the import screen and message review flow exist.", url:"https://github.com/example/trail-notes/issues/45" },
-        { id:"issue-51", type:"triage", number:51, repo:"orbit-tools", title:"Consider a release activity view", age:"Today", tag:"Needs refinement", body:"Explore whether release activity needs a separate view or can remain in the existing release detail.", url:"https://github.com/example/orbit-tools/issues/51" },
-        { id:"issue-19", type:"triage", number:19, repo:"trail-notes", title:"Clarify retention rules for imported notes", age:"12 days old", tag:"Unclassified", body:"This issue has no workflow label yet. Decide whether it needs discovery, a human decision, or implementation.", url:"https://github.com/example/trail-notes/issues/19" }
-      ];
-      const views = { all:["Now",""], pr:["Pull requests",""], agent:["Ready for agent",""], human:["Needs me",""], triage:["Triage",""] };
-      const types = { all:["pr","agent","human","triage"], pr:["pr"], agent:["agent"], human:["human"], triage:["triage"] };
-      const escape = value => value.replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[char]);
-      const queued = type => items.filter(item => item.type === type).sort((a,b) => Number(a.dependency?.kind !== "unblocked") - Number(b.dependency?.kind !== "unblocked") || a.number - b.number);
-      function row(item) {
-        const status = item.dependency ? `<span class="tag ${item.dependency.kind === "blocked" ? "blocked" : ""}">${escape(item.dependency.text)}</span>` : item.tag ? `<span class="tag triage">${escape(item.tag)}</span>` : "";
-        const oldest = item.oldest ? `<span class="tag oldest">Oldest ready</span>` : "";
-        const kind = item.type === "pr" ? "PR" : "#";
-        const meta = item.type === "pr" ? `${item.repo} · #${item.number} · ${item.size}` : `${item.repo} · #${item.number}`;
-        return `<button class="item" data-id="${item.id}"><span class="number">${kind}${item.number}</span><span><span class="item-title">${escape(item.title)}</span><span class="item-meta">${escape(meta)}</span>${status}${oldest}</span><span class="item-age">${escape(item.age)}</span></button>`;
+      // PROTOTYPE ONLY. This is fictional and mirrors pr-layer-preview.example.json.
+      const githubPullRequest = { repository:"sample-org/harbor", number:482, title:"Add teammate invitations with roles", url:"https://github.com/example/sample-org-harbor/pull/482", author:"Morgan Lee", additions:214, deletions:18, changedFiles:10, headCommit:"f3c91b34d0a1f4a2", updatedAt:"Updated 18 minutes ago" };
+      const layerPreview = {
+        schemaVersion:"1",
+        generatedFor:{ repository:"sample-org/harbor", pullRequestNumber:482, baseCommit:"ab16e9ce547c15af", headCommit:"f3c91b34d0a1f4a2", generatedAt:"2026-08-24T12:00:00Z" },
+        overview:"Adds invitation records, the API that issues and accepts them, and the members screen that lets an administrator send them.",
+        sections:[
+          { id:"invitation-model", title:"Add the invitation record and roles", summary:"Defines the stored invitation, its expiry, and the roles a recipient may receive.", dependsOn:[], signals:["new persisted record","role rules"], anchors:[{path:"src/domain/invitation.ts",startLine:12,endLine:59},{path:"src/domain/member-role.ts",startLine:4,endLine:14}], files:[{path:"src/domain/invitation.ts",additions:48,deletions:0},{path:"src/domain/member-role.ts",additions:11,deletions:2}] },
+          { id:"invitation-api", title:"Issue and accept invitations", summary:"Adds the guarded endpoints, token creation, expiry checks, and the invitation email.", dependsOn:["invitation-model"], signals:["admin-only action","new outbound email"], anchors:[{path:"src/server/invitations/service.ts",startLine:28,endLine:81},{path:"src/server/invitations/router.ts",startLine:14,endLine:53},{path:"src/server/emails/invitation.ts",startLine:8,endLine:38}], files:[{path:"src/server/invitations/service.ts",additions:54,deletions:0},{path:"src/server/invitations/router.ts",additions:40,deletions:0},{path:"src/server/emails/invitation.ts",additions:31,deletions:0}] },
+          { id:"members-screen", title:"Let administrators send invitations", summary:"Shows pending invitations in member settings and gives administrators the form that creates one.", dependsOn:["invitation-api"], signals:["new admin workflow","uses invitation API"], anchors:[{path:"src/web/members/InviteMemberForm.tsx",startLine:18,endLine:41},{path:"src/web/members/PendingInvitations.tsx",startLine:9,endLine:26},{path:"src/web/members/MembersPage.tsx",startLine:45,endLine:53}], files:[{path:"src/web/members/InviteMemberForm.tsx",additions:24,deletions:0},{path:"src/web/members/PendingInvitations.tsx",additions:18,deletions:0},{path:"src/web/members/MembersPage.tsx",additions:9,deletions:6}] },
+          { id:"coverage", title:"Cover expiration and permissions", summary:"Tests the failure paths that would otherwise invite a person with a stale token or insufficient rights.", dependsOn:["invitation-api","members-screen"], signals:["regression coverage"], anchors:[{path:"src/server/invitations/service.test.ts",startLine:37,endLine:55},{path:"src/web/members/MembersPage.test.tsx",startLine:22,endLine:32}], files:[{path:"src/server/invitations/service.test.ts",additions:19,deletions:0},{path:"src/web/members/MembersPage.test.tsx",additions:11,deletions:0}] }
+        ]
+      };
+      const pullRequests = [githubPullRequest,{repository:"sample-org/harbor",number:479,title:"Make the release summary easier to scan",author:"Amir Khan",updatedAt:"Updated 2 hours ago"},{repository:"sample-org/tide",number:91,title:"Remove the duplicate weekly export",author:"Jun Park",updatedAt:"Updated yesterday"}];
+      const params = new URLSearchParams(location.search);
+      const state = { expanded:params.get("expanded")==="true", layout:params.get("layout")==="files"?"files":"story", selectedPr:482, selectedLayerId:"invitation-api", selectedFilePath:null, fileMode:"diff", hasNewCommit:false, merged:false, notice:"" };
+      const shell=document.querySelector("#shell"), list=document.querySelector("#pr-list"), quickRead=document.querySelector("#quick-read"), switcher=document.querySelector(".switcher");
+      const esc=(value)=>String(value).replace(/[&<>"']/g,(character)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[character]));
+      const commit=()=>state.hasNewCommit?"c6a7e8b9d0f11234":githubPullRequest.headCommit;
+      const short=(value)=>value.slice(0,7);
+      const previewAvailable=()=>state.selectedPr===githubPullRequest.number;
+      const selectedLayer=()=>layerPreview.sections.find((layer)=>layer.id===state.selectedLayerId)||layerPreview.sections[0];
+      function syncUrl(){ const next=new URLSearchParams({layout:state.layout}); if(state.expanded)next.set("expanded","true"); history.replaceState(null,"",location.pathname+"?"+next); }
+      function files(files){ return `<ul class="file-list">${files.map((file)=>`<li><button class="file-button" data-file="${esc(file.path)}" type="button"><span class="path">${esc(file.path)}</span><span class="change">+${file.additions} −${file.deletions}</span></button></li>`).join("")}</ul>`; }
+      function renderList(){
+        document.querySelector("#notice").textContent=state.notice;
+        list.innerHTML=pullRequests.filter((pr)=>!state.merged||pr.number!==githubPullRequest.number).map((pr)=>`<li><button class="pr-row" aria-pressed="${state.selectedPr===pr.number}" data-pr="${pr.number}" type="button"><span class="pr-number">PR${pr.number}</span><span><span class="pr-title">${esc(pr.title)}</span><span class="pr-meta">${esc(pr.repository)} · ${esc(pr.author)}</span></span><span class="pr-age">${esc(pr.updatedAt)}</span></button></li>`).join("");
+        list.querySelectorAll("[data-pr]").forEach((button)=>button.addEventListener("click",()=>{state.selectedPr=Number(button.dataset.pr);state.expanded=false;render();}));
       }
-      document.querySelector("#pr-list").innerHTML = queued("pr").map(row).join("");
-      document.querySelector("#agent-list").innerHTML = queued("agent").map(row).join("");
-      document.querySelector("#human-list").innerHTML = queued("human").map(row).join("");
-      document.querySelector("#triage-list").innerHTML = queued("triage").map(row).join("");
-      function show(item) {
-        document.querySelectorAll(".item").forEach(element => element.classList.toggle("selected", element.dataset.id === item.id));
-        const facts = item.type === "pr" ? `<div class="fact"><p class="eyebrow">Change size</p><h3>${escape(item.size)}</h3><p>${item.closing ? `Closes <a href="${item.closing.url}" target="_blank" rel="noreferrer">${escape(item.closing.label)} ↗</a>.` : "No closing issue linked."}</p></div>` : item.dependency ? `<div class="fact"><p class="eyebrow">Dependency status</p><p>${escape(item.dependency.text)}</p></div>` : "";
-        const closingAction = item.closing ? `<a class="action secondary" href="${item.closing.url}" target="_blank" rel="noreferrer">Open closing issue ↗</a>` : "";
-        document.querySelector("#detail").innerHTML = `<p class="detail-kind">${item.type === "pr" ? "Pull request" : "Issue"}</p><p class="detail-repo">${escape(item.repo)} · ${item.type === "pr" ? "PR" : "#"}${item.number}</p><h2 class="detail-title">${escape(item.title)}</h2><p class="detail-meta">${escape(item.age)}</p><div class="actions"><a class="action" href="${item.url}" target="_blank" rel="noreferrer">Open on GitHub ↗</a>${closingAction}<button class="action secondary" data-body>Quick read</button><button class="quiet" data-refresh>Refresh this item</button></div><p class="refreshed" data-refresh-status></p>${facts}<div class="fact"><p class="eyebrow">Body</p><p class="body">${escape(item.body)}</p></div>`;
-        document.querySelector("[data-body]").addEventListener("click", () => { const body = document.querySelector(".body"); body.classList.toggle("open"); document.querySelector("[data-body]").textContent = body.classList.contains("open") ? "Hide body" : "Quick read"; });
-        document.querySelector("[data-refresh]").addEventListener("click", () => { document.querySelector("[data-refresh-status]").textContent = "This item was refreshed just now."; });
+      function quickView(){
+        const pr=pullRequests.find((candidate)=>candidate.number===state.selectedPr);
+        if(!previewAvailable())return `<div class="quick-read-inner"><p class="eyebrow">Quick read</p><h2>${esc(pr.title)}</h2><p class="identity">${esc(pr.repository)} · PR${pr.number}</p><p class="summary">This pull request has no review plan in the prototype.</p></div>`;
+        return `<div class="quick-read-inner"><p class="eyebrow">Quick read</p><h2>${esc(githubPullRequest.title)}</h2><p class="identity">${githubPullRequest.repository} · PR${githubPullRequest.number} · ${githubPullRequest.updatedAt}</p><p class="summary">${esc(layerPreview.overview)}</p><div class="actions"><button class="button" data-expand type="button">Open review</button><a class="quiet" href="${githubPullRequest.url}" target="_blank" rel="noreferrer">Open on GitHub</a></div><div class="layer-peek"><p class="eyebrow">Review plan</p><ol>${layerPreview.sections.map((section,index)=>`<li><strong><span class="number">${index+1}</span>${esc(section.title)}</strong><p>${esc(section.summary)}</p></li>`).join("")}</ol></div><p class="muted" style="margin-top:1.25rem">Generated for ${short(layerPreview.generatedFor.headCommit)}. ${githubPullRequest.changedFiles} files, +${githubPullRequest.additions} −${githubPullRequest.deletions} in GitHub.</p></div>`;
       }
-      document.addEventListener("click", event => { const item = event.target.closest(".item"); if (item) show(items.find(value => value.id === item.dataset.id)); });
-      document.querySelectorAll(".nav button").forEach(button => button.addEventListener("click", () => { const view = button.dataset.view; document.querySelectorAll(".nav button").forEach(item => item.removeAttribute("aria-current")); button.setAttribute("aria-current","page"); document.querySelector(".content").classList.toggle("preview", view === "all"); document.querySelector("#title").textContent = views[view][0]; document.querySelector("#description").textContent = views[view][1]; ["pr","agent","human","triage"].forEach(type => document.querySelectorAll(`.section-${type}`).forEach(section => section.classList.toggle("hidden", !types[view].includes(type)))); }));
-      document.querySelector("[data-sync]").addEventListener("click", () => { document.querySelector("#sync-status").textContent = "Sampled just now"; });
-      document.querySelector(".search").addEventListener("input", event => { const value = event.target.value.trim().toLowerCase(); document.querySelectorAll(".item").forEach(element => { const item = items.find(candidate => candidate.id === element.dataset.id); element.classList.toggle("hidden", Boolean(value) && !`${item.repo} ${item.number} ${item.title} ${item.tag || ""}`.toLowerCase().includes(value)); }); });
+      function layersView(){
+        const selected=selectedLayer(), index=layerPreview.sections.indexOf(selected);
+        return `<div class="layers"><ol class="outline">${layerPreview.sections.map((section,i)=>`<li><button aria-pressed="${section.id===selected.id}" data-layer="${section.id}" type="button"><span class="number">${i+1}</span><span><strong>${esc(section.title)}</strong><small>${section.files.length} files</small></span></button></li>`).join("")}</ol><article class="layer-detail"><p class="eyebrow">Section ${index+1}</p><h3>${esc(selected.title)}</h3><p>${esc(selected.summary)}</p><section><p class="eyebrow">Diff anchors</p><p class="path">${selected.anchors.map((anchor)=>`${esc(anchor.path)}:${anchor.startLine}–${anchor.endLine}`).join("<br>")}</p></section><section><p class="eyebrow">Files in this section</p>${files(selected.files)}</section><section><p class="eyebrow">Review cues</p><ul class="signals">${selected.signals.map((signal)=>`<li>${esc(signal)}</li>`).join("")}</ul></section>${selected.dependsOn.length?`<section><p class="eyebrow">Builds on</p><p>${selected.dependsOn.map((id)=>layerPreview.sections.find((section)=>section.id===id).title).map(esc).join(", ")}</p></section>`:""}</article></div>`;
+      }
+      function storyView(){return `<section class="story" aria-label="Review story">${layerPreview.sections.map((section,index)=>`<article class="story-card"><span class="number">${index+1}</span><div><h3>${esc(section.title)}</h3><p>${esc(section.summary)}</p><div class="story-files">${files(section.files)}</div></div></article>`).join("")}</section>`;}
+      function fileView(){return `<section class="file-groups" aria-label="Files grouped by review section">${layerPreview.sections.map((section,index)=>`<article class="file-group"><p class="eyebrow">Section ${index+1}</p><h3>${esc(section.title)}</h3><p class="muted">${esc(section.summary)}</p>${files(section.files)}</article>`).join("")}</section>`;}
+      function fileViewer(){
+        if(!state.selectedFilePath)return "";
+        const before=`export async function inviteMember(input) {\n  return saveInvitation(input);\n}`;
+        const after=`export async function inviteMember(input) {\n  const invitation = await saveInvitation(input);\n  await sendInvitationEmail(invitation);\n  return invitation;\n}`;
+        const content=state.fileMode==="before"?before:state.fileMode==="after"?after:`<span> export async function inviteMember(input) {</span>\n<span class="removed">-  return saveInvitation(input);</span>\n<span class="added">+  const invitation = await saveInvitation(input);</span>\n<span class="added">+  await sendInvitationEmail(invitation);</span>\n<span class="added">+  return invitation;</span>\n<span> }</span>`;
+        return `<section class="file-viewer" aria-label="File viewer"><header><div><p class="eyebrow">File</p><h3 class="path">${esc(state.selectedFilePath)}</h3></div><button class="quiet" data-close-file type="button">Close file</button></header><div class="file-tabs"><button aria-pressed="${state.fileMode==="diff"}" data-file-mode="diff" type="button">Diff</button><button aria-pressed="${state.fileMode==="before"}" data-file-mode="before" type="button">Before</button><button aria-pressed="${state.fileMode==="after"}" data-file-mode="after" type="button">After</button></div><pre class="code">${content}</pre></section>`;
+      }
+      function layerView(){
+        const stale=commit()!==layerPreview.generatedFor.headCommit, content=state.layout==="files"?fileView():storyView();
+        return `<div class="quick-read-inner"><header class="layer-header"><div><p class="eyebrow">Review plan</p><h2>${esc(githubPullRequest.title)}</h2><p class="identity">${githubPullRequest.repository} · PR${githubPullRequest.number} · ${githubPullRequest.changedFiles} files</p></div><div class="header-actions"><button class="quiet" data-close type="button">Back to list</button><a class="quiet" href="${githubPullRequest.url}" target="_blank" rel="noreferrer">Open on GitHub</a><button class="merge" data-merge type="button">Merge pull request</button></div></header><p class="stale" ${stale?"":"hidden"}><span>Preview may be stale.</span><span>GitHub now points to ${short(commit())}. This plan describes ${short(layerPreview.generatedFor.headCommit)}.</span></p>${content}${fileViewer()}<div class="actions"><button class="quiet" data-commit type="button">${state.hasNewCommit?"Use preview commit":"Simulate a newer GitHub commit"}</button></div><details open><summary>Prototype state and review JSON</summary><pre>${esc(JSON.stringify({githubPullRequest:{...githubPullRequest,headCommit:commit()},reviewPlan:layerPreview,ui:{layout:state.layout,selectedFilePath:state.selectedFilePath,fileMode:state.fileMode,previewStale:stale}},null,2))}</pre></details></div>`;
+      }
+      function bind(){ quickRead.querySelector("[data-expand]")?.addEventListener("click",()=>{state.expanded=true;render();}); quickRead.querySelector("[data-close]")?.addEventListener("click",()=>{state.expanded=false;render();}); quickRead.querySelector("[data-commit]")?.addEventListener("click",()=>{state.hasNewCommit=!state.hasNewCommit;render();}); quickRead.querySelector("[data-merge]")?.addEventListener("click",()=>{state.merged=true;state.selectedPr=479;state.expanded=false;state.notice="PR482 was merged in this prototype.";render();}); quickRead.querySelector("[data-close-file]")?.addEventListener("click",()=>{state.selectedFilePath=null;render();}); quickRead.querySelectorAll("[data-file]").forEach((button)=>button.addEventListener("click",()=>{state.selectedFilePath=button.dataset.file;state.fileMode="diff";render();})); quickRead.querySelectorAll("[data-file-mode]").forEach((button)=>button.addEventListener("click",()=>{state.fileMode=button.dataset.fileMode;render();})); }
+      function render(){ shell.dataset.expanded=String(state.expanded); syncUrl(); renderList(); quickRead.innerHTML=state.expanded&&previewAvailable()?layerView():quickView(); bind(); switcher.querySelectorAll("[data-layout]").forEach((button)=>{button.setAttribute("aria-pressed",String(button.dataset.layout===state.layout));button.onclick=()=>{state.layout=button.dataset.layout;render();};}); }
+      render();
     </script>
   </body>
 </html>
