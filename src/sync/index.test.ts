@@ -379,6 +379,80 @@ describe("bounded sampled sync", () => {
     }
   });
 
+  it("reconciles webhooks from a separate complete repository inventory inside the shared sync", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const calls: string[] = [];
+    const client: SyncClient & {
+      readOwnedRepositoryInventory(): Promise<{ account: { id: string; login: string }; fetchedAt: string; repositories: [] }>;
+    } = {
+      async readAccountSnapshot() { return accountSnapshot(); },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        calls.push("inventory");
+        return { account: { id: "U_inventory", login: "octo" }, fetchedAt: "2026-08-24T12:00:00.000Z", repositories: [] };
+      },
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    try {
+      const service = createSyncService({
+        cache,
+        client,
+        webhookProvisioner: {
+          async reconcile(inventory) {
+            calls.push(`provision:${inventory.account.id}`);
+            return { eligible: 0, created: 0, alreadyPresent: 0, failed: 0 };
+          },
+        },
+        logEvent: (event) => events.push(event),
+      });
+      await Promise.all([service.sync(), service.sync()]);
+
+      expect(calls).toEqual(["inventory", "provision:U_inventory"]);
+      expect(events).toContainEqual(expect.objectContaining({
+        event: "webhook.provisioning.finished",
+        status: "complete",
+        eligibleCount: 0,
+      }));
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("skips provisioning after an incomplete inventory and never puts inventory identities in logs", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const events: Array<Record<string, unknown>> = [];
+    const inventorySentinel = "repository-identity-SENTINEL";
+    const client: SyncClient = {
+      async readAccountSnapshot() { return accountSnapshot(); },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        return {
+          status: "unavailable" as const,
+          error: { code: "unavailable" as const, message: inventorySentinel },
+        };
+      },
+    };
+
+    try {
+      await createSyncService({
+        cache,
+        client,
+        webhookProvisioner: { async reconcile() { throw new Error("must not reconcile"); } },
+        logEvent: (event) => events.push(event),
+      }).sync();
+
+      expect(events).toContainEqual(expect.objectContaining({
+        event: "webhook.provisioning.finished",
+        status: "skipped",
+        errorCode: "inventory_unavailable",
+      }));
+      expect(JSON.stringify(events)).not.toContain(inventorySentinel);
+    } finally {
+      cache.close();
+    }
+  });
+
   async function createCachePath() {
     const directory = await mkdtemp(join(tmpdir(), "repo-control-sync-"));
     temporaryDirectories.push(directory);

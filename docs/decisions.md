@@ -5,12 +5,17 @@
 The name describes a personal place to inspect and eventually act on repository
 work. It does not imply that the project is made by or affiliated with GitHub.
 
-## Version one is personal-account-only and read-only
+## Version one is personal-account-only with one operator-consented mutation
 
 Version one reads only repositories owned by the authenticated personal
 account. Organization-owned repositories remain excluded even when the token
 can read them. It does not merge, edit, assign, comment, approve, or make any
-other GitHub mutation.
+user-directed GitHub mutation. When the operator configures the receiver secret
+and exact HTTPS callback URL, an explicit sync may create one missing receiver
+webhook per active non-fork owned repository. Configuration is the operator's
+consent; there is no UI control, confirmation dialog, or startup provisioning.
+Existing matching or unrelated hooks are never repaired, disabled, updated, or
+deleted. Callback and secret rotation are manual operations.
 
 ## Full lists come from reconciled cache generations
 
@@ -33,7 +38,7 @@ background.
 ## A fine-grained token stays outside application storage
 
 The first release uses a fine-grained personal access token with Metadata,
-Issues, and Pull requests read permissions. Piploy's daemon injects it from its
+Issues, Pull requests, and Webhooks read-and-write permissions. Piploy's daemon injects it from its
 host-managed environment; the server reads it but the browser, logs, and SQLite
 do not. A token is finite: expiry, revocation, and rotation are normal operator
 events.

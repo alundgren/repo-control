@@ -18,6 +18,8 @@ import {
   type GitHubRepository,
   type GitHubViewer,
   type GitHubWorkItem,
+  type OwnedRepository,
+  type OwnedRepositoryInventoryRead,
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
@@ -38,6 +40,13 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
     async readOwnedRepositoryCapabilities() {
       const data = await readGraphQL(fetch, token, "OwnedRepositoryCapabilities", REPOSITORIES_QUERY, {});
       return parseRepositoryPage(data.viewer).repositories;
+    },
+    async readOwnedRepositoryInventory(): Promise<OwnedRepositoryInventoryRead> {
+      try {
+        return await readOwnedRepositoryInventory(fetch, token);
+      } catch (error) {
+        return unavailableRead(error);
+      }
     },
     async readAccountSnapshot({ updatedSince } = { updatedSince: null }): Promise<AccountSnapshotRead> {
       try {
@@ -98,6 +107,17 @@ const REPOSITORIES_QUERY = `query OwnedRepositoryCapabilities {
         issues(first: 1) { totalCount }
         pullRequests(first: 1) { totalCount }
       }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`;
+
+const OWNED_REPOSITORY_INVENTORY_QUERY = `query OwnedRepositoryInventory($after: String) {
+  viewer {
+    id
+    login
+    repositories(first: ${RECONCILIATION_PAGE_SIZE}, affiliations: OWNER, after: $after) {
+      nodes { id nameWithOwner isFork isArchived }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -307,6 +327,35 @@ function unavailableRelationshipSubject(nodeId: string, type?: unknown): Relatio
 
 function hasCompleteExpectedRelationshipCoverage(subject: RelationshipEnrichmentSubject): boolean {
   return subject.coverage.blocker === "complete" || subject.coverage.closing_issue === "complete";
+}
+
+async function readOwnedRepositoryInventory(fetch: Fetch, token: string) {
+  let after: string | null = null;
+  let account: { id: string; login: string } | null = null;
+  const repositories: OwnedRepository[] = [];
+  do {
+    const data = await readWorkGraphQL(fetch, token, "OwnedRepositoryInventory", OWNED_REPOSITORY_INVENTORY_QUERY, { after });
+    if (!isObject(data.viewer) || !isString(data.viewer.id) || !isString(data.viewer.login)) {
+      throw new WorkReadFailure("invalid_response");
+    }
+    const nextAccount = { id: data.viewer.id, login: data.viewer.login };
+    if (account && (account.id !== nextAccount.id || account.login !== nextAccount.login)) {
+      throw new WorkReadFailure("invalid_response");
+    }
+    account = nextAccount;
+    const connection = parseConnection(data.viewer.repositories);
+    repositories.push(...connection.nodes.map(parseOwnedRepository));
+    after = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : null;
+  } while (after !== null);
+  if (!account) throw new WorkReadFailure("invalid_response");
+  return { account, fetchedAt: new Date().toISOString(), repositories };
+}
+
+function parseOwnedRepository(value: unknown): OwnedRepository {
+  if (!isObject(value) || !isString(value.id) || !isString(value.nameWithOwner) || typeof value.isFork !== "boolean" || typeof value.isArchived !== "boolean") {
+    throw new WorkReadFailure("invalid_response");
+  }
+  return { id: value.id, nameWithOwner: value.nameWithOwner, isFork: value.isFork, isArchived: value.isArchived };
 }
 
 async function readAccountSnapshot(
