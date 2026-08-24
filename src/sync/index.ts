@@ -72,7 +72,7 @@ export function createSyncService({
       const operation = () => runSync(cache, client, now);
       const promise = (coordinator ? coordinator.runSync(operation) : operation()).then(async (outcome) => {
         if (outcome.status !== "failed") {
-          await reconcileWebhookProvisioning(client, webhookProvisioner, logEvent);
+          await reconcileWebhookProvisioning(cache, client, webhookProvisioner, logEvent);
         }
         logSyncOutcome(outcome, Math.max(0, now() - startedAt), logEvent);
         if (outcome.status === "complete" && outcome.scope.reconciliation === "full" && outcome.scope.inventoryComplete === true) {
@@ -101,7 +101,7 @@ export function createSyncService({
   };
 }
 
-async function reconcileWebhookProvisioning(client: SyncClient, provisioner: WebhookProvisioner | undefined, logEvent: LogEventSink | undefined) {
+async function reconcileWebhookProvisioning(cache: Cache, client: SyncClient, provisioner: WebhookProvisioner | undefined, logEvent: LogEventSink | undefined) {
   if (!provisioner || !client.readOwnedRepositoryInventory) return;
   try {
     const inventory = await client.readOwnedRepositoryInventory();
@@ -110,6 +110,7 @@ async function reconcileWebhookProvisioning(client: SyncClient, provisioner: Web
       return;
     }
     const summary = await provisioner.reconcile(inventory);
+    if (summary.created > 0) cache.clearActiveGenerationLastFullReconciledAt();
     emitLogEvent(logEvent, {
       event: "webhook.provisioning.finished",
       level: summary.failed > 0 ? "warn" : "info",

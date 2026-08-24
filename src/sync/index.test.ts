@@ -264,6 +264,148 @@ describe("bounded sampled sync", () => {
     }
   });
 
+  it("forces another full reconciliation after provisioning a webhook, including after a partial catch-up", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const reads: Array<{ updatedSince: string | null } | undefined> = [];
+    let provisioningRuns = 0;
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    const client: SyncClient & {
+      readOwnedRepositoryInventory(): Promise<{ account: { id: string; login: string }; fetchedAt: string; repositories: [] }>;
+    } = {
+      async readAccountSnapshot(input) {
+        reads.push(input);
+        if (reads.length === 2) {
+          return accountSnapshot({
+            fetchedAt: "2026-08-23T09:05:00.000Z",
+            scope: {
+              ...accountSnapshot().scope,
+              inventoryComplete: false,
+              partialReasons: [{ kind: "search_result_limit", itemType: "issue" }],
+              status: "partial",
+            },
+          });
+        }
+        return accountSnapshot({ fetchedAt: fullAt });
+      },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        return { account: { id: "U_inventory", login: "octo" }, fetchedAt: fullAt, repositories: [] };
+      },
+    };
+
+    try {
+      const service = createSyncService({
+        cache,
+        client,
+        now: () => new Date("2026-08-23T10:00:00.000Z").getTime(),
+        webhookProvisioner: {
+          async reconcile() {
+            const created = provisioningRuns++ === 0 ? 1 : 0;
+            return { eligible: created, created, alreadyPresent: 0, failed: 0 };
+          },
+        },
+      });
+
+      await service.sync();
+      await service.sync();
+
+      expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBeNull();
+
+      await service.sync();
+
+      expect(reads).toEqual([{ updatedSince: null }, { updatedSince: null }, { updatedSince: null }]);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("keeps the reconciliation cursor when provisioning creates no webhook", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const reads: Array<{ updatedSince: string | null } | undefined> = [];
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    const client: SyncClient & {
+      readOwnedRepositoryInventory(): Promise<{ account: { id: string; login: string }; fetchedAt: string; repositories: [] }>;
+    } = {
+      async readAccountSnapshot(input) {
+        reads.push(input);
+        return reads.length === 1
+          ? accountSnapshot({ fetchedAt: fullAt })
+          : accountSnapshot({
+            fetchedAt: "2026-08-23T09:05:00.000Z",
+            scope: { ...accountSnapshot().scope, reconciliation: "incremental", lastFullReconciliationAt: fullAt },
+          });
+      },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        return { account: { id: "U_inventory", login: "octo" }, fetchedAt: fullAt, repositories: [] };
+      },
+    };
+
+    try {
+      const service = createSyncService({
+        cache,
+        client,
+        now: () => new Date("2026-08-23T10:00:00.000Z").getTime(),
+        webhookProvisioner: { async reconcile() { return { eligible: 0, created: 0, alreadyPresent: 0, failed: 0 }; } },
+      });
+
+      await service.sync();
+      await service.sync();
+
+      expect(reads).toEqual([{ updatedSince: null }, { updatedSince: fullAt }]);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("forces the next sync full when provisioning creates a webhook during an incremental sync", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const reads: Array<{ updatedSince: string | null } | undefined> = [];
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    const client: SyncClient & {
+      readOwnedRepositoryInventory(): Promise<{ account: { id: string; login: string }; fetchedAt: string; repositories: [] }>;
+    } = {
+      async readAccountSnapshot(input) {
+        reads.push(input);
+        return reads.length === 1
+          ? accountSnapshot({ fetchedAt: fullAt })
+          : accountSnapshot({
+            fetchedAt: "2026-08-23T09:05:00.000Z",
+            scope: reads.length === 2
+              ? { ...accountSnapshot().scope, reconciliation: "incremental", lastFullReconciliationAt: fullAt }
+              : accountSnapshot().scope,
+          });
+      },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        return { account: { id: "U_inventory", login: "octo" }, fetchedAt: fullAt, repositories: [] };
+      },
+    };
+    let provisioningRuns = 0;
+
+    try {
+      const service = createSyncService({
+        cache,
+        client,
+        now: () => new Date("2026-08-23T10:00:00.000Z").getTime(),
+        webhookProvisioner: {
+          async reconcile() {
+            const created = provisioningRuns++ === 1 ? 1 : 0;
+            return { eligible: created, created, alreadyPresent: 0, failed: 0 };
+          },
+        },
+      });
+
+      await service.sync();
+      await service.sync();
+      await service.sync();
+
+      expect(reads).toEqual([{ updatedSince: null }, { updatedSince: fullAt }, { updatedSince: null }]);
+    } finally {
+      cache.close();
+    }
+  });
+
   it("runs another full reconciliation at the 24-hour boundary", async () => {
     const cache = openCache({ path: await createCachePath() });
     const fullAt = "2026-08-23T09:00:00.000Z";
@@ -448,6 +590,32 @@ describe("bounded sampled sync", () => {
         errorCode: "inventory_unavailable",
       }));
       expect(JSON.stringify(events)).not.toContain(inventorySentinel);
+      expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBe("2026-08-23T09:00:00.000Z");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("keeps the reconciliation cursor when webhook provisioning fails", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const client: SyncClient & {
+      readOwnedRepositoryInventory(): Promise<{ account: { id: string; login: string }; fetchedAt: string; repositories: [] }>;
+    } = {
+      async readAccountSnapshot() { return accountSnapshot(); },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readOwnedRepositoryInventory() {
+        return { account: { id: "U_inventory", login: "octo" }, fetchedAt: "2026-08-23T09:00:00.000Z", repositories: [] };
+      },
+    };
+
+    try {
+      await createSyncService({
+        cache,
+        client,
+        webhookProvisioner: { async reconcile() { throw new Error("provisioning failed"); } },
+      }).sync();
+
+      expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBe("2026-08-23T09:00:00.000Z");
     } finally {
       cache.close();
     }
