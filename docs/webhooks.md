@@ -16,6 +16,30 @@ If the variable is missing, the server does not register the webhook route.
 Manual sync, focused refresh, cached reads, and the private UI remain
 available.
 
+## Automatic receiver provisioning
+
+Provisioning is opt-in. In addition to the receiver secret, set an absolute
+HTTPS callback URL with exactly the `/webhooks/github` path and no credentials,
+query string, or fragment:
+
+```sh
+REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL='https://hooks.example.com/webhooks/github'
+```
+
+On each explicit account sync, Repo Control fully inventories personal-account
+repositories, then considers only active, non-fork repositories without a
+terminal provisioning result. It pages their hooks looking only for an exact
+callback URL. An exact match is left entirely untouched and recorded as
+`already_present`; when absent, Repo Control creates one active JSON webhook
+for the `issues` and `pull_request` events and records `created`.
+
+Repo Control never updates, disables, deletes, repairs, or rotates a webhook,
+even when an existing matching hook is inactive, has the wrong events, or uses
+an old secret. Change the callback or secret manually in GitHub, then remove or
+manage the affected webhook there. A failed hook read or creation records no
+terminal result, so the next successful explicit sync retries safely. The PAT
+needs **Webhooks: Read and write** in addition to the read permissions.
+
 The webhook route acknowledges a valid new or duplicate delivery with `202`
 only after its SQLite ledger transaction commits. A worker then claims pending
 rows, refreshes cached items, and upserts opened, reopened, or transferred-in

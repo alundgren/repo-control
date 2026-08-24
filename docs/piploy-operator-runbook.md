@@ -36,7 +36,9 @@ must be the whole value. Keep every non-secret key visible during review.
     "DATA_DIRECTORY": "/var/lib/repo-control",
     "REPO_CONTROL_GITHUB_TOKEN": "${hostEnv:REPO_CONTROL_GITHUB_TOKEN}",
     "REPO_CONTROL_GITHUB_OWNER": "account-login",
-    "REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT": "2030-01-01T00:00:00.000Z"
+    "REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT": "2030-01-01T00:00:00.000Z",
+    "REPO_CONTROL_GITHUB_WEBHOOK_SECRET": "${hostEnv:REPO_CONTROL_GITHUB_WEBHOOK_SECRET}",
+    "REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL": "https://hooks.example.com/webhooks/github"
   }
 }
 ```
@@ -52,7 +54,7 @@ Reviewing this payload does not approve `register` or `poll`.
 
 Create a fine-grained personal access token for the personal account. Select
 all repositories under that account and grant read-only Metadata, Issues, and
-Pull requests access. Put its value in the Piploy daemon environment as
+Pull requests access plus Webhooks: Read and write. Put its value in the Piploy daemon environment as
 `REPO_CONTROL_GITHUB_TOKEN`. Set the owner and the token's actual GitHub
 expiry as a future UTC ISO 8601 value in the other two variables shown above.
 
@@ -126,6 +128,19 @@ Repo Control writes logs only to stdout. Piploy and Docker own the retention
 and storage of that output, so verify the host's container log rotation and
 disk alerting before release. The application does not rotate or persist its
 own logs.
+
+## Webhook provisioning and rotation
+
+Set `REPO_CONTROL_GITHUB_WEBHOOK_SECRET` in the host environment and use an
+exact public HTTPS `REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL` ending in
+`/webhooks/github`. Supplying both opts into automatic provisioning during
+explicit account sync; no browser control or startup action exists.
+
+The application only creates missing hooks and never repairs existing hooks.
+For a callback or secret rotation, update the receiver/tunnel and GitHub hooks
+manually, then update the host environment and recreate the container. Verify
+deliveries before removing the old hook. The provisioning ledger intentionally
+does not automate this sequence.
 
 ## Verify the local artifact
 

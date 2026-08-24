@@ -20,9 +20,25 @@ export type RepositoryCapability = {
   pullRequests: { totalCount: number };
 };
 
+export type OwnedRepositoryInventory = {
+  account: { id: string; login: string };
+  fetchedAt: string;
+  repositories: OwnedRepository[];
+};
+
+export type OwnedRepository = {
+  id: string;
+  nameWithOwner: string;
+  isFork: boolean;
+  isArchived: boolean;
+};
+
+export type OwnedRepositoryInventoryRead = OwnedRepositoryInventory | UnavailableRead;
+
 export type GitHubReadClient = {
   getViewer(): Promise<GitHubViewer>;
   readOwnedRepositoryCapabilities(): Promise<RepositoryCapability[]>;
+  readOwnedRepositoryInventory?(): Promise<OwnedRepositoryInventoryRead>;
   readAccountSnapshot(input?: { updatedSince: string | null }): Promise<AccountSnapshotRead>;
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;

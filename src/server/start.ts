@@ -5,6 +5,7 @@ import { openCache } from "../cache/index.js";
 import { createReconciliationCoordinator } from "../coordination/index.js";
 import { createChangeEventHub } from "../events/index.js";
 import { createGitHubReadClient } from "../github/client.js";
+import { createGitHubWebhookClient } from "../github/webhook-client.js";
 import {
   ConnectionValidationError,
   readConnectionConfiguration,
@@ -15,6 +16,8 @@ import { createItemRefreshService } from "../refresh/index.js";
 import { createSyncService } from "../sync/index.js";
 import { createWebhookService } from "../webhook/index.js";
 import { openDeliveryStore } from "../webhook/store.js";
+import { createWebhookProvisioner, readWebhookProvisioningConfiguration } from "../webhook/provisioning.js";
+import { openWebhookProvisioningStore } from "../webhook/provisioning-store.js";
 import type { FastifyBaseLogger } from "fastify";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import { createApp } from "./app.js";
@@ -46,6 +49,17 @@ export async function startServer({
   const cache = openCache({ path: join(dataDirectory, "repo-control.sqlite") });
   const client = createGitHubReadClient(configuration.token);
   const deliveryStore = openDeliveryStore({ path: join(dataDirectory, "repo-control.sqlite") });
+  const webhookProvisioningConfiguration = readWebhookProvisioningConfiguration(environment);
+  const webhookProvisioningStore = webhookProvisioningConfiguration
+    ? openWebhookProvisioningStore({ path: join(dataDirectory, "repo-control.sqlite") })
+    : null;
+  const webhookProvisioner = webhookProvisioningConfiguration && webhookProvisioningStore
+    ? createWebhookProvisioner({
+        store: webhookProvisioningStore,
+        client: createGitHubWebhookClient(configuration.token),
+        configuration: webhookProvisioningConfiguration,
+      })
+    : undefined;
   const coordinator = createReconciliationCoordinator();
   const eventHub = createChangeEventHub();
   const syncService = createSyncService({
@@ -53,6 +67,7 @@ export async function startServer({
     client,
     coordinator,
     onComplete: () => deliveryStore.resolveManualReconciliation(new Date().toISOString()),
+    webhookProvisioner,
     logEvent,
   });
   const refreshService = createItemRefreshService({ cache, client, coordinator, onChange: eventHub.publish, logEvent });
@@ -71,6 +86,7 @@ export async function startServer({
     app.addHook("onClose", async () => {
       if (webhookService) await webhookService.stop();
       deliveryStore.close();
+      webhookProvisioningStore?.close();
       cache.close();
     });
     await app.listen({ host, port, listenTextResolver: () => "Server listening" });
@@ -86,6 +102,7 @@ export async function startServer({
   } catch (error) {
     if (webhookService) await webhookService.stop();
     deliveryStore.close();
+    webhookProvisioningStore?.close();
     cache.close();
     throw error;
   }

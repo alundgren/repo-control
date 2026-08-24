@@ -20,13 +20,15 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 
 | Module | Responsibility |
 | --- | --- |
-| GitHub client | Paginates account-scoped searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. |
-| Snapshot service (`src/sync`) | Reconciles the open account inventory, records the last complete reconciliation, and uses an overlapping update-time read between full reconciliations. |
+| GitHub read client | Paginates account-scoped searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. |
+| GitHub webhook client | Separately pages repository hooks and creates one configured receiver hook. It never updates, disables, or deletes a hook. |
+| Snapshot service (`src/sync`) | Reconciles the open account inventory, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
+| Webhook provisioning | Atomically replaces the complete owned-repository inventory, then records only `created` or `already_present` terminal outcomes per account and repository. |
 | Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
 | Web UI | Renders queues and item detail. It does not derive readiness from issue text. |
 
@@ -54,6 +56,12 @@ repositories in scope, and refresh outcome. Do not persist a GitHub token in
 this model. Organization-owned repositories are excluded even when the token
 could see them.
 
+The provisioning inventory is separate from the view-serving snapshot: it holds
+each owned repository's node ID, current name, fork state, archived state, and
+observation time. A terminal provisioning ledger is keyed by account and
+repository node IDs. It stores no callback URL, receiver secret, token, or
+GitHub response body.
+
 ## Data flow
 
 1. An initial sync paginates two account-scoped searches: all open issues and
@@ -76,6 +84,14 @@ could see them.
 7. A successful item write or removal publishes one item-scoped change. The SSE
    route sends it to connected browsers without making cache reads or manual
    sync depend on stream delivery.
+8. When the operator has supplied both a receiver secret and a validated exact
+   HTTPS callback URL, the same explicit sync fully pages the owned repository
+   inventory and commits it atomically. Only then it serially checks each
+   eligible repository without a terminal ledger outcome. An exact existing
+   callback records `already_present`; otherwise it creates an active JSON hook
+   for only issues and pull requests, then records `created`. A list or create
+   failure records no terminal result, so a later explicit sync retries. No
+   hook is ever repaired or removed.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
@@ -115,7 +131,7 @@ longer qualifies.
 
 Production uses a fine-grained personal access token for **All repositories**
 under the personal account, with **Metadata**, **Issues**, and **Pull requests**
-read-only permissions. Piploy's host-managed environment injects
+read-only permissions plus **Webhooks: Read and write**. Piploy's host-managed environment injects
 `REPO_CONTROL_GITHUB_TOKEN`, `REPO_CONTROL_GITHUB_OWNER`, and
 `REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` when starting the application. Startup
 validates the PAT format and future expiry locally, then reads the authenticated

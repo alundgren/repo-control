@@ -12,7 +12,9 @@ three questions without opening several GitHub tabs:
 
 ## Version one
 
-Version one is read-only.
+Version one reads GitHub work data. It also has one operator-consented
+infrastructure mutation: during an explicit account sync it can create the
+receiver webhook that is missing from an eligible personal repository.
 
 - Show open pull requests, with rough size, a bounded in-place textual body
   excerpt, and a link back to GitHub.
@@ -33,7 +35,7 @@ Version one is read-only.
 
 ## Not in version one
 
-- Merge, edit, assign, comment, approve, or any other GitHub mutation.
+- Merge, edit, assign, comment, approve, or any user-directed GitHub mutation.
 - AI summaries, agent dispatch, or a local model integration.
 - Epic-specific navigation or project management views.
 - Notifications, background polling, or multi-user collaboration.
@@ -61,6 +63,13 @@ A focused refresh fetches one selected pull request or issue after the person
 knows something changed on GitHub, such as merging a pull request or assigning
 an issue. It updates that item and the relationship facts shown with it. It
 does not force an account-wide sync.
+
+When both the receiver secret and a validated public receiver URL are set, an
+explicit account sync also inventories the personal account's repositories and
+creates a missing receiver webhook for each active, non-fork repository. This
+is repeat-safe and needs no browser control or startup task. Repo Control never
+repairs, disables, deletes, rotates, or otherwise changes an existing webhook;
+those remain manual operator work.
 
 ## Later direction
 

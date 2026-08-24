@@ -7,6 +7,7 @@ export type LogEvent = {
     | "startup.finished"
     | "startup.failed"
     | "sync.finished"
+    | "webhook.provisioning.finished"
     | "refresh.finished"
     | "webhook.delivery.finished"
     | "webhook.worker.failed";
@@ -67,6 +68,7 @@ const EVENT_FIELDS: Record<LogEvent["event"], readonly string[]> = {
     "status", "durationMs", "reconciliation", "inventoryComplete", "repositoryCount", "itemCount",
     "truncatedReason", "generationId", "errorCode", "hasActiveSnapshot", "rateLimitCost", "rateLimitRemaining", "rateLimitResetAt",
   ],
+  "webhook.provisioning.finished": ["status", "eligibleCount", "createdCount", "alreadyPresentCount", "failedCount", "errorCode"],
   "refresh.finished": [
     "status", "mode", "durationMs", "itemType", "relationshipStatus", "removalReason", "errorCode",
     "rateLimitCost", "rateLimitRemaining", "rateLimitResetAt",

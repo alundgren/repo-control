@@ -12,10 +12,11 @@ import type {
 } from "../github/read-client.js";
 import { RECONCILIATION_PAGE_SIZE, RELATIONSHIP_SUBJECT_LIMIT, SEARCH_RESULT_LIMIT } from "../github/read-client.js";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
+import type { WebhookProvisioner } from "../webhook/provisioning.js";
 
 export const FULL_RECONCILIATION_INTERVAL_HOURS = 24;
 
-export type SyncClient = Pick<GitHubReadClient, "readAccountSnapshot" | "readRelationshipEnrichment">;
+export type SyncClient = Pick<GitHubReadClient, "readAccountSnapshot" | "readRelationshipEnrichment" | "readOwnedRepositoryInventory">;
 
 export type SyncOutcome = SyncSuccess | SyncFailure;
 
@@ -49,6 +50,7 @@ export function createSyncService({
   now = Date.now,
   coordinator,
   onComplete,
+  webhookProvisioner,
   logEvent,
 }: {
   cache: Cache;
@@ -56,6 +58,7 @@ export function createSyncService({
   now?: () => number;
   coordinator?: ReconciliationCoordinator;
   onComplete?: () => void;
+  webhookProvisioner?: WebhookProvisioner;
   logEvent?: LogEventSink;
 }): SyncService {
   let inFlight: Promise<SyncOutcome> | null = null;
@@ -67,7 +70,10 @@ export function createSyncService({
       }
       const startedAt = now();
       const operation = () => runSync(cache, client, now);
-      const promise = (coordinator ? coordinator.runSync(operation) : operation()).then((outcome) => {
+      const promise = (coordinator ? coordinator.runSync(operation) : operation()).then(async (outcome) => {
+        if (outcome.status !== "failed") {
+          await reconcileWebhookProvisioning(client, webhookProvisioner, logEvent);
+        }
         logSyncOutcome(outcome, Math.max(0, now() - startedAt), logEvent);
         if (outcome.status === "complete" && outcome.scope.reconciliation === "full" && outcome.scope.inventoryComplete === true) {
           try {
@@ -93,6 +99,30 @@ export function createSyncService({
       return promise;
     },
   };
+}
+
+async function reconcileWebhookProvisioning(client: SyncClient, provisioner: WebhookProvisioner | undefined, logEvent: LogEventSink | undefined) {
+  if (!provisioner || !client.readOwnedRepositoryInventory) return;
+  try {
+    const inventory = await client.readOwnedRepositoryInventory();
+    if ("status" in inventory) {
+      emitLogEvent(logEvent, { event: "webhook.provisioning.finished", level: "warn", status: "skipped", errorCode: "inventory_unavailable" });
+      return;
+    }
+    const summary = await provisioner.reconcile(inventory);
+    emitLogEvent(logEvent, {
+      event: "webhook.provisioning.finished",
+      level: summary.failed > 0 ? "warn" : "info",
+      status: "complete",
+      eligibleCount: summary.eligible,
+      createdCount: summary.created,
+      alreadyPresentCount: summary.alreadyPresent,
+      failedCount: summary.failed,
+      errorCode: summary.failed > 0 ? "repository_provisioning_failed" : undefined,
+    });
+  } catch {
+    emitLogEvent(logEvent, { event: "webhook.provisioning.finished", level: "warn", status: "skipped", errorCode: "provisioning_failed" });
+  }
 }
 
 function logSyncOutcome(outcome: SyncOutcome, durationMs: number, logEvent?: LogEventSink) {

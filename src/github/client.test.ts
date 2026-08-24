@@ -54,6 +54,40 @@ describe("GitHub read client", () => {
       message: expect.not.stringContaining(token),
     });
   });
+
+  it("paginates a separate owned repository inventory with fork and archive state", async () => {
+    const afterValues: Array<string | null | undefined> = [];
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_url, init) => {
+      const body = JSON.parse(String(init.body)) as { operationName: string; variables: { after?: string | null } };
+      afterValues.push(body.variables.after);
+      return response({
+        data: {
+          viewer: {
+            id: "U_1",
+            login: "octo",
+            repositories: body.variables.after === undefined || body.variables.after === null
+              ? {
+                  nodes: [{ id: "R_1", nameWithOwner: "octo/active", isFork: false, isArchived: false }],
+                  pageInfo: { hasNextPage: true, endCursor: "next-page" },
+                }
+              : {
+                  nodes: [{ id: "R_2", nameWithOwner: "octo/archive", isFork: false, isArchived: true }],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+          },
+        },
+      });
+    });
+
+    await expect(client.readOwnedRepositoryInventory?.()).resolves.toMatchObject({
+      account: { id: "U_1", login: "octo" },
+      repositories: [
+        { id: "R_1", isFork: false, isArchived: false },
+        { id: "R_2", isFork: false, isArchived: true },
+      ],
+    });
+    expect(afterValues).toEqual([null, "next-page"]);
+  });
 });
 
 function response(body: unknown) {
