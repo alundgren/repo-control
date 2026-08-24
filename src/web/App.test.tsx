@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,6 +12,7 @@ describe("work queue overview", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("shows the reconciled Now view with complete queue counts", async () => {
@@ -90,7 +91,7 @@ describe("work queue overview", () => {
     expect(screen.getByText("Review fictional moss")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Now 6" }));
-    const search = screen.getByRole("searchbox", { name: "Search loaded work" });
+    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
 
     await user.type(search, "paths tidy");
     expect(screen.getByText("Keep fictional paths tidy")).toBeTruthy();
@@ -282,21 +283,31 @@ describe("work queue overview", () => {
     ]);
   });
 
-  it("removes a focused item when its refresh reports it is no longer loaded", async () => {
-    const user = userEvent.setup();
+  it("removes a focused item and clears its notice after the focus move", async () => {
+    vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response({ status: "not_found" })));
 
     render(<App />);
 
-    await screen.findByText("Add a fictional seed");
-    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
-    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
-    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Add a fictional seed")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh this item" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    expect(await screen.findByText("This item is no longer in the loaded work.")).toBeTruthy();
+    expect(screen.getByText("This item is no longer in the loaded work.")).toBeTruthy();
     expect(screen.queryByText("Add a fictional seed")).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.queryByText("This item is no longer in the loaded work.")).toBeNull();
   });
 
   it("applies live updates to the selected item and announces a normal close", async () => {
@@ -337,7 +348,7 @@ describe("work queue overview", () => {
     expect(await screen.findByText("Issue #23 was closed on GitHub and removed from the loaded work.")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
-    await user.type(screen.getByRole("searchbox", { name: "Search loaded work" }), "seed");
+    await user.type(screen.getByRole("searchbox", { name: "Filter pull requests and issues" }), "seed");
     TestEventSource.last?.emit({ type: "updated", item: issue({ id: "I_1", number: 22, title: "A renamed item" }) });
     expect(await screen.findByText("Item refreshed and no longer matches this search.")).toBeTruthy();
   });

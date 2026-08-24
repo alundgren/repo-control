@@ -39,6 +39,7 @@ const views: Record<View, ViewDetails> = {
 const mainViews: View[] = ["now", "pullRequests"];
 const issueViews: View[] = ["agent", "human", "triage"];
 const previewLimit = 2;
+const itemMessageDuration = 5_000;
 
 export function App() {
   const [overview, setOverview] = useState<Extract<OverviewResponse, { status: "ready" }> | null>(null);
@@ -103,6 +104,12 @@ export function App() {
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+
+  useEffect(() => {
+    if (!itemMessage) return;
+    const timeout = window.setTimeout(() => setItemMessage(""), itemMessageDuration);
+    return () => window.clearTimeout(timeout);
+  }, [itemMessage]);
 
   async function loadOverview() {
     setLoading(true);
@@ -363,14 +370,14 @@ export function App() {
 
           {overview ? (
             <>
-              <label className="visuallyHidden" htmlFor="work-search">Search loaded work</label>
+              <label className="visuallyHidden" htmlFor="work-search">Filter pull requests and issues</label>
               <input
                 id="work-search"
                 onChange={(event) => {
                   queryRef.current = event.target.value;
                   setQuery(event.target.value);
                 }}
-                placeholder="Search loaded work"
+                placeholder="Filter pull requests and issues"
                 type="search"
                 value={query}
               />
