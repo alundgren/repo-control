@@ -46,8 +46,10 @@ update one item without rebuilding every list.
 
 Store instance configuration separately from GitHub facts and cache generations.
 It contains the label-to-queue mapping, default queue for absent or unknown
-labels. A default mapping may use `ready-for-agent`,
-`ready-for-human`; every installation can change or remove those labels. The
+labels. A new installation is seeded with `ready-for-agent` to `agent` and
+`ready-for-human` to `human`, defaulting to `triage`; every installation can
+change or remove those labels, and the seed never overwrites a mapping that is
+already configured. The
 workflow classifier applies this configuration on the server, so the browser
 receives a queue rather than inventing one.
 

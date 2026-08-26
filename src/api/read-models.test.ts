@@ -96,7 +96,11 @@ describe("api read models", () => {
           throw new Error("expected a ready overview");
         }
 
-        expect(overview.queues).toEqual([{ name: "triage", issues: [] }]);
+        expect(overview.queues).toEqual([
+          { name: "agent", issues: [] },
+          { name: "human", issues: [] },
+          { name: "triage", issues: [] },
+        ]);
         expect(overview.pullRequests).toEqual([
           {
             id: "PR_1",

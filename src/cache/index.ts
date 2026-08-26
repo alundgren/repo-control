@@ -748,6 +748,14 @@ type ItemRow = {
   deletions: number | null;
 };
 
+const DEFAULT_QUEUE_MAPPING: QueueMapping = {
+  defaultQueue: "triage",
+  labels: [
+    { label: "ready-for-agent", queue: "agent" },
+    { label: "ready-for-human", queue: "human" },
+  ],
+};
+
 function migrate(database: Database.Database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS cache_migrations (
@@ -894,5 +902,20 @@ function migrate(database: Database.Database) {
     addColumn("search_page_size", "search_page_size INTEGER NOT NULL DEFAULT 100");
     addColumn("search_result_limit", "search_result_limit INTEGER NOT NULL DEFAULT 1000");
     database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (3, ?)").run(new Date().toISOString());
+  })();
+  if ((applied.version ?? 0) < 4) database.transaction(() => {
+    const configured = database
+      .prepare("SELECT singleton FROM instance_configuration WHERE singleton = 1")
+      .get() as { singleton: number } | undefined;
+    if (!configured) {
+      database
+        .prepare("INSERT INTO instance_configuration (singleton, default_queue) VALUES (1, ?)")
+        .run(DEFAULT_QUEUE_MAPPING.defaultQueue);
+      const insert = database.prepare("INSERT INTO queue_label_mappings (label_name, queue) VALUES (?, ?)");
+      for (const mappingEntry of DEFAULT_QUEUE_MAPPING.labels) {
+        insert.run(mappingEntry.label, mappingEntry.queue);
+      }
+    }
+    database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (4, ?)").run(new Date().toISOString());
   })();
 }
