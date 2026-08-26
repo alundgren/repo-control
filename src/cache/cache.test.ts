@@ -33,7 +33,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 3,
+        schemaVersion: 4,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -44,7 +44,7 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(3);
+      expect(reopened.getStatus().schemaVersion).toBe(4);
     } finally {
       reopened.close();
     }
@@ -59,7 +59,7 @@ describe("local cache", () => {
 
     const versionOne = new Database(path);
     versionOne.exec(`
-      DELETE FROM cache_migrations WHERE version IN (2, 3);
+      DELETE FROM cache_migrations WHERE version IN (2, 3, 4);
       DROP TABLE related_item_summaries;
       ALTER TABLE items DROP COLUMN github_created_at;
       ALTER TABLE snapshot_generations DROP COLUMN reconciliation_kind;
@@ -72,7 +72,7 @@ describe("local cache", () => {
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(3);
+      expect(migrated.getStatus().schemaVersion).toBe(4);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained generation" }],
@@ -91,14 +91,14 @@ describe("local cache", () => {
 
     const versionTwo = new Database(path);
     versionTwo.exec(`
-      DELETE FROM cache_migrations WHERE version = 3;
+      DELETE FROM cache_migrations WHERE version IN (3, 4);
       DROP TABLE related_item_summaries;
     `);
     versionTwo.close();
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(3);
+      expect(migrated.getStatus().schemaVersion).toBe(4);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained reconciliation generation" }],
@@ -434,6 +434,22 @@ describe("local cache", () => {
       cache.close();
       cache = openCache({ path });
       expect(cache.getActiveSnapshot()?.scope.lastFullReconciliationAt).toBeNull();
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("starts a new installation on the documented default queue mapping", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      expect(cache.getQueueMapping()).toEqual({
+        defaultQueue: "triage",
+        labels: [
+          { label: "ready-for-agent", queue: "agent" },
+          { label: "ready-for-human", queue: "human" },
+        ],
+      });
     } finally {
       cache.close();
     }
