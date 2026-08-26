@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PR degradation experiment</title>
+    <style>
+      :root {
+        --bg:#F2EADE; --surface:#EADFCD; --raised:#E0D2BD; --line:#C1AF9A;
+        --field:#F9F6F0; --text:#604939; --muted:#66574D; --accent:#784F26;
+        --link:#3D5D71; --ok:#3D6034; --warn:#7E5220; --danger:#8F3A2D;
+        --sans: "IBM Plex Sans", Aptos, "Segoe UI", sans-serif;
+        --mono: "IBM Plex Mono", Consolas, monospace;
+      }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font:400 16px/1.55 var(--sans); }
+      button { font:inherit; color:inherit; }
+      button:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+      .shell { display:grid; grid-template-columns:17rem minmax(0, 1fr); min-height:100vh; }
+      .rail { padding:1.5rem 1rem; border-right:1px solid var(--line); }
+      .eyebrow { margin:0 0 .35rem; color:var(--muted); font:500 11px/1.4 var(--mono); letter-spacing:.07em; text-transform:uppercase; }
+      h1,h2,h3,p { margin-top:0; }
+      h1 { margin-bottom:.25rem; font-size:clamp(1.8rem, 4vw, 2.5rem); line-height:1.1; letter-spacing:-.015em; }
+      h2 { margin:0; font-size:1.1rem; line-height:1.25; }
+      h3 { margin:0; font-size:.95rem; }
+      .subtitle { margin:0; max-width:62ch; color:var(--muted); font-size:.845rem; }
+      .index { display:grid; gap:.25rem; margin-top:2rem; }
+      .pr-link { display:grid; grid-template-columns:3rem minmax(0,1fr); gap:.45rem; width:100%; padding:.6rem; border:0; border-radius:.5rem; background:transparent; cursor:pointer; text-align:left; }
+      .pr-link:hover,.pr-link[aria-current="page"] { background:var(--raised); }
+      .pr-link[aria-current="page"] { box-shadow:inset 3px 0 var(--link); }
+      .pr-number,.mono { font-family:var(--mono); }
+      .pr-number { color:var(--muted); font-size:.78rem; padding-top:.12rem; }
+      .pr-title { overflow:hidden; font-size:.84rem; font-weight:500; line-height:1.3; text-overflow:ellipsis; white-space:nowrap; }
+      .rail-note { margin:2rem .6rem 0; color:var(--muted); font-size:.76rem; }
+      main { min-width:0; padding:2rem clamp(1rem, 4vw, 3rem) 4rem; }
+      .topline { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:1rem; max-width:78rem; }
+      .state { color:var(--muted); font:500 11px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+      .pager { display:flex; gap:.5rem; margin:1.5rem 0; }
+      .pager button { padding:.45rem .65rem; border:1px solid var(--line); border-radius:.45rem; background:var(--field); color:var(--link); cursor:pointer; }
+      .pager button:disabled { color:var(--muted); cursor:default; opacity:.65; }
+      .summary { max-width:78rem; padding:1rem 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+      .summary-grid { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:1rem; }
+      .summary b { display:block; font-size:.83rem; }
+      .summary span { color:var(--muted); font-size:.76rem; }
+      .concern { max-width:78rem; margin:1.25rem 0 2rem; padding:.85rem 1rem; border-left:3px solid var(--warn); background:var(--surface); }
+      .concern strong { display:block; margin-bottom:.15rem; font-size:.87rem; }
+      .concern p { margin:0; max-width:76ch; font-size:.88rem; }
+      .variants { display:grid; gap:2.25rem; max-width:78rem; }
+      .variant { padding-top:.9rem; border-top:1px solid var(--line); }
+      .variant-head { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; margin-bottom:.8rem; }
+      .variant-head p { margin:0; color:var(--muted); font-size:.77rem; }
+      .clean { margin:0; color:var(--ok); font-size:.9rem; }
+      /* Graph variant */
+      .map { display:grid; grid-template-columns:1fr auto 1fr auto 1fr; gap:.5rem; align-items:center; min-height:6.5rem; }
+      .node { min-height:5.2rem; padding:.7rem; border:1px solid var(--line); border-radius:.55rem; background:var(--field); }
+      .node b { display:block; font-size:.83rem; }
+      .node small { display:block; margin-top:.25rem; color:var(--muted); font-size:.74rem; line-height:1.35; }
+      .arrow { color:var(--link); font:1.2rem var(--mono); }
+      .map-alert .node:last-child { border-color:var(--warn); background:var(--raised); }
+      /* Sequence variant */
+      .sequence { display:grid; grid-template-columns:7.25rem 1.4rem minmax(0,1fr); gap:0 .7rem; }
+      .sequence .who { grid-column:1; padding:.36rem 0; color:var(--muted); font:500 11px/1.4 var(--mono); letter-spacing:.05em; text-transform:uppercase; }
+      .sequence .line { grid-column:2; position:relative; border-left:1px solid var(--line); }
+      .sequence .line::before { content:""; position:absolute; left:-.27rem; top:.6rem; width:.45rem; height:.45rem; border-radius:50%; background:var(--link); }
+      .sequence .step { grid-column:3; padding:.24rem 0 .6rem; font-size:.86rem; }
+      .sequence .step small { color:var(--muted); }
+      .sequence .risk { color:var(--warn); }
+      /* Bullet variant */
+      .brief { margin:0; padding-left:1.2rem; }
+      .brief li { margin:.35rem 0; max-width:76ch; font-size:.88rem; }
+      .brief b { font-weight:600; }
+      /* Redline variant */
+      .redline { position:relative; padding:1rem 1rem .9rem; border:1px solid var(--line); background:var(--field); }
+      .docket { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+      .stamp { padding:.18rem .45rem; border:2px solid currentColor; border-radius:.2rem; color:var(--ok); font:600 11px/1 var(--mono); letter-spacing:.08em; transform:rotate(-2deg); }
+      .stamp.unproven { color:var(--warn); }
+      .day-clause { max-width:62ch; margin:.8rem 0; font-size:1.02rem; }
+      .amendment { margin:.55rem 0; padding:.55rem 0; border-top:1px dashed var(--line); font-size:.87rem; }
+      del { text-decoration-color:var(--danger); text-decoration-thickness:2px; }
+      ins { margin-left:.3rem; color:var(--ok); text-decoration:none; }
+      .rulings { display:flex; flex-wrap:wrap; gap:.55rem; margin-top:.9rem; }
+      .seal { padding:.35rem .45rem; border:1px solid var(--line); border-radius:.35rem; color:var(--muted); font:500 11px/1.35 var(--mono); }
+      .seal b { color:var(--text); }
+      .proof-strip { margin-top:.9rem; padding-top:.7rem; border-top:1px dashed var(--line); color:var(--muted); font-size:.75rem; }
+      .proof-strip code { display:block; overflow-wrap:anywhere; margin-top:.2rem; color:var(--link); font:12px/1.45 var(--mono); }
+      /* Proof-ticket variant */
+      .ticket { padding:1rem; border:1px solid var(--text); border-radius:.3rem; background:var(--field); }
+      .ticket-top { display:flex; justify-content:space-between; gap:1rem; }
+      .punch { font:600 11px/1.4 var(--mono); letter-spacing:.06em; }
+      .punch.ready { color:var(--ok); }.punch.partial,.punch.absent { color:var(--warn); }
+      .claim { margin:.5rem 0 .8rem; font-size:1rem; }
+      .ticket-row { display:grid; grid-template-columns:5.6rem minmax(0,1fr); gap:.5rem; padding:.38rem 0; border-top:1px solid var(--line); font-size:.83rem; }
+      .ticket-row b { color:var(--muted); font:500 11px/1.4 var(--mono); letter-spacing:.05em; }
+      .ticket-row code { overflow-wrap:anywhere; color:var(--link); font:11px/1.4 var(--mono); }
+      .inspection { margin-top:.75rem; color:var(--muted); font:11px/1.4 var(--mono); letter-spacing:.04em; }
+      .hold { margin-top:.75rem; padding-top:.6rem; border-top:2px dotted var(--line); color:var(--warn); font-size:.8rem; }
+      @media (max-width:780px) { .shell{display:block}.rail{border-right:0;border-bottom:1px solid var(--line)}.index{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:1rem}.rail-note{display:none}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.map{grid-template-columns:1fr;gap:.3rem}.arrow{transform:rotate(90deg);text-align:center}.node{min-height:auto}.sequence{grid-template-columns:5.9rem 1rem minmax(0,1fr)} }
+      @media (max-width:420px) { .index{grid-template-columns:1fr}.summary-grid{grid-template-columns:1fr}.ticket-row{grid-template-columns:1fr;gap:.1rem} }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail" aria-label="Pull request index">
+        <p class="eyebrow">Experiment</p>
+        <h2>Architectural drift</h2>
+        <p class="subtitle">Five bounded views of the same historical PR evidence.</p>
+        <nav class="index" id="index"></nav>
+        <p class="rail-note">Each review uses the PR's base revision and proposed diff. Later outcomes are excluded.</p>
+      </aside>
+      <main id="app"></main>
+    </div>
+    <script>
+      const prs = [
+        { n:52, state:"Merged", title:"Seed default queue mapping", size:"4 files · +54/−9", verdict:"NATIVE", fit:"aligned", pattern:"earns · seeded instance defaults", confidence:"high", claim:"A new installation gets the documented queue mapping without overwriting configuration.", graph:["Migration 4", "instance configuration", "workflow classifier"], sequence:[["New install","migration writes mapping"],["Cache","returns configured queues"],["Classifier","labels resolve to agent or human"]], proof:{state:"CHECKABLE", seam:"cache mapping", command:"corepack pnpm test:focused -- src/cache/cache.test.ts", oracle:"fresh cache has documented mapping"}, concern:"", amendment:""},
+        { n:49, state:"Open", title:"Layer prototype + idea", size:"4 files · +270/−162", verdict:"UNPROVEN", fit:"unknown", pattern:"unknown · PR-attached review plan", confidence:"medium", claim:"A posted JSON review plan groups current pull-request evidence and warns when its SHA is stale.", graph:["Implementation skill", "posted review-plan JSON", "Repo Control review UI"], sequence:[["Implementation skill","authors and posts a plan"],["Repo Control","reads GitHub data plus JSON"],["Reviewer","trusts grouping or sees stale warning"]], proof:{state:"ABSENT", seam:"prototype page", command:"No focused test or executable ingestion route", oracle:"staleness and plan-to-diff agreement are unproven"}, concern:"A second, author-supplied PR artifact becomes review guidance, but the proposal does not yet establish trustworthy creation, ownership, or an executable ingestion seam.", amendment:"<del>Posted plan supplies review structure.</del><ins>Derive or validate the plan through one inspectable analysis boundary.</ins>"},
+        { n:48, state:"Merged", title:"Full catch-up after webhook provisioning", size:"6 files · +220/−11", verdict:"NATIVE", fit:"aligned", pattern:"inherits · explicit reconciliation cursor", confidence:"high", claim:"Creating a webhook makes the next sync perform a full catch-up.", graph:["Webhook provisioner", "sync service", "active-generation cursor"], sequence:[["Provisioner","creates a repository hook"],["Sync service","clears full-reconciliation cursor"],["Next sync","uses full inventory read"]], proof:{state:"CHECKABLE", seam:"sync client input", command:"corepack pnpm test:focused -- src/sync/index.test.ts", oracle:"next read has updatedSince: null"}, concern:"", amendment:""},
+        { n:45, state:"Merged", title:"Provision missing repository webhooks", size:"17 files · +843/−12", verdict:"NATIVE", fit:"aligned", pattern:"earns · terminal provisioning ledger", confidence:"high", claim:"An opted-in sync creates only missing receiver hooks and records durable terminal outcomes.", graph:["sync service", "provisioner + ledger", "GitHub webhook client"], sequence:[["Explicit sync","pages owned repositories"],["Provisioner","checks ledger and existing hooks"],["GitHub client","creates only missing receiver hook"]], proof:{state:"PARTIAL", seam:"provisioning service", command:"corepack pnpm test:focused -- src/webhook/provisioning.test.ts", oracle:"fake client proves ledger and create decisions"}, concern:"Verification is strong at the service seam, but a safe non-production GitHub route for the external mutation is not supplied.", amendment:""},
+        { n:43, state:"Merged", title:"Fix Piploy Docker build context", size:"3 files · +68/−31", verdict:"NATIVE", fit:"aligned", pattern:"earns · deployment-path verifier", confidence:"high", claim:"The container verifier exercises the same Docker API context shape used by deployment.", graph:["tracked repository", "tar archive", "Docker API build"], sequence:[["Verifier","lists tracked clone files"],["Archive","sends tar to Docker socket"],["Docker Engine","builds exactly that context"]], proof:{state:"PARTIAL", seam:"Docker build API", command:"corepack pnpm verify:container", oracle:"API build and image-boundary checks pass"}, concern:"The proof is objective but needs a local Docker socket; an agent without that capability can inspect it, not execute it.", amendment:""},
+        { n:41, state:"Merged", title:"Include Dockerfile in build context", size:"3 files · +31/−13", verdict:"UNPROVEN", fit:"contained", pattern:"none", confidence:"medium", claim:"The deployment build can locate the Dockerfile after .dockerignore filtering.", graph:[".dockerignore", "Docker CLI proxy check", "Piploy API build"], sequence:[["Verifier","invokes docker build CLI"],["CLI","prepares context"],["Claim","API build can find Dockerfile"]], proof:{state:"PARTIAL", seam:"Docker CLI build", command:"corepack pnpm verify:container", oracle:"CLI context-check stage succeeds"}, concern:"The new proof invokes the Docker CLI while the failure is specifically in an API build path. The claim may be right, but the proof route is not the claimed route.", amendment:"<del>CLI context check stands in for deployment.</del><ins>Exercise the deployment-equivalent archive and Docker API build directly.</ins>"},
+        { n:40, state:"Merged", title:"Add stdout-only production observability", size:"18 files · +597/−29", verdict:"NATIVE", fit:"aligned", pattern:"earns · allow-listed operation events", confidence:"high", claim:"Operations emit safe, structured terminal events without changing application behavior.", graph:["operation services", "allow-listed event sink", "stdout logger"], sequence:[["Sync / refresh / webhook","emits terminal event"],["Event sink","selects safe fields"],["Pino stdout","writes one JSON record"]], proof:{state:"CHECKABLE", seam:"logger destination", command:"corepack pnpm test:focused -- src/observability/index.test.ts", oracle:"secret sentinel is absent from JSON output"}, concern:"", amendment:""},
+        { n:39, state:"Merged", title:"Keep navigation visible while queue scrolls", size:"1 file · +2/−2", verdict:"NATIVE", fit:"aligned", pattern:"none", confidence:"high", claim:"Navigation stays visible on desktop and returns to document flow on narrow screens.", graph:["desktop grid", "sticky navigation", "mobile media rule"], sequence:[["Desktop viewport","navigation becomes sticky"],["Long navigation","scrolls inside viewport"],["Narrow viewport","media rule restores normal flow"]], proof:{state:"ABSENT", seam:"rendered browser layout", command:"No automated browser or visual check is present", oracle:"clipping and breakpoint behavior require manual inspection"}, concern:"The change is a small, coherent CSS extension, but its central behavior is visual and no objective browser verification route accompanies it.", amendment:"<del>Manual browser check establishes layout behavior.</del><ins>Add a reproducible rendered-browser assertion for the breakpoint and overflow contract.</ins>"},
+        { n:38, state:"Merged", title:"Sync GitHub changes into live updates", size:"22 files · +1316/−91", verdict:"NATIVE", fit:"aligned", pattern:"earns · durable delivery to focused refresh", confidence:"high", claim:"Validated GitHub deliveries update the cache and send item-scoped browser events.", graph:["signed webhook", "delivery ledger + refresh", "SSE event hub"], sequence:[["GitHub delivery","is verified and recorded"],["Worker","does focused refresh or upsert"],["Event hub","publishes item-scoped change"]], proof:{state:"CHECKABLE", seam:"webhook HTTP + cache", command:"corepack pnpm test:focused -- src/webhook/index.test.ts", oracle:"signed delivery reaches refresh/upsert outcome"}, concern:"", amendment:""},
+        { n:36, state:"Merged", title:"Refine work queue feedback", size:"2 files · +31/−13", verdict:"NATIVE", fit:"aligned", pattern:"inherits · UI state cleanup", confidence:"high", claim:"A removed-item notice clears after five seconds and search wording is more precise.", graph:["focused refresh", "item message state", "cleanup effect"], sequence:[["Item refresh","removes selected item"],["UI","announces removal"],["Timer effect","clears message after five seconds"]], proof:{state:"CHECKABLE", seam:"rendered accessible text", command:"corepack pnpm test:focused -- src/web/App.test.tsx", oracle:"notice appears then disappears with fake timer"}, concern:"", amendment:""}
+      ];
+
+      const esc = (value) => String(value).replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+      const currentNumber = () => Number(location.hash.replace("#pr-", "")) || prs[0].n;
+      const current = () => prs.find((pr) => pr.n === currentNumber()) || prs[0];
+      const setPr = (n) => { location.hash = `pr-${n}`; };
+      function index() {
+        const selected = current().n;
+        document.querySelector("#index").innerHTML = prs.map((pr) => `<button class="pr-link" data-pr="${pr.n}" aria-current="${pr.n === selected ? "page" : "false"}"><span class="pr-number">#${pr.n}</span><span class="pr-title">${esc(pr.title)}</span></button>`).join("");
+        document.querySelectorAll("[data-pr]").forEach((button) => button.addEventListener("click", () => setPr(Number(button.dataset.pr))));
+      }
+      function graph(pr) {
+        return `<section class="variant"><div class="variant-head"><h2>1 · Architecture map</h2><p>Where the change sits</p></div><div class="map ${pr.concern ? "map-alert" : ""}">${pr.graph.map((node, i) => `<div class="node"><b>${esc(node)}</b><small>${i === 0 ? esc(pr.claim) : i === 1 ? `Fit: ${esc(pr.fit)}` : `Pattern: ${esc(pr.pattern)}`}</small></div>${i < 2 ? '<div class="arrow" aria-hidden="true">→</div>' : ''}`).join("")}</div></section>`;
+      }
+      function sequence(pr) {
+        return `<section class="variant"><div class="variant-head"><h2>2 · Behaviour sequence</h2><p>What must happen in order</p></div><div class="sequence">${pr.sequence.map(([who, step], i) => `<div class="who">${esc(who)}</div><div class="line"></div><div class="step ${pr.concern && i === 2 ? "risk" : ""}">${esc(step)}${i === 2 && pr.concern ? " · evidence is incomplete" : ""}</div>`).join("")}</div></section>`;
+      }
+      function bullets(pr) {
+        if (!pr.concern) return `<section class="variant"><div class="variant-head"><h2>3 · Compact brief</h2><p>Minimal review output</p></div><p class="clean">No material architectural, pattern, or agent-verifiability concern found. Confidence: ${esc(pr.confidence)}.</p></section>`;
+        return `<section class="variant"><div class="variant-head"><h2>3 · Compact brief</h2><p>Minimal review output</p></div><ul class="brief"><li><b>Day one:</b> ${esc(pr.verdict.toLowerCase())}.</li><li><b>Architecture:</b> ${esc(pr.fit)}; ${esc(pr.pattern)}.</li><li><b>Concern:</b> ${esc(pr.concern)}</li><li><b>Agent proof:</b> ${esc(pr.proof.state.toLowerCase())} — ${esc(pr.proof.oracle)}.</li></ul></section>`;
+      }
+      function redline(pr) {
+        return `<section class="variant"><div class="variant-head"><h2>4 · Day-One Redline</h2><p>Sol variant: amended design contract</p></div><article class="redline"><div class="docket"><span class="mono">PR #${pr.n}</span><strong class="stamp ${pr.verdict === "UNPROVEN" ? "unproven" : ""}">${esc(pr.verdict)}</strong></div><p class="day-clause">${esc(pr.claim)}</p>${pr.amendment ? `<p class="amendment">${pr.amendment}</p>` : ""}<div class="rulings"><span class="seal"><b>FIT</b> ${esc(pr.fit)}</span><span class="seal"><b>PATTERN</b> ${esc(pr.pattern)}</span></div><div class="proof-strip"><b>${esc(pr.proof.state)}</b> · ${esc(pr.proof.oracle)}<code>${esc(pr.proof.command)}</code></div></article></section>`;
+      }
+      function ticket(pr) {
+        const state = pr.proof.state === "CHECKABLE" ? "ready" : pr.proof.state.toLowerCase();
+        return `<section class="variant"><div class="variant-head"><h2>5 · Proof Ticket</h2><p>Sol variant: objective verification first</p></div><article class="ticket"><div class="ticket-top"><span class="mono">PR #${pr.n} · PROOF TICKET</span><strong class="punch ${state}">${esc(pr.proof.state)}</strong></div><p class="claim">“${esc(pr.claim)}”</p><div class="ticket-row"><b>OBSERVE</b><span>${esc(pr.proof.seam)}</span></div><div class="ticket-row"><b>RUN</b><code>${esc(pr.proof.command)}</code></div><div class="ticket-row"><b>ACCEPT</b><span>${esc(pr.proof.oracle)}</span></div><p class="inspection">DAY ONE · ${esc(pr.verdict)} &nbsp; ARCHITECTURE · ${esc(pr.fit).toUpperCase()} &nbsp; PRECEDENT · ${esc(pr.pattern).toUpperCase()}</p>${pr.concern ? `<p class="hold">HOLD: ${esc(pr.concern)}</p>` : ""}</article></section>`;
+      }
+      function render() {
+        const pr = current(); const at = prs.indexOf(pr);
+        document.querySelector("#app").innerHTML = `<div class="topline"><div><p class="eyebrow">Historical review · base revision only</p><h1>PR #${pr.n}: ${esc(pr.title)}</h1><p class="subtitle">Five prompt-and-presentation variants, constrained to the same evidence.</p></div><p class="state">${esc(pr.state)} · ${esc(pr.size)}</p></div><div class="pager"><button ${at === prs.length - 1 ? "disabled" : ""} data-nav="next">Newer</button><button ${at === 0 ? "disabled" : ""} data-nav="previous">Older</button></div><section class="summary"><div class="summary-grid"><div><b>${esc(pr.verdict)}</b><span>day-one verdict</span></div><div><b>${esc(pr.fit)}</b><span>architectural fit</span></div><div><b>${esc(pr.pattern)}</b><span>pattern effect</span></div><div><b>${esc(pr.proof.state)}</b><span>agent proof status</span></div></div></section>${pr.concern ? `<aside class="concern"><strong>Material uncertainty</strong><p>${esc(pr.concern)}</p></aside>` : ""}<div class="variants">${graph(pr)}${sequence(pr)}${bullets(pr)}${redline(pr)}${ticket(pr)}</div>`;
+        document.querySelector("[data-nav=next]")?.addEventListener("click", () => setPr(prs[at - 1].n));
+        document.querySelector("[data-nav=previous]")?.addEventListener("click", () => setPr(prs[at + 1].n));
+        index();
+      }
+      addEventListener("hashchange", render);
+      if (!location.hash) location.hash = `pr-${prs[0].n}`;
+      render();
+    </script>
+  </body>
+</html>

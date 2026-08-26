@@ -60,6 +60,10 @@ used.
   area carries the bounded excerpt, relationship links or their unavailable
   state, item freshness, and the focused refresh control. Status facts use
   the success, warning, and secondary text roles.
+- PR degradation experiment: a local, static dossier prototype. It is separate
+  from the application build and presents one historical pull request at a
+  time, with five intentionally distinct, bounded analysis views. Its index
+  is navigation; the page's job is comparison, not a new production workflow.
 
 ## Deviations
 
