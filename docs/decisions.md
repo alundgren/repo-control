@@ -55,10 +55,17 @@ payloads. Successful refreshes delete data that left the open scope or lost
 repository access; failed or partial refreshes do not. Later releases must
 explicitly archive or delete data that is no longer needed.
 
-## No epic view in version one
+## Epic context is metadata plus a separate view, not a queue
 
-Epic context may return later, but grouping it with triage made both jobs less
-clear. The first version keeps Triage to open work that needs sorting.
+Reversed: "No epic view in version one." With the configurable `epic` label
+(stored in instance configuration, default `epic`) and GitHub's native sub-issue
+graph, epic awareness landed without re-crowding triage. Epics are never
+classified into any queue, so Triage keeps only open work that needs sorting.
+
+The rule that replaced the old trade-off: nothing encodes "done". Visibility is
+GitHub's open/closed state alone — a closed epic disappears everywhere; the
+child fraction is inert display data the account owner interprets. Nested epics
+are tolerated as ordinary children rather than validated.
 
 ## Readiness means label plus dependencies
 
