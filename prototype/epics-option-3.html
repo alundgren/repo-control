@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Repo Control — epics option 3: own organizer surface</title>
+    <style>
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:600; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Medium.woff2") format("woff2"); }
+      :root {
+        --color-background:#f2eade;
+        --color-surface:#eadfcd;
+        --color-raised:#e0d2bd;
+        --color-divider:#c1af9a;
+        --color-field:#f9f6f0;
+        --color-text:#604939;
+        --color-text-muted:#66574d;
+        --color-accent:#784f26;
+        --color-link:#3d5d71;
+        --color-success:#3d6034;
+        --color-warning:#7e5220;
+        --color-focus-ring:var(--color-accent);
+        --font-sans:"IBM Plex Sans", Aptos, "Segoe UI", sans-serif;
+        --font-mono:"IBM Plex Mono", Consolas, monospace;
+        --font-size-secondary:13.5px;
+        --font-size-label:11px;
+        --radius-control:8px;
+        --radius-field:10px;
+        font-synthesis:none;
+      }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--color-background); color:var(--color-text); font:400 16px/1.6 var(--font-sans); }
+      button, input { font:inherit; }
+      a { color:var(--color-link); }
+      h1, h2, h3, p { margin-top:0; }
+      .shell { display:grid; grid-template-columns:235px minmax(365px,1fr) minmax(330px,.9fr); min-height:100vh; }
+      .side, .detail { padding:28px 20px; }
+      .side { border-right:1px solid var(--color-divider); }
+      .detail { background:var(--color-surface); border-left:1px solid var(--color-divider); }
+      .brand { display:flex; align-items:center; gap:9px; margin:0 0 34px; font-size:19px; font-weight:600; }
+      .mark { display:grid; width:28px; height:28px; place-items:center; border-radius:9px; background:var(--color-accent); color:var(--color-field); }
+      .eyebrow { margin:0 0 7px; color:var(--color-text-muted); font:500 var(--font-size-label)/1.4 var(--font-mono); letter-spacing:.07em; text-transform:uppercase; }
+      .nav { display:grid; gap:4px; }
+      .nav + .nav { margin-top:28px; }
+      .nav button { display:flex; justify-content:space-between; width:100%; padding:9px 10px; border:0; border-radius:var(--radius-control); background:transparent; cursor:pointer; text-align:left; }
+      .nav button:hover, .nav [aria-current="page"] { background:var(--color-raised); }
+      .nav [aria-current="page"] { font-weight:600; }
+      .count { color:var(--color-text-muted); font-size:var(--font-size-secondary); font-variant-numeric:tabular-nums; }
+      .epic-nav-entry { display:block; width:100%; padding:8px 10px; border:0; border-radius:var(--radius-control); background:transparent; cursor:pointer; text-align:left; }
+      .epic-nav-entry:hover, .epic-nav-entry[aria-current="true"] { background:var(--color-raised); }
+      .epic-nav-title { display:block; font-size:14px; font-weight:600; line-height:1.35; }
+      .epic-bar { height:4px; margin-top:6px; border-radius:999px; background:var(--color-divider); overflow:hidden; }
+      .epic-fill { height:100%; border-radius:999px; background:var(--color-success); }
+      .epic-count { margin-top:3px; color:var(--color-text-muted); font:500 11.5px var(--font-mono); font-variant-numeric:tabular-nums; }
+      .side-foot { position:fixed; bottom:24px; width:195px; color:var(--color-text-muted); font-size:var(--font-size-secondary); font-variant-numeric:tabular-nums; }
+      .content { min-width:0; padding:27px 32px 60px; }
+      .top { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+      h1 { margin-bottom:5px; font-size:clamp(28px,4vw,40px); font-weight:600; line-height:1.1; letter-spacing:-.015em; }
+      h2 { margin:0; font-size:22px; font-weight:600; letter-spacing:-.01em; }
+      h3 { margin:0; font-size:17px; font-weight:600; }
+      .subhead, .item-meta, .note { color:var(--color-text-muted); }
+      .sync { display:flex; align-items:center; gap:10px; color:var(--color-text-muted); font-size:var(--font-size-secondary); white-space:nowrap; }
+      .sync-status::before { content:""; display:inline-block; width:7px; height:7px; margin:0 7px 1px 0; border-radius:50%; background:var(--color-success); }
+      .quiet { padding:2px 0; border:0; background:transparent; color:var(--color-link); cursor:pointer; font-size:var(--font-size-secondary); text-decoration:underline; }
+      .mock-note { max-width:62ch; margin:18px 0 4px; padding:10px 12px; border:1px solid var(--color-divider); border-radius:var(--radius-control); background:var(--color-field); font-size:var(--font-size-secondary); }
+      .switcher { display:flex; gap:6px; align-items:center; margin-top:12px; font-size:var(--font-size-secondary); color:var(--color-text-muted); }
+      .switcher a { display:inline-block; padding:1px 9px; border:1px solid var(--color-divider); border-radius:999px; font-size:var(--font-size-label); font-weight:500; text-decoration:none; }
+      .switcher a[aria-current="true"] { background:var(--color-raised); color:var(--color-text); font-weight:500; }
+      .search { width:100%; margin:20px 0 28px; padding:12px 14px; border:1px solid var(--color-divider); border-radius:var(--radius-field); background:var(--color-field); color:var(--color-text); }
+      .search::placeholder { color:var(--color-text-muted); opacity:1; }
+      .section { margin-top:34px; }
+      .section-head { display:flex; align-items:baseline; justify-content:space-between; gap:15px; margin-bottom:10px; }
+      .queue { border-top:1px solid var(--color-divider); }
+      .item { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:12px; width:100%; padding:15px 9px; border:0; border-bottom:1px solid var(--color-divider); background:transparent; cursor:pointer; text-align:left; }
+      .item:hover, .item.selected { background:var(--color-surface); }
+      .item.selected { box-shadow:inset 3px 0 0 var(--color-link); }
+      .number { padding-top:1px; color:var(--color-text-muted); font:13px var(--font-mono); }
+      .item-title { display:block; font-weight:600; line-height:1.32; }
+      .item-meta { display:block; margin-top:5px; font-size:var(--font-size-secondary); line-height:1.35; }
+      .item-age { color:var(--color-text-muted); font-size:12px; white-space:nowrap; }
+      .tag { display:inline-block; margin:6px 5px 0 0; padding:2px 7px; border:1px solid currentColor; border-radius:999px; font-size:var(--font-size-label); font-weight:500; line-height:1.4; }
+      .tag.triage { color:var(--color-text-muted); }
+      .epic-row { display:grid; grid-template-columns:minmax(0,1fr) 150px auto; align-items:center; gap:16px; width:100%; padding:14px 9px; border:0; border-bottom:1px solid var(--color-divider); background:transparent; cursor:pointer; text-align:left; }
+      .epic-row:hover, .epic-row.selected { background:var(--color-surface); }
+      .epic-row.selected { box-shadow:inset 3px 0 0 var(--color-link); }
+      .epic-row-title { font-weight:600; line-height:1.32; }
+      .epic-row-repo { display:block; margin-top:2px; color:var(--color-text-muted); font-size:var(--font-size-secondary); }
+      .epic-track { height:5px; border-radius:999px; background:var(--color-raised); overflow:hidden; }
+      .epic-fill { height:100%; border-radius:999px; background:var(--color-success); }
+      .epic-done { background:var(--color-success); opacity:.45; }
+      .epic-row-count { color:var(--color-text-muted); font:500 12px var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; }
+      .detail-inner { position:sticky; top:28px; max-width:560px; }
+      .detail-kind, .detail-repo { margin:0 0 8px; color:var(--color-text-muted); font:12px var(--font-mono); }
+      .detail-kind { text-transform:uppercase; letter-spacing:.07em; }
+      .detail-title { margin-bottom:12px; font-size:28px; line-height:1.16; }
+      .detail-meta { margin-bottom:24px; color:var(--color-text-muted); font-size:var(--font-size-secondary); }
+      .action { display:inline-flex; align-items:center; min-height:38px; padding:7px 11px; border:1px solid var(--color-divider); border-radius:var(--radius-control); background:var(--color-field); color:var(--color-link); cursor:pointer; text-decoration:none; }
+      .fact { padding:19px 0; border-top:1px solid var(--color-divider); }
+      .fact p { margin:0; }
+      .fact p + p { margin-top:6px; }
+      .big-progress { margin:6px 0 0; }
+      .big-progress .epic-track { height:7px; }
+      @media (max-width:980px) { .shell { grid-template-columns:190px minmax(0,1fr); } .detail { grid-column:1 / -1; border-top:1px solid var(--color-divider); border-left:0; } .detail-inner { position:static; max-width:none; } .side-foot { width:155px; } }
+      @media (max-width:660px) { .shell { display:block; } .side { border-right:0; border-bottom:1px solid var(--color-divider); padding:20px; } .side-foot { display:none; } .content, .detail { padding:23px 20px 42px; } .top { align-items:flex-start; flex-direction:column; gap:5px; } .item { grid-template-columns:auto minmax(0,1fr); } .item-age { grid-column:2; } .epic-row { grid-template-columns:minmax(0,1fr) auto; } .epic-track-col { display:none; } }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <aside class="side">
+        <p class="brand"><span class="mark">↗</span> Repo Control</p>
+        <nav class="nav" aria-label="Main views">
+          <button>Now <span class="count">9</span></button>
+          <button>Pull requests <span class="count">2</span></button>
+        </nav>
+        <div class="nav">
+          <p class="eyebrow">Epics</p>
+          <button class="epic-nav-entry" aria-current="true"><span class="epic-nav-title">Offline sync</span><span class="epic-bar"><span class="epic-fill" style="width:57%;display:block;"></span></span><span class="epic-count">4/7 done · orbit-tools</span></button>
+          <button class="epic-nav-entry"><span class="epic-nav-title">Onboarding pass</span><span class="epic-bar"><span class="epic-fill" style="width:17%;display:block;"></span></span><span class="epic-count">1/6 done · trail-notes</span></button>
+          <button class="epic-nav-entry"><span class="epic-nav-title">Digest export rework</span><span class="epic-bar"><span class="epic-fill epic-done" style="width:100%;display:block;"></span></span><span class="epic-count">Done · 9/9</span></button>
+        </div>
+        <nav class="nav" aria-label="Issue queues">
+          <p class="eyebrow">Issues</p>
+          <button aria-current="page">Triage <span class="count">2</span></button>
+          <button>Ready for agent <span class="count">3</span></button>
+          <button>Needs me <span class="count">2</span></button>
+        </nav>
+        <p class="side-foot">Fictional sample data<br />Epics mockup · option 3</p>
+      </aside>
+
+      <section class="content">
+        <div class="top"><div><h1>Triage</h1><p class="subhead">Newly loaded items waiting for a workflow label.</p></div><div class="sync"><span class="sync-status">Sampled 12 min ago</span><button class="quiet">Sync sampled view</button></div></div>
+
+        <p class="mock-note"><strong>Mockup.</strong> Layout option 3 of 3 — epics live on their own organizer surface beside the queues. Issue rows stay completely untouched: no badges anywhere. Showing the Triage view plus the Epics view together here for comparison.</p>
+        <nav class="switcher" aria-label="Epic layout options"><span>Epics layout:</span>
+          <a href="epics-option-1.html">1 · Metadata badges</a>
+          <a href="epics-option-2.html">2 · Inline groups</a>
+          <a href="#" aria-current="true">3 · Epics surface</a>
+        </nav>
+
+        <input class="search" type="search" placeholder="Filter pull requests and issues" aria-label="Filter pull requests and issues" />
+
+        <section class="section">
+          <div class="section-head"><h2>Triage</h2></div>
+          <div class="queue">
+            <button class="item"><span class="number">#51</span><span><span class="item-title">Consider a release activity view</span><span class="item-meta">orbit-tools</span><span class="tag triage">Needs refinement</span></span><span class="item-age">Today</span></button>
+            <button class="item"><span class="number">#19</span><span><span class="item-title">Clarify retention rules for imported notes</span><span class="item-meta">trail-notes</span><span class="tag triage">Unclassified</span></span><span class="item-age">12 days old</span></button>
+          </div>
+          <p class="note" style="margin-top:10px;">Cleanest separation: epics are not items here at all. Queue rows stay minimal — the cost is that in-context progress ("this row belongs to X, which is 4/7 done") needs a look elsewhere.</p>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><h2>Epics</h2></div>
+          <div class="queue">
+            <button class="epic-row selected"><span class="epic-row-titles"><span class="epic-row-title">Offline sync</span><span class="epic-row-repo">orbit-tools · 3 open, 4 closed of 7</span></span><span class="epic-track-col"><span class="epic-track"><span class="epic-fill" style="width:57%;display:block;"></span></span></span><span class="epic-row-count">4/7</span></button>
+            <button class="epic-row"><span class="epic-row-titles"><span class="epic-row-title">Onboarding pass</span><span class="epic-row-repo">trail-notes · 5 open, 1 closed of 6</span></span><span class="epic-track-col"><span class="epic-track"><span class="epic-fill" style="width:17%;display:block;"></span></span></span><span class="epic-row-count">1/6</span></button>
+            <button class="epic-row"><span class="epic-row-titles"><span class="epic-row-title">Digest export rework</span><span class="epic-row-repo">orbit-tools · finished last week</span></span><span class="epic-track-col"><span class="epic-track"><span class="epic-fill epic-done" style="width:100%;display:block;"></span></span></span><span class="epic-row-count">9/9</span></button>
+          </div>
+          <p class="note" style="margin-top:10px;">Selecting an epic opens it in the quick read, where its children are one hop away; selecting it can also filter every queue down to that epic's open children. Finished epics stay visible until they are archived rather than disappearing silently.</p>
+        </section>
+      </section>
+
+      <aside class="detail">
+        <div class="detail-inner">
+          <p class="detail-kind">Epic</p>
+          <p class="detail-repo">orbit-tools · #44</p>
+          <h2 class="detail-title">Offline sync</h2>
+          <p class="detail-meta">Non-executable organizing issue · updated today</p>
+          <div class="actions"><a class="action" href="#">Open on GitHub ↗</a><button class="quiet">Refresh this item</button></div>
+          <div class="fact big-progress"><p class="eyebrow">Progress</p><div class="epic-track"><span class="epic-fill" style="width:57%;display:block;"></span></div><p class="epic-count" style="margin-top:6px;">4 of 7 children closed</p></div>
+          <div class="fact"><p class="eyebrow">Goal</p><p>Drafts saved offline reach every device intact, including conflicts created while a device was away from the network.</p></div>
+          <div class="fact"><p class="eyebrow">Next open child</p><p>#46 Resolve conflicts from device edits — blocked by orbit-tools#45</p></div>
+        </div>
+      </aside>
+    </main>
+  </body>
+</html>
