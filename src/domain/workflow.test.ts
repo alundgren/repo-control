@@ -22,7 +22,7 @@ describe("classifyIssues", () => {
         updatedAt: "2026-08-24T12:00:00.000Z",
       }),
       issue({ id: "I_earlier", number: 2, updatedAt: "2026-08-23T12:00:00.000Z" }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
       { id: "I_earlier", queue: "agent" },
@@ -37,7 +37,7 @@ describe("classifyIssues", () => {
       { ...issue({ id: "I_a", repositoryId: "R_alpha", number: 9 }), title: "Second" },
       { ...issue({ id: "I_z", repositoryId: "R_alpha", number: 7 }), title: "First" },
       { ...issue({ id: "I_b", repositoryId: "R_beta", number: 1 }), title: "Fourth" },
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id }) => id)).toEqual(["I_z", "I_a", "I_c", "I_b"]);
     expect(classified[0]?.title).toBe("First");
@@ -47,7 +47,7 @@ describe("classifyIssues", () => {
     const classified = classifyIssues(mapping, [
       issue({ id: "I_none", labels: [] }),
       issue({ id: "I_unknown", labels: ["custom-label"] }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
       { id: "I_none", queue: "triage" },
@@ -60,7 +60,7 @@ describe("classifyIssues", () => {
       issue({ id: "I_known", labels: ["ready-for-agent", "custom-label"] }),
       issue({ id: "I_conflict", labels: ["ready-for-agent", "needs-review"] }),
       issue({ id: "I_same-queue", labels: ["ready-for-agent", "agent-alias"] }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
       { id: "I_conflict", queue: "triage" },
@@ -77,7 +77,7 @@ describe("classifyIssues", () => {
           { sourceId: "I_issue", targetId: "I_blocker_a", type: "blocker" },
         ],
       }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified).toMatchObject({
       queue: "agent",
@@ -95,12 +95,36 @@ describe("classifyIssues", () => {
       }),
       issue({ id: "I_unavailable_middle", blockerCoverage: "unavailable", updatedAt: "2026-08-23T10:00:00.000Z" }),
       issue({ id: "I_unblocked_but_oldest", updatedAt: "2026-08-22T10:00:00.000Z" }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id }) => id)).toEqual([
       "I_unblocked_but_oldest",
       "I_unavailable_middle",
       "I_blocked_but_newest",
+    ]);
+  });
+
+  it("keeps epic-labelled issues out of every queue, even with a queue label", () => {
+    const classified = classifyIssues(mapping, [
+      issue({ id: "I_epic_only", labels: ["epic"] }),
+      issue({ id: "I_epic_and_queue", labels: ["epic", "ready-for-agent"], updatedAt: "2026-08-24T12:00:00.000Z" }),
+      issue({ id: "I_regular", labels: ["ready-for-agent"] }),
+    ], { epicLabel: "epic" });
+
+    expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
+      { id: "I_regular", queue: "agent" },
+      { id: "I_epic_only", queue: null },
+      { id: "I_epic_and_queue", queue: null },
+    ]);
+  });
+
+  it("respects a configured epic label other than the default name", () => {
+    const classified = classifyIssues(mapping, [
+      issue({ id: "I_container", labels: ["release-organizer"] }),
+    ], { epicLabel: "release-organizer" });
+
+    expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
+      { id: "I_container", queue: null },
     ]);
   });
 
@@ -112,7 +136,7 @@ describe("classifyIssues", () => {
         relationships: [{ sourceId: "I_unavailable", targetId: "I_retained_blocker", type: "blocker" }],
       }),
       issue({ id: "I_unsampled", blockerCoverage: "not_sampled" }),
-    ]);
+    ], { epicLabel: "epic" });
 
     expect(classified.map(({ id, readiness, eligibleForRecommendation }) => ({
       id,
