@@ -19,14 +19,19 @@ export type IssueReadiness =
   | { kind: "unavailable" };
 
 export type ClassifiedIssue<T extends IssueForClassification = IssueForClassification> = T & {
-  queue: string;
+  queue: string | null;
   readiness: IssueReadiness;
   eligibleForRecommendation: boolean;
+};
+
+export type ClassificationOptions = {
+  epicLabel: string;
 };
 
 export function classifyIssues<T extends IssueForClassification>(
   mapping: QueueMapping,
   issues: T[],
+  options: ClassificationOptions,
 ): ClassifiedIssue<T>[] {
   const queueByLabel = new Map(mapping.labels.map(({ label, queue }) => [label, queue]));
 
@@ -41,12 +46,16 @@ export function classifyIssues<T extends IssueForClassification>(
 
       return {
         ...issue,
-        queue: matchingQueues.size === 1 ? [...matchingQueues][0]! : mapping.defaultQueue,
+        queue: isEpic(issue, options.epicLabel) ? null : matchingQueues.size === 1 ? [...matchingQueues][0]! : mapping.defaultQueue,
         readiness,
         eligibleForRecommendation: readiness.kind === "unblocked",
       };
     })
     .sort(compareIssues);
+}
+
+function isEpic(issue: IssueForClassification, epicLabel: string) {
+  return issue.labels.some(({ name }) => name === epicLabel);
 }
 
 function getReadiness(issue: IssueForClassification): IssueReadiness {
@@ -63,6 +72,7 @@ function getReadiness(issue: IssueForClassification): IssueReadiness {
 
 function compareIssues(left: ClassifiedIssue, right: ClassifiedIssue) {
   return (
+    (left.queue === null ? 1 : 0) - (right.queue === null ? 1 : 0) ||
     readinessBand(left.readiness) - readinessBand(right.readiness) ||
     compareStrings(left.updatedAt, right.updatedAt) ||
     compareStrings(left.repositoryId, right.repositoryId) ||

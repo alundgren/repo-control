@@ -24,7 +24,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | GitHub webhook client | Separately pages repository hooks and creates one configured receiver hook. It never updates, disables, or deletes a hook. |
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
-| Workflow classifier | Applies the installation's label-to-queue mapping and marks unknown labels for Triage. |
+| Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |

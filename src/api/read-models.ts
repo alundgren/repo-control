@@ -30,6 +30,18 @@ export type ApiRelatedItems =
   | { status: "unavailable" }
   | { status: "not_sampled" };
 
+export type ApiSubIssues = { completed: number; total: number };
+
+export type ApiEpicMembership = {
+  id: string;
+  repositoryId: string;
+  repositoryNameWithOwner: string | null;
+  number: number;
+  title: string;
+  url: string;
+  subIssues: ApiSubIssues | null;
+};
+
 export type ApiIssue = {
   id: string;
   type: "issue";
@@ -41,8 +53,10 @@ export type ApiIssue = {
   createdAt?: string | null;
   updatedAt: string;
   observedAt?: string;
-  queue: string;
+  queue: string | null;
   readiness: ApiReadiness;
+  epic: ApiEpicMembership | null;
+  subIssues: ApiSubIssues | null;
 };
 
 export type ApiPullRequest = {
@@ -74,6 +88,7 @@ export type OverviewResponse =
       scope: ApiScope;
       queues: ApiQueue[];
       pullRequests: ApiPullRequest[];
+      epics: ApiIssue[];
     }
   | { status: "empty" };
 
@@ -101,6 +116,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
   }
 
   const mapping = cache.getQueueMapping();
+  const epicLabel = cache.getEpicLabel();
   const issues = snapshot.items.filter(
     (item): item is CacheItem & { type: "issue" } => item.type === "issue",
   );
@@ -109,7 +125,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
   );
 
   const blockerCache = new Map<string, ApiBlocker>();
-  const apiIssues = classifyIssues(mapping, issues).map((classified) =>
+  const apiIssues = classifyIssues(mapping, issues, { epicLabel }).map((classified) =>
     toApiIssue(cache, classified, blockerCache),
   );
 
@@ -118,8 +134,11 @@ export function buildOverview(cache: Cache): OverviewResponse {
     fetchedAt: snapshot.fetchedAt,
     repositories: snapshot.repositories,
     scope: snapshot.scope,
-    queues: groupIntoQueues(mapping, apiIssues),
+    queues: groupIntoQueues(mapping, apiIssues.filter((issue): issue is ApiIssue & { queue: string } => issue.queue !== null)),
     pullRequests: pullRequests.map((item) => toApiPullRequest(cache, item)).sort(comparePullRequests),
+    epics: apiIssues
+      .filter((issue) => issue.queue === null)
+      .sort(compareEpics),
   };
 }
 
@@ -172,7 +191,7 @@ export function toApiItem(cache: Cache, item: CacheItem): ApiItem {
     return toApiPullRequest(cache, item);
   }
   const mapping = cache.getQueueMapping();
-  const [classified] = classifyIssues(mapping, [item]);
+  const [classified] = classifyIssues(mapping, [item], { epicLabel: cache.getEpicLabel() });
   return toApiIssue(cache, classified!);
 }
 
@@ -194,6 +213,37 @@ function toApiIssue(
     updatedAt: classified.updatedAt,
     queue: classified.queue,
     readiness: toApiReadiness(cache, classified.readiness, blockerCache),
+    epic: toApiEpicMembership(cache, classified),
+    subIssues: classified.subIssues ?? null,
+  };
+}
+
+function toApiEpicMembership(
+  cache: Cache,
+  classified: ClassifiedIssue<CacheItem>,
+): ApiEpicMembership | null {
+  if (classified.relationshipCoverage.parent !== "complete") {
+    return null;
+  }
+  const parentId = classified.relationships.find((relationship) => relationship.type === "parent")?.targetId;
+  if (!parentId) {
+    return null;
+  }
+  const summary = cache.getRelatedItem(parentId);
+  const cached = cache.getItem(parentId);
+  if (!summary && !cached) {
+    return null;
+  }
+  return {
+    id: parentId,
+    repositoryId: summary?.repositoryId ?? cached!.repositoryId,
+    repositoryNameWithOwner: summary?.repositoryNameWithOwner ?? null,
+    number: summary?.number ?? cached!.number,
+    title: summary?.title ?? cached!.title,
+    url: summary?.url ?? cached!.url,
+    subIssues: cached && cached.type === "issue" && cached.subIssues
+      ? { ...cached.subIssues }
+      : null,
   };
 }
 
@@ -267,7 +317,16 @@ function toApiRelatedItems(cache: Cache, item: CacheItem, type: "closing_issue")
   return { status: "complete", items: related as ApiRelatedItem[] };
 }
 
-function groupIntoQueues(mapping: QueueMapping, issues: ApiIssue[]): ApiQueue[] {
+function compareEpics(left: ApiIssue, right: ApiIssue): number {
+  return (
+    compareStrings(right.updatedAt, left.updatedAt) ||
+    compareStrings(left.repositoryId, right.repositoryId) ||
+    left.number - right.number ||
+    compareStrings(left.id, right.id)
+  );
+}
+
+function groupIntoQueues(mapping: QueueMapping, issues: Array<ApiIssue & { queue: string }>): ApiQueue[] {
   const byQueue = new Map<string, ApiIssue[]>();
   for (const name of queueOrder(mapping)) {
     byQueue.set(name, []);

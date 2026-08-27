@@ -39,6 +39,7 @@ describe("work queue overview", () => {
             { name: "human", issues: [issue({ id: "I_3", number: 24, title: "Choose a garden name" })] },
             { name: "triage", issues: [issue({ id: "I_4", number: 25, title: "Clarify fictional soil" }), issue({ id: "I_5", number: 26, title: "Sort fictional leaves" })] },
           ],
+          epics: [],
         }),
       ),
     );
@@ -353,6 +354,127 @@ describe("work queue overview", () => {
     expect(await screen.findByText("Item refreshed and no longer matches this search.")).toBeTruthy();
   });
 
+  it("gives epics their own navigation, list, quick read, and Now preview", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    overview.queues[0]!.issues = [issue({ id: "I_1", number: 22, title: "Add a fictional seed" })];
+    overview.epics = [
+      epicIssue({ id: "I_epic_1", number: 2, title: "Epic: offline sync", subIssues: { completed: 5, total: 14 } }),
+      epicIssue({ id: "I_epic_2", number: 3, title: "Onboarding pass" }),
+      epicIssue({ id: "I_epic_3", number: 4, title: "Digest rework", subIssues: { completed: 9, total: 9 } }),
+    ];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    expect(screen.getByRole("button", { name: "Epics 3" })).toBeTruthy();
+
+    const nowSection = screen.getByRole("region", { name: "Epics" });
+    expect(within(nowSection).getByText("Epic: offline sync")).toBeTruthy();
+    expect(within(nowSection).getByText("5/14")).toBeTruthy();
+    expect(within(nowSection).queryByText("Digest rework")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Epics 3" }));
+    expect(screen.getByRole("heading", { name: "Epics" })).toBeTruthy();
+    expect(screen.getByText("Epic: offline sync")).toBeTruthy();
+    expect(screen.getByText("5/14")).toBeTruthy();
+    expect(screen.getByText("No sampled progress")).toBeTruthy();
+    expect(screen.queryByText("Add a fictional seed")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Select Epic: offline sync" }));
+    expect(await screen.findByRole("heading", { name: "Epic: offline sync" })).toBeTruthy();
+    expect(screen.getByText("5 of 14 children closed.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open on GitHub" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Now 8" }));
+    const epicRows = within(screen.getByRole("region", { name: "Epics" })).getAllByRole("button", { name: /Select / });
+    expect(epicRows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Select Epic: offline sync",
+      "Select Onboarding pass",
+    ]);
+  });
+
+  it("routes live updates of unqueued issues into the epics view", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(readyOverview()));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", TestEventSource);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    TestEventSource.last?.open();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    TestEventSource.last?.emit({ type: "updated", item: epicIssue({ id: "I_new_epic", number: 30, title: "Epic: fresh container", subIssues: { completed: 1, total: 4 } }) });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Epics 1" }));
+    expect(screen.getByText("Epic: fresh container")).toBeTruthy();
+    expect(screen.getByText("1/4")).toBeTruthy();
+  });
+
+  it("marks work rows with static relationship pills that do not compete with status facts", async () => {
+    const overview = readyOverview();
+    overview.queues[0]!.issues = [
+      {
+        ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }),
+        epic: {
+          id: "I_epic_9",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/garden",
+          number: 9,
+          title: "Epic: offline sync",
+          url: "https://github.test/fictional-tools/garden/issues/9",
+          subIssues: { completed: 5, total: 14 },
+        },
+      },
+      {
+        ...issue({ id: "I_2", number: 23, title: "Review fictional moss" }),
+        epic: {
+          id: "I_epic_10",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/garden",
+          number: 10,
+          title: "Epic: a very long epic title spanning widely across the tracker",
+          url: "https://github.test/fictional-tools/garden/issues/10",
+          subIssues: null,
+        },
+      },
+    ];
+    overview.pullRequests = [{
+      ...pullRequest({ id: "PR_1", number: 41, title: "Keep fictional paths tidy" }),
+      closingIssues: {
+        status: "complete" as const,
+        items: [{
+          id: "I_closing",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/river",
+          number: 44,
+          title: "Close the river loop",
+          url: "https://github.test/fictional-tools/river/issues/44",
+        }],
+      },
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    const seedRow = screen.getByRole("button", { name: "Select Add a fictional seed" });
+    const mossRow = screen.getByRole("button", { name: "Select Review fictional moss" });
+    const pullRequestRow = screen.getByRole("button", { name: "Select Keep fictional paths tidy" });
+
+    const offlinePill = within(seedRow).getByText("offline sync · 5/14");
+    expect(offlinePill.tagName).toBe("SPAN");
+
+    const truncatedPill = within(mossRow).getByText("a very long epic…");
+    expect(truncatedPill.tagName).toBe("SPAN");
+
+    const closingPill = within(pullRequestRow).getByText("fictional-tools/river#44");
+    expect(closingPill.tagName).toBe("SPAN");
+  });
+
   it("does not let a delayed refresh response steal a newer selection", async () => {
     const user = userEvent.setup();
     const refresh = deferred<ReturnType<typeof response>>();
@@ -395,6 +517,7 @@ function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
       { name: "human", issues: [issue({ id: "I_3", number: 24, title: "Choose a garden name" })] },
       { name: "triage", issues: [issue({ id: "I_4", number: 25, title: "Clarify fictional soil" }), issue({ id: "I_5", number: 26, title: "Sort fictional leaves" })] },
     ],
+    epics: [],
   };
 }
 
@@ -445,8 +568,18 @@ function issue({ id, number, title }: { id: string; number: number; title: strin
     excerpt: null,
     url: `https://github.test/fictional-tools/garden/issues/${number}`,
     updatedAt: "2026-08-20T10:00:00.000Z",
-    queue: "agent",
+    queue: "agent" as const,
     readiness: { kind: "unblocked" as const },
+    epic: null,
+    subIssues: null,
+  };
+}
+
+function epicIssue({ id, number, title, subIssues }: { id: string; number: number; title: string; subIssues?: { completed: number; total: number } }) {
+  return {
+    ...issue({ id, number, title }),
+    queue: null as string | null,
+    subIssues: subIssues ?? null,
   };
 }
 

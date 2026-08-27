@@ -60,6 +60,18 @@ used.
   area carries the bounded excerpt, relationship links or their unavailable
   state, item freshness, and the focused refresh control. Status facts use
   the success, warning, and secondary text roles.
+- Relationship pills: small static mono pills after status facts — a shortened
+  epic title with its `closed/total` fraction on issue rows that belong to an
+  epic (`Epic:` prefixes stripped before word-boundary truncation), and linked
+  closing issues as `repository#number` on pull-request rows. They are
+  metadata, never clickable, and never read as status.
+- Epics navigation row: one plain row inside the issue-queue navigation group,
+  styled like the other rows, counting open epics.
+- Epics view: the same three-column scan-and-read layout as the queues. Epic
+  rows carry title, thin progress track, mono `closed/total`, and recency,
+  ordered most-recently-updated first. Selecting an epic shows a minimal quick
+  read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
+  opens no child details and filters no lists.
 
 ## Deviations
 

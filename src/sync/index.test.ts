@@ -521,6 +521,68 @@ describe("bounded sampled sync", () => {
     }
   });
 
+  it("keeps parent facts and sub-issue counts while blocker enrichment completes", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const epic = issueItem();
+    const child: GitHubWorkItem = {
+      ...epic,
+      id: "I_child",
+      number: 30,
+      labels: [],
+      relationships: [{ sourceId: "I_child", targetId: "I_epic", type: "parent" }],
+      relationshipCoverage: { blocker: "unavailable", parent: "complete", closing_issue: "unavailable" },
+      relatedItems: [{
+        id: "I_epic",
+        repositoryId: "R_fixture",
+        repositoryNameWithOwner: "octofixture/example-widgets",
+        number: 2,
+        title: "Epic: offline sync",
+        url: "https://example.test/octofixture/example-widgets/issues/2",
+      }],
+      subIssues: undefined,
+    };
+    const client: SyncClient = {
+      async readAccountSnapshot() {
+        return accountSnapshot({ items: [{ ...child, subIssues: { total: 14, completed: 5 } }] });
+      },
+      async readRelationshipEnrichment({ nodeIds }) {
+        return {
+          requestedCount: nodeIds.length,
+          readCount: nodeIds.length,
+          subjectLimit: 10,
+          status: "complete" as const,
+          subjects: nodeIds.map((nodeId) => ({
+            nodeId,
+            status: "read" as const,
+            coverage: { blocker: "complete" as const, closing_issue: "not_sampled" as const },
+            relationships: [{ sourceId: nodeId, targetId: "I_blocker_1", type: "blocker" as const }],
+            relatedItems: [{
+              id: "I_blocker_1",
+              repositoryId: "R_fixture",
+              repositoryNameWithOwner: "octofixture/example-widgets",
+              number: 31,
+              title: "The blocker",
+              url: "https://example.test/octofixture/example-widgets/issues/31",
+            }],
+          })),
+        };
+      },
+    };
+
+    try {
+      await createSyncService({ cache, client }).sync();
+
+      const cachedChild = cache.getItem("I_child");
+      expect(cachedChild?.relationshipCoverage).toMatchObject({ blocker: "complete", parent: "complete" });
+      expect(cachedChild?.relationships.map((relationship) => relationship.type).sort()).toEqual(["blocker", "parent"]);
+      expect(cachedChild?.subIssues).toEqual({ total: 14, completed: 5 });
+      expect(cache.getRelatedItem("I_epic")?.number).toBe(2);
+      expect(cache.getRelatedItem("I_blocker_1")?.number).toBe(31);
+    } finally {
+      cache.close();
+    }
+  });
+
   it("reconciles webhooks from a separate complete repository inventory inside the shared sync", async () => {
     const cache = openCache({ path: await createCachePath() });
     const calls: string[] = [];

@@ -123,6 +123,8 @@ const OWNED_REPOSITORY_INVENTORY_QUERY = `query OwnedRepositoryInventory($after:
   }
 }`;
 
+const RELATED_ISSUE_FIELDS = `id number title url repository { id nameWithOwner }`;
+
 const WORK_ITEM_FIELDS = `
   id
   number
@@ -135,7 +137,10 @@ const WORK_ITEM_FIELDS = `
   labels(first: ${LABEL_LIMIT}) { nodes { id name } pageInfo { hasNextPage endCursor } }
 `;
 
-const RELATED_ISSUE_FIELDS = `id number title url repository { id nameWithOwner }`;
+const ISSUE_FACT_FIELDS = `
+  parent { ${RELATED_ISSUE_FIELDS} }
+  subIssuesSummary { total completed }
+`;
 const RELATIONSHIP_QUERY = `query EnrichWorkItemRelationships($ids: [ID!]!) {
   nodes(ids: $ids) {
     __typename
@@ -165,7 +170,7 @@ const ACCOUNT_SEARCH_QUERY = `query AccountSearchPage($query: String!, $after: S
     issueCount
     nodes {
       __typename
-      ... on Issue { ${WORK_ITEM_FIELDS} }
+      ... on Issue { ${WORK_ITEM_FIELDS} ${ISSUE_FACT_FIELDS} }
       ... on PullRequest { ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
     }
     pageInfo { hasNextPage endCursor }
@@ -177,7 +182,7 @@ const FOCUSED_ITEM_QUERY = `query FocusedWorkItem($id: ID!) {
   viewer { id }
   node(id: $id) {
     __typename
-    ... on Issue { state ${WORK_ITEM_FIELDS} }
+    ... on Issue { state ${WORK_ITEM_FIELDS} ${ISSUE_FACT_FIELDS} }
     ... on PullRequest { state ${WORK_ITEM_FIELDS} isDraft changedFiles additions deletions }
   }
   rateLimit { cost remaining resetAt }
@@ -536,7 +541,7 @@ function parseWorkItem(
   };
   if (type === "issue") {
     const relationships = parseIssueRelationships(value, partialReasons);
-    return { ...base, type, ...relationships };
+    return { ...base, type, ...relationships, subIssues: parseSubIssuesSummary(value.subIssuesSummary) };
   }
   if (typeof value.isDraft !== "boolean" || !nullableInteger(value.changedFiles) || !nullableInteger(value.additions) || !nullableInteger(value.deletions)) {
     throw new WorkReadFailure("invalid_response");
@@ -558,14 +563,44 @@ function parseWorkItem(
 function parseIssueRelationships(value: Record<string, unknown>, partialReasons: SnapshotPartialReason[]) {
   const coverage = unavailableCoverage();
   const relationships: GitHubWorkItem["relationships"] = [];
-  if (value.parent === null) {
+  const relatedItems: import("./read-client.js").RelatedWorkItem[] = [];
+  if (value.parent === undefined) {
+    // Field was not requested by this read; leave parent facts unsampled.
+  } else if (value.parent === null) {
     coverage.parent = "complete";
   } else if (isObject(value.parent) && isString(value.parent.id)) {
     coverage.parent = "complete";
-    relationships.push({ sourceId: value.id as string, targetId: value.parent.id, type: "parent" });
+    const related = toRelatedWorkItem(value.parent);
+    if (!related) throw new WorkReadFailure("invalid_response");
+    relationships.push({ sourceId: value.id as string, targetId: related.id, type: "parent" });
+    relatedItems.push(related);
   }
   readRelationshipConnection(value.blockedBy, value.id as string, "blocker", coverage, relationships, partialReasons);
-  return { relationships, relationshipCoverage: coverage };
+  return { relationships, relationshipCoverage: coverage, ...(relatedItems.length > 0 ? { relatedItems } : {}) };
+}
+
+function toRelatedWorkItem(value: unknown): import("./read-client.js").RelatedWorkItem | null {
+  if (!isObject(value) || !isString(value.id) || !Number.isInteger(value.number) || !isString(value.title) || !isString(value.url) || !isObject(value.repository) || !isString(value.repository.nameWithOwner)) {
+    return null;
+  }
+  return {
+    id: value.id,
+    repositoryId: value.repository.id as string,
+    repositoryNameWithOwner: value.repository.nameWithOwner,
+    number: value.number as number,
+    title: value.title,
+    url: value.url,
+  };
+}
+
+function parseSubIssuesSummary(value: unknown): import("./read-client.js").SubIssuesSummary | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isObject(value) || !Number.isInteger(value.total) || !Number.isInteger(value.completed) || (value.completed as number) < 0 || (value.total as number) < 0) {
+    throw new WorkReadFailure("invalid_response");
+  }
+  return { total: value.total as number, completed: value.completed as number };
 }
 
 function parsePullRequestRelationships(value: Record<string, unknown>, partialReasons: SnapshotPartialReason[]) {

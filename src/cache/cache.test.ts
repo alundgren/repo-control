@@ -33,7 +33,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 4,
+        schemaVersion: 5,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -44,7 +44,7 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(4);
+      expect(reopened.getStatus().schemaVersion).toBe(5);
     } finally {
       reopened.close();
     }
@@ -59,9 +59,11 @@ describe("local cache", () => {
 
     const versionOne = new Database(path);
     versionOne.exec(`
-      DELETE FROM cache_migrations WHERE version IN (2, 3, 4);
+      DELETE FROM cache_migrations WHERE version IN (2, 3, 4, 5);
       DROP TABLE related_item_summaries;
       ALTER TABLE items DROP COLUMN github_created_at;
+      ALTER TABLE items DROP COLUMN sub_issues_total;
+      ALTER TABLE items DROP COLUMN sub_issues_completed;
       ALTER TABLE snapshot_generations DROP COLUMN reconciliation_kind;
       ALTER TABLE snapshot_generations DROP COLUMN last_full_reconciled_at;
       ALTER TABLE snapshot_generations DROP COLUMN inventory_complete;
@@ -72,7 +74,7 @@ describe("local cache", () => {
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(4);
+      expect(migrated.getStatus().schemaVersion).toBe(5);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained generation" }],
@@ -91,14 +93,14 @@ describe("local cache", () => {
 
     const versionTwo = new Database(path);
     versionTwo.exec(`
-      DELETE FROM cache_migrations WHERE version IN (3, 4);
+      DELETE FROM cache_migrations WHERE version IN (3, 4, 5);
       DROP TABLE related_item_summaries;
     `);
     versionTwo.close();
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(4);
+      expect(migrated.getStatus().schemaVersion).toBe(5);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained reconciliation generation" }],
@@ -455,6 +457,33 @@ describe("local cache", () => {
     }
   });
 
+  it("starts a new installation on the documented default epic label", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      expect(cache.getEpicLabel()).toBe("epic");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("persists sub-issue counts with issue items and clears them when a later read omits them", async () => {
+    const cache = openCache({ path: await createCachePath() });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot({ subIssues: { completed: 5, total: 14 } }));
+
+      expect(cache.getItem("I_issue_1")?.subIssues).toEqual({ completed: 5, total: 14 });
+      expect(cache.getActiveSnapshot()?.items[0]?.subIssues).toEqual({ completed: 5, total: 14 });
+
+      cache.replaceActiveSnapshot(snapshot({ title: "Second generation" }));
+
+      expect(cache.getActiveSnapshot()?.items[0]?.subIssues).toBeUndefined();
+    } finally {
+      cache.close();
+    }
+  });
+
   it("stores instance queue mappings separately from GitHub facts", async () => {
     const cache = openCache({ path: await createCachePath() });
 
@@ -505,6 +534,7 @@ function snapshot({
     repositoryLimit: 5,
     truncatedReason: null,
   },
+  subIssues,
   title = "First",
 }: {
   account?: SuccessfulSnapshot["account"];
@@ -519,6 +549,7 @@ function snapshot({
   relationshipCoverage?: RelationshipCoverageByType;
   repositoryId?: string;
   scope?: SuccessfulSnapshot["scope"];
+  subIssues?: NonNullable<SuccessfulSnapshot["items"][number]["subIssues"]>;
   title?: string;
 } = {}): SuccessfulSnapshot {
   return {
@@ -551,6 +582,7 @@ function snapshot({
         relationships,
         relatedItems,
         repositoryId,
+        subIssues,
         title,
         type: "issue",
         updatedAt: "2026-08-22T09:00:00.000Z",

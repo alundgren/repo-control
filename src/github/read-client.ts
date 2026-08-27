@@ -112,6 +112,12 @@ type BaseWorkItem = {
   relationships: GitHubRelationship[];
   relationshipCoverage: RelationshipCoverageByType;
   relatedItems?: RelatedWorkItem[];
+  subIssues?: SubIssuesSummary;
+};
+
+export type SubIssuesSummary = {
+  completed: number;
+  total: number;
 };
 
 export type GitHubWorkItem =

@@ -37,9 +37,19 @@ receiver webhook that is missing from an eligible personal repository.
 
 - Merge, edit, assign, comment, approve, or any user-directed GitHub mutation.
 - AI summaries, agent dispatch, or a local model integration.
-- Epic-specific navigation or project management views.
+- Project-management features beyond the read-only epic view described below.
 - Notifications, background polling, or multi-user collaboration.
 - Organization-owned repositories or GitHub Apps.
+
+## Epic rules
+
+Epics are the account owner's convention for grouping issues toward a common
+goal. An issue labelled with the instance's epic label (configurable alongside
+the queue mapping; default `epic`) never enters a workflow queue and does not
+clutter triage. Epics appear on their own view plus a small preview on Now;
+membership travels on rows as static pills that can reach the epic. Nothing
+encodes "done": visibility follows GitHub's open state only, and the
+`closed/total` fraction is inert display data for the account owner to judge.
 
 ## Queue rules
 

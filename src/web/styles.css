@@ -103,7 +103,11 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 .tag.success { color: var(--color-success); }
 .tag.warning { color: var(--color-warning); }
 .tag.neutral { color: var(--color-text-muted); }
+.tag.mono { color: var(--color-text-muted); font-family: var(--font-mono); }
 .emptyState { margin-top: 1rem; }
+
+.epicProgress .progressTrack { display: block; height: 0.3125rem; margin-top: 0.375rem; border-radius: 999px; background: var(--color-raised-surface); overflow: hidden; }
+.epicProgress .progressFill { display: block; height: 100%; border-radius: 999px; background: var(--color-success); }
 
 @media (max-width: 64rem) {
   .appShell { grid-template-columns: 14.6875rem minmax(0, 1fr); }

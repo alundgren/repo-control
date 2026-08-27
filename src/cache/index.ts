@@ -44,6 +44,12 @@ type BaseCacheItem = {
   relationships: CacheRelationship[];
   relationshipCoverage: RelationshipCoverageByType;
   relatedItems?: RelatedItemSummary[];
+  subIssues?: SubIssuesSummary;
+};
+
+export type SubIssuesSummary = {
+  completed: number;
+  total: number;
 };
 
 export type CacheItem =
@@ -120,6 +126,7 @@ export type Cache = {
   removeItem(nodeId: string): void;
   replaceQueueMapping(mapping: QueueMapping): void;
   getQueueMapping(): QueueMapping;
+  getEpicLabel(): string;
   getStatus(): CacheStatus;
   close(): void;
 };
@@ -234,7 +241,8 @@ class SqliteCache implements Cache {
           `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                   items.number, items.title, items.body, items.url,
                   items.github_created_at AS createdAt, items.github_updated_at AS updatedAt,
-                  items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
+                  items.observed_at AS observedAt, items.sub_issues_completed, items.sub_issues_total,
+                  pull_request_facts.is_draft AS isDraft,
                   pull_request_facts.additions, pull_request_facts.deletions
            FROM items
            LEFT JOIN pull_request_facts ON pull_request_facts.item_node_id = items.node_id
@@ -352,6 +360,13 @@ class SqliteCache implements Cache {
     return { defaultQueue: configuration?.default_queue ?? "triage", labels };
   }
 
+  getEpicLabel(): string {
+    const configuration = this.database
+      .prepare("SELECT epic_label FROM instance_configuration WHERE singleton = 1")
+      .get() as { epic_label: string } | undefined;
+    return configuration?.epic_label ?? DEFAULT_EPIC_LABEL;
+  }
+
   getStatus(): CacheStatus {
     const active = this.database
       .prepare("SELECT active_generation_id FROM cache_state WHERE singleton = 1")
@@ -394,8 +409,9 @@ class SqliteCache implements Cache {
     this.database
       .prepare(
         `INSERT INTO items (
-           node_id, repository_node_id, type, number, title, body, url, github_created_at, github_updated_at, observed_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           node_id, repository_node_id, type, number, title, body, url, github_created_at, github_updated_at, observed_at,
+           sub_issues_completed, sub_issues_total
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(node_id) DO UPDATE SET
            repository_node_id = excluded.repository_node_id,
            type = excluded.type,
@@ -405,8 +421,10 @@ class SqliteCache implements Cache {
            url = excluded.url,
            github_created_at = excluded.github_created_at,
            github_updated_at = excluded.github_updated_at,
-           observed_at = excluded.observed_at`,
-    )
+           observed_at = excluded.observed_at,
+           sub_issues_completed = excluded.sub_issues_completed,
+           sub_issues_total = excluded.sub_issues_total`,
+     )
       .run(
         item.id,
         item.repositoryId,
@@ -418,6 +436,8 @@ class SqliteCache implements Cache {
         item.createdAt,
         item.updatedAt,
         observedAt,
+        item.type === "issue" && item.subIssues ? item.subIssues.completed : null,
+        item.type === "issue" && item.subIssues ? item.subIssues.total : null,
       );
     this.database.prepare("DELETE FROM item_labels WHERE item_node_id = ?").run(item.id);
 
@@ -554,7 +574,8 @@ class SqliteCache implements Cache {
         `SELECT items.node_id AS id, items.repository_node_id AS repositoryId, items.type,
                 items.number, items.title, items.body, items.url,
                 items.github_created_at AS createdAt, items.github_updated_at AS updatedAt,
-                items.observed_at AS observedAt, pull_request_facts.is_draft AS isDraft,
+                items.observed_at AS observedAt, items.sub_issues_completed, items.sub_issues_total,
+                pull_request_facts.is_draft AS isDraft,
                 pull_request_facts.additions, pull_request_facts.deletions
          FROM snapshot_items
          JOIN items ON items.node_id = snapshot_items.item_node_id
@@ -632,7 +653,10 @@ class SqliteCache implements Cache {
       url: row.url,
     };
     if (row.type === "issue") {
-      return { ...item, type: "issue" };
+      const subIssues = row.sub_issues_completed !== null && row.sub_issues_total !== null
+        ? { completed: row.sub_issues_completed, total: row.sub_issues_total }
+        : undefined;
+      return { ...item, type: "issue", ...(subIssues ? { subIssues } : {}) };
     }
     if (row.isDraft === null) {
       throw new Error("Cached pull request is missing pull-request facts");
@@ -743,6 +767,8 @@ type ItemRow = {
   createdAt: string | null;
   updatedAt: string;
   observedAt: string;
+  sub_issues_completed: number | null;
+  sub_issues_total: number | null;
   isDraft: number | null;
   additions: number | null;
   deletions: number | null;
@@ -755,6 +781,8 @@ const DEFAULT_QUEUE_MAPPING: QueueMapping = {
     { label: "ready-for-human", queue: "human" },
   ],
 };
+
+const DEFAULT_EPIC_LABEL = "epic";
 
 function migrate(database: Database.Database) {
   database.exec(`
@@ -917,5 +945,21 @@ function migrate(database: Database.Database) {
       }
     }
     database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (4, ?)").run(new Date().toISOString());
+  })();
+  if ((applied.version ?? 0) < 5) database.transaction(() => {
+    const itemColumns = database.prepare("PRAGMA table_info(items)").all() as Array<{ name: string }>;
+    const addItemColumn = (name: string, definition: string) => {
+      if (!itemColumns.some((column) => column.name === name)) {
+        database.exec(`ALTER TABLE items ADD COLUMN ${definition}`);
+      }
+    };
+    addItemColumn("sub_issues_total", "sub_issues_total INTEGER");
+    addItemColumn("sub_issues_completed", "sub_issues_completed INTEGER");
+
+    const configurationColumns = database.prepare("PRAGMA table_info(instance_configuration)").all() as Array<{ name: string }>;
+    if (!configurationColumns.some((column) => column.name === "epic_label")) {
+      database.exec(`ALTER TABLE instance_configuration ADD COLUMN epic_label TEXT NOT NULL DEFAULT '${DEFAULT_EPIC_LABEL}'`);
+    }
+    database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (5, ?)").run(new Date().toISOString());
   })();
 }
