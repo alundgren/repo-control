@@ -5,6 +5,7 @@ import type {
   GitHubReadClient,
   GitHubReadError,
   GitHubWorkItem,
+  RelatedWorkItem,
   RelationshipEnrichmentSubject,
 } from "../github/read-client.js";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";

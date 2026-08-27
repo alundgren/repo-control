@@ -134,7 +134,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
     fetchedAt: snapshot.fetchedAt,
     repositories: snapshot.repositories,
     scope: snapshot.scope,
-    queues: groupIntoQueues(mapping, apiIssues.filter((issue) => issue.queue !== null)),
+    queues: groupIntoQueues(mapping, apiIssues.filter((issue): issue is ApiIssue & { queue: string } => issue.queue !== null)),
     pullRequests: pullRequests.map((item) => toApiPullRequest(cache, item)).sort(comparePullRequests),
     epics: apiIssues
       .filter((issue) => issue.queue === null)
@@ -326,7 +326,7 @@ function compareEpics(left: ApiIssue, right: ApiIssue): number {
   );
 }
 
-function groupIntoQueues(mapping: QueueMapping, issues: ApiIssue[]): ApiQueue[] {
+function groupIntoQueues(mapping: QueueMapping, issues: Array<ApiIssue & { queue: string }>): ApiQueue[] {
   const byQueue = new Map<string, ApiIssue[]>();
   for (const name of queueOrder(mapping)) {
     byQueue.set(name, []);
