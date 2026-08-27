@@ -414,6 +414,67 @@ describe("work queue overview", () => {
     expect(screen.getByText("1/4")).toBeTruthy();
   });
 
+  it("marks work rows with static relationship pills that do not compete with status facts", async () => {
+    const overview = readyOverview();
+    overview.queues[0]!.issues = [
+      {
+        ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }),
+        epic: {
+          id: "I_epic_9",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/garden",
+          number: 9,
+          title: "Epic: offline sync",
+          url: "https://github.test/fictional-tools/garden/issues/9",
+          subIssues: { completed: 5, total: 14 },
+        },
+      },
+      {
+        ...issue({ id: "I_2", number: 23, title: "Review fictional moss" }),
+        epic: {
+          id: "I_epic_10",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/garden",
+          number: 10,
+          title: "Epic: a very long epic title spanning widely across the tracker",
+          url: "https://github.test/fictional-tools/garden/issues/10",
+          subIssues: null,
+        },
+      },
+    ];
+    overview.pullRequests = [{
+      ...pullRequest({ id: "PR_1", number: 41, title: "Keep fictional paths tidy" }),
+      closingIssues: {
+        status: "complete" as const,
+        items: [{
+          id: "I_closing",
+          repositoryId: "R_2",
+          repositoryNameWithOwner: "fictional-tools/river",
+          number: 44,
+          title: "Close the river loop",
+          url: "https://github.test/fictional-tools/river/issues/44",
+        }],
+      },
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    await screen.findByText("Add a fictional seed");
+    const seedRow = screen.getByRole("button", { name: "Select Add a fictional seed" });
+    const mossRow = screen.getByRole("button", { name: "Select Review fictional moss" });
+    const pullRequestRow = screen.getByRole("button", { name: "Select Keep fictional paths tidy" });
+
+    const offlinePill = within(seedRow).getByText("offline sync · 5/14");
+    expect(offlinePill.tagName).toBe("SPAN");
+
+    const truncatedPill = within(mossRow).getByText("a very long epic…");
+    expect(truncatedPill.tagName).toBe("SPAN");
+
+    const closingPill = within(pullRequestRow).getByText("fictional-tools/river#44");
+    expect(closingPill.tagName).toBe("SPAN");
+  });
+
   it("does not let a delayed refresh response steal a newer selection", async () => {
     const user = userEvent.setup();
     const refresh = deferred<ReturnType<typeof response>>();

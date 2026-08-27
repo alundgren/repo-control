@@ -650,10 +650,18 @@ function ItemFacts({
     if (item.additions !== null && item.deletions !== null) {
       facts.push({ className: "neutral", text: `+${item.additions} −${item.deletions}` });
     }
+    if (item.closingIssues.status === "complete") {
+      for (const related of item.closingIssues.items) {
+        facts.push({ className: "mono", text: `${related.repositoryNameWithOwner ?? repositoryName(overview, related.repositoryId)}#${related.number}` });
+      }
+    }
   } else if (item.queue === null) {
     facts.push(epicProgressFact(item));
   } else {
     facts.push(readinessFact(item, overview));
+    if (item.epic) {
+      facts.push({ className: "mono", text: epicPillText(item.epic) });
+    }
   }
   return (
     <span className="itemFacts">
@@ -666,6 +674,28 @@ function epicProgressFact(item: Extract<ApiItem, { type: "issue" }>) {
   return item.subIssues
     ? { className: "neutral", text: `${item.subIssues.completed}/${item.subIssues.total}` }
     : { className: "neutral", text: "No sampled progress" };
+}
+
+const EPIC_TITLE_PILL_LIMIT = 22;
+
+function shortEpicTitle(title: string) {
+  const stripped = title.replace(/^epic:\s*/i, "");
+  const chars = [...stripped];
+  if (chars.length <= EPIC_TITLE_PILL_LIMIT) {
+    return stripped;
+  }
+  let cut = chars.slice(0, EPIC_TITLE_PILL_LIMIT).join("");
+  const lastSpace = cut.lastIndexOf(" ");
+  if (lastSpace >= 10) {
+    cut = cut.slice(0, lastSpace);
+  }
+  return `${cut.trimEnd()}…`;
+}
+
+function epicPillText(epic: NonNullable<Extract<ApiItem, { type: "issue" }>["epic"]>) {
+  return epic.subIssues
+    ? `${shortEpicTitle(epic.title)} · ${epic.subIssues.completed}/${epic.subIssues.total}`
+    : shortEpicTitle(epic.title);
 }
 
 function readinessFact(
