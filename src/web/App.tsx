@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import { getOverview, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
 
-type View = "now" | "pullRequests" | "agent" | "human" | "triage";
+type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
 type ItemRefreshState = "idle" | "busy" | "success" | "partial" | "failed" | "removed";
 
@@ -34,10 +34,14 @@ const views: Record<View, ViewDetails> = {
     sectionTitle: "Triage",
     queue: "triage",
   },
+  epics: {
+    title: "Epics",
+    sectionTitle: "Epics",
+  },
 };
 
 const mainViews: View[] = ["now", "pullRequests"];
-const issueViews: View[] = ["agent", "human", "triage"];
+const issueViews: View[] = ["agent", "human", "triage", "epics"];
 const previewLimit = 2;
 const itemMessageDuration = 5_000;
 
@@ -460,14 +464,14 @@ function NowView({
     return <ListSection items={filteredItems} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind title="Search results" />;
   }
 
-  const previewViews: View[] = ["pullRequests", "agent", "human", "triage"];
+  const previewViews: View[] = ["pullRequests", "agent", "human", "triage", "epics"];
   return (
     <div className="queuePreviews">
       {previewViews.map((view) => {
         const items = itemsForView(overview, view);
         const details = views[view];
         return (
-          <section className="queueSection" key={view}>
+          <section aria-label={details.sectionTitle ?? details.title} className="queueSection" key={view}>
             <div className="sectionHeading">
               <h2>{details.sectionTitle}</h2>
             </div>
@@ -566,14 +570,14 @@ function QuickRead({ backLabel, headingRef, item, onBack, onRefresh, overview, r
   return (
     <aside aria-label="Quick read" className="quickRead">
       {onBack ? <button className="quietButton backToList" onClick={onBack} type="button">Back to {backLabel}</button> : null}
-      <p className="eyebrow">{item.type === "pull_request" ? "Pull request" : "Issue"}</p>
+      <p className="eyebrow">{item.type === "pull_request" ? "Pull request" : item.type === "issue" && item.queue === null ? "Epic" : "Issue"}</p>
       <p className="detailIdentity">{repositoryName(overview, item.repositoryId)} · {item.type === "pull_request" ? "PR" : "#"}{item.number}</p>
       <h2 ref={headingRef} tabIndex={-1}>{item.title}</h2>
       <p className="detailAge">Updated {relativeTime(item.updatedAt)}</p>
       <a className="detailLink" href={item.url} rel="noreferrer" target="_blank">Open on GitHub</a>
       <p className="itemExcerpt">{item.excerpt ?? "No text excerpt is available for this item."}</p>
       <p className="itemContextFreshness">Item facts checked {relativeTime(item.observedAt ?? item.updatedAt)}.</p>
-      {item.type === "pull_request" ? <ClosingIssueFacts item={item} /> : <BlockerFacts item={item} overview={overview} />}
+      {item.type === "pull_request" ? <ClosingIssueFacts item={item} /> : item.queue === null ? <EpicProgressFacts item={item} /> : <BlockerFacts item={item} overview={overview} />}
       <div className="itemRefresh">
         <button className="quietButton" disabled={refreshState === "busy"} onClick={() => onRefresh(item.id)} type="button">
           {refreshState === "busy" ? "Refreshing this item…" : "Refresh this item"}
@@ -589,6 +593,25 @@ function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_requ
   if (item.closingIssues.status === "not_sampled") return <p>Closing-issue details were not sampled.</p>;
   if (item.closingIssues.items.length === 0) return <p>No closing issue linked.</p>;
   return <p>{item.closingIssues.items.map((issue, index) => <span key={issue.id}>{index > 0 ? ", " : "Closes "}<a href={issue.url} rel="noreferrer" target="_blank">{issue.repositoryNameWithOwner}#{issue.number}</a></span>)}</p>;
+}
+
+function EpicProgressFacts({ item }: { item: Extract<ApiItem, { type: "issue" }> }) {
+  if (!item.subIssues) {
+    return (
+      <div className="epicProgress">
+        <p className="eyebrow">Progress</p>
+        <p>Children were not sampled yet. Refresh this epic or sync the account to sample its children.</p>
+      </div>
+    );
+  }
+  const percent = item.subIssues.total === 0 ? 0 : Math.round((100 * item.subIssues.completed) / item.subIssues.total);
+  return (
+    <div className="epicProgress">
+      <p className="eyebrow">Progress</p>
+      <div aria-hidden="true" className="progressTrack"><span className="progressFill" style={{ width: `${percent}%` }} /></div>
+      <p>{item.subIssues.completed} of {item.subIssues.total} children closed.</p>
+    </div>
+  );
 }
 
 function BlockerFacts({ item, overview }: { item: Extract<ApiItem, { type: "issue" }>; overview: Extract<OverviewResponse, { status: "ready" }> }) {
@@ -627,6 +650,8 @@ function ItemFacts({
     if (item.additions !== null && item.deletions !== null) {
       facts.push({ className: "neutral", text: `+${item.additions} −${item.deletions}` });
     }
+  } else if (item.queue === null) {
+    facts.push(epicProgressFact(item));
   } else {
     facts.push(readinessFact(item, overview));
   }
@@ -635,6 +660,12 @@ function ItemFacts({
       {facts.map((fact, index) => <span className={`tag ${fact.className}`} key={`${fact.text}-${index}`}>{fact.text}</span>)}
     </span>
   );
+}
+
+function epicProgressFact(item: Extract<ApiItem, { type: "issue" }>) {
+  return item.subIssues
+    ? { className: "neutral", text: `${item.subIssues.completed}/${item.subIssues.total}` }
+    : { className: "neutral", text: "No sampled progress" };
 }
 
 function readinessFact(
@@ -663,14 +694,17 @@ function itemsForView(overview: Extract<OverviewResponse, { status: "ready" }>, 
   if (view === "pullRequests") {
     return overview.pullRequests;
   }
+  if (view === "epics") {
+    return overview.epics;
+  }
   if (view === "now") {
-    return [overview.pullRequests, ...overview.queues.map((queue) => queue.issues)].flat();
+    return [overview.pullRequests, overview.epics, ...overview.queues.map((queue) => queue.issues)].flat();
   }
   return overview.queues.find((queue) => queue.name === views[view].queue)?.issues ?? [];
 }
 
 function itemFromOverview(overview: Extract<OverviewResponse, { status: "ready" }>, nodeId: string): ApiItem | null {
-  return [...overview.pullRequests, ...overview.queues.flatMap((queue) => queue.issues)].find((item) => item.id === nodeId) ?? null;
+  return [...overview.pullRequests, ...overview.epics, ...overview.queues.flatMap((queue) => queue.issues)].find((item) => item.id === nodeId) ?? null;
 }
 
 function countForView(overview: Extract<OverviewResponse, { status: "ready" }>, view: View) {
@@ -684,8 +718,8 @@ function filterItems(items: ApiItem[], query: string, overview: Extract<Overview
   }
   return items.filter((item) => {
     const repository = repositoryName(overview, item.repositoryId);
-    const queue = item.type === "issue" ? queueTitle(item.queue) : "Pull request";
-    return `${item.title} ${repository} ${item.number} ${queue}`.toLocaleLowerCase().includes(normalizedQuery);
+    const kind = item.type === "issue" ? queueTitle(item.queue) : "Pull request";
+    return `${item.title} ${repository} ${item.number} ${kind}`.toLocaleLowerCase().includes(normalizedQuery);
   });
 }
 
@@ -719,7 +753,10 @@ function repositoryName(overview: Extract<OverviewResponse, { status: "ready" }>
   return overview.repositories.find((entry) => entry.id === repositoryId)?.nameWithOwner ?? "Repository unavailable";
 }
 
-function queueTitle(queue: string) {
+function queueTitle(queue: string | null) {
+  if (queue === null) {
+    return "Epic";
+  }
   const view = issueViews.find((name) => views[name].queue === queue);
   return view ? views[view].title : queue;
 }
@@ -729,6 +766,7 @@ function replaceOverviewItem(
   updated: ApiItem,
   metadata: { repositories?: Extract<OverviewResponse, { status: "ready" }> ["repositories"]; scope?: Extract<OverviewResponse, { status: "ready" }> ["scope"] } = {},
 ): Extract<OverviewResponse, { status: "ready" }> {
+  const becameEpic = updated.type === "issue" && updated.queue === null;
   return {
     ...overview,
     repositories: metadata.repositories ?? overview.repositories,
@@ -738,11 +776,21 @@ function replaceOverviewItem(
       : overview.pullRequests.filter((item) => item.id !== updated.id),
     queues: overview.queues.map((queue) => ({
       ...queue,
-      issues: updated.type === "issue" && queue.name === updated.queue
+      issues: updated.type === "issue" && updated.queue !== null && queue.name === updated.queue
         ? [...queue.issues.filter((item) => item.id !== updated.id), updated].sort(compareIssues)
         : queue.issues.filter((item) => item.id !== updated.id),
     })),
+    epics: becameEpic
+      ? [...overview.epics.filter((item) => item.id !== updated.id), updated].sort(compareEpics)
+      : overview.epics.filter((item) => item.id !== updated.id),
   };
+}
+
+function compareEpics(left: ApiItem, right: ApiItem) {
+  return right.updatedAt.localeCompare(left.updatedAt)
+    || left.repositoryId.localeCompare(right.repositoryId)
+    || left.number - right.number
+    || left.id.localeCompare(right.id);
 }
 
 function comparePullRequests(left: Extract<ApiItem, { type: "pull_request" }>, right: Extract<ApiItem, { type: "pull_request" }>) {
@@ -773,6 +821,7 @@ function removeOverviewItem(
     scope: scope ?? overview.scope,
     pullRequests: overview.pullRequests.filter((item) => item.id !== nodeId),
     queues: overview.queues.map((queue) => ({ ...queue, issues: queue.issues.filter((item) => item.id !== nodeId) })),
+    epics: overview.epics.filter((item) => item.id !== nodeId),
   };
 }
 

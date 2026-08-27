@@ -215,6 +215,67 @@ describe("api read models", () => {
       }
     });
 
+    it("lists epic-labelled issues outside every queue with their own sampled progress", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceActiveSnapshot(
+          snapshot({
+            items: [
+              issue({
+                id: "I_epic_new",
+                number: 2,
+                labels: ["epic"],
+                updatedAt: "2026-08-25T10:00:00.000Z",
+                subIssues: { completed: 5, total: 14 },
+              }),
+              issue({ id: "I_epic_unsampled", number: 3, labels: ["epic"], updatedAt: "2026-08-24T10:00:00.000Z" }),
+              issue({
+                id: "I_child",
+                labels: ["ready-for-agent"],
+                relationships: [{ sourceId: "I_child", targetId: "I_epic_new", type: "parent" }],
+                relatedItems: [{
+                  id: "I_epic_new",
+                  repositoryId: "R_repo_1",
+                  repositoryNameWithOwner: "octo-user/fictional",
+                  number: 2,
+                  title: "Epic: offline sync",
+                  url: "https://github.test/fictional/issues/2",
+                }],
+              }),
+            ],
+          }),
+        );
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+
+        expect(overview.epics.map((epic) => epic.id)).toEqual(["I_epic_new", "I_epic_unsampled"]);
+        expect(overview.epics[0]).toMatchObject({
+          type: "issue",
+          queue: null,
+          subIssues: { completed: 5, total: 14 },
+        });
+        expect(overview.epics[1]?.subIssues).toBeNull();
+
+        const queuedIds = overview.queues.flatMap((queue) => queue.issues.map((issueRead) => issueRead.id));
+        expect(queuedIds).toEqual(["I_child"]);
+        expect(overview.queues.find((queue) => queue.name === "triage")?.issues).toEqual([]);
+
+        const child = overview.queues.flatMap((queue) => queue.issues)[0];
+        expect(child?.epic).toEqual({
+          id: "I_epic_new",
+          repositoryId: "R_repo_1",
+          repositoryNameWithOwner: "octo-user/fictional",
+          number: 2,
+          title: "Epic: offline sync",
+          url: "https://github.test/fictional/issues/2",
+          subIssues: { completed: 5, total: 14 },
+        });
+      } finally {
+        cache.close();
+      }
+    });
+
     it("exposes only the purpose-built issue and pull-request fields, nothing else from the cache row", async () => {
       const cache = await freshCache();
       try {
@@ -230,7 +291,7 @@ describe("api read models", () => {
         const [pullRequestRead] = overview.pullRequests;
 
         expect(Object.keys(issueRead!).sort()).toEqual(
-          ["createdAt", "excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "title", "type", "updatedAt", "url"].sort(),
+          ["createdAt", "epic", "excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "subIssues", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(pullRequestRead!).sort()).toEqual(
           [
@@ -385,6 +446,7 @@ function itemRecord({
   relationships = [] as CacheItem["relationships"],
   relatedItems,
   relationshipCoverage = { blocker: "complete", closing_issue: "complete", parent: "complete" } as CacheItem["relationshipCoverage"],
+  subIssues,
   updatedAt = "2026-08-23T10:00:00.000Z",
 }: {
   id?: string;
@@ -395,6 +457,7 @@ function itemRecord({
   relationships?: CacheItem["relationships"];
   relatedItems?: CacheItem["relatedItems"];
   relationshipCoverage?: CacheItem["relationshipCoverage"];
+  subIssues?: NonNullable<CacheItem["subIssues"]>;
   updatedAt?: string;
 } = {}): CacheItem & { type: "issue" } {
   return {
@@ -409,6 +472,7 @@ function itemRecord({
     relationships,
     relatedItems,
     relationshipCoverage,
+    ...(subIssues ? { subIssues } : {}),
     type: "issue",
   };
 }
