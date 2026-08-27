@@ -62,8 +62,60 @@ describe("GitHub work reads", () => {
     ]);
   });
 
-  it("marks GitHub's search-result cap as partial instead of claiming a complete inventory", async () => {
+  it("samples a parent link with its summary and the epic's sub-issue counts on search results", async () => {
     const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
+      const request = JSON.parse(String(init.body)) as { operationName: string; variables: { query?: string } };
+      if (request.operationName === "AccountSearchViewer") {
+        return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });
+      }
+      if (request.variables.query?.includes("is:issue")) {
+        return response(searchPayload([{ ...workItem(), parent: graphqlRelatedIssue({ id: "I_epic", number: 2 }), subIssuesSummary: { total: 14, completed: 5 } }], false, null, 1));
+      }
+      return response(searchPayload([], false, null, 0));
+    });
+
+    await expect(client.readAccountSnapshot({ updatedSince: null })).resolves.toMatchObject({
+      items: [
+        {
+          id: "I_1",
+          type: "issue",
+          relationships: [{ sourceId: "I_1", targetId: "I_epic", type: "parent" }],
+          relationshipCoverage: { blocker: "not_sampled", parent: "complete", closing_issue: "not_sampled" },
+          relatedItems: [relatedIssue({ id: "I_epic", number: 2 })],
+          subIssues: { total: 14, completed: 5 },
+        },
+      ],
+    });
+  });
+
+  it("maps a focused issue without a parent and keeps its sub-issue counts fresh", async () => {
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async () => response({
+      data: {
+        viewer: { id: "U_1" },
+        node: {
+          __typename: "Issue",
+          ...workItem(),
+          state: "OPEN",
+          parent: null,
+          subIssuesSummary: { total: 7, completed: 7 },
+        },
+        rateLimit: rateLimit(),
+      },
+    }));
+
+    await expect(client.readFocusedItem({ nodeId: "I_1" })).resolves.toMatchObject({
+      status: "open",
+      item: {
+        id: "I_1",
+        type: "issue",
+        relationships: [],
+        relationshipCoverage: { blocker: "not_sampled", parent: "complete", closing_issue: "not_sampled" },
+        subIssues: { total: 7, completed: 7 },
+      },
+    });
+  });
+
+  it("marks GitHub's search-result cap as partial instead of claiming a complete inventory", async () => {    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
       const request = JSON.parse(String(init.body)) as { operationName: string; variables: { query?: string } };
       if (request.operationName === "AccountSearchViewer") return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });
       return response(searchPayload(request.variables.query?.includes("is:issue") ? [workItem()] : [], false, null, request.variables.query?.includes("is:issue") ? 1_001 : 0));
