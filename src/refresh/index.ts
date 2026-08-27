@@ -282,8 +282,8 @@ function mergeItem(
   }
 
   const relatedItems: RelatedItemSummary[] | undefined = subject && subject.coverage[enrichedType] === "complete"
-    ? subject.relatedItems
-    : undefined;
+    ? mergeRelatedItems(previous?.relatedItems ?? [], subject.relatedItems)
+    : previous?.relatedItems;
   const base = {
     id: fresh.id,
     repositoryId: fresh.repositoryId,
@@ -296,11 +296,23 @@ function mergeItem(
     labels: fresh.labels,
     relationships,
     relationshipCoverage,
-    ...(relatedItems ? { relatedItems } : {}),
+    ...(relatedItems && relatedItems.length > 0 ? { relatedItems } : {}),
   };
 
   if (fresh.type === "issue") {
-    return { ...base, type: "issue" };
+    const subIssues = fresh.subIssues ?? (previous?.type === "issue" ? previous.subIssues : undefined);
+    return { ...base, type: "issue", ...(subIssues ? { subIssues } : {}) };
   }
   return { ...base, type: "pull_request", pullRequest: { ...fresh.pullRequest } };
+}
+
+function mergeRelatedItems(
+  existing: RelatedItemSummary[],
+  incoming: RelatedWorkItem[],
+): RelatedItemSummary[] {
+  const summaries = new Map(existing.map((related) => [related.id, related]));
+  for (const related of incoming) {
+    summaries.set(related.id, related);
+  }
+  return [...summaries.values()];
 }

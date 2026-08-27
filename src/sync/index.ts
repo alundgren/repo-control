@@ -239,6 +239,7 @@ function toCacheItem(item: GitHubWorkItem): CacheItem {
     relationships: item.relationships,
     relationshipCoverage: item.relationshipCoverage,
     relatedItems: item.relatedItems,
+    ...(item.type === "issue" && item.subIssues ? { subIssues: item.subIssues } : {}),
   };
   if (item.type === "issue") {
     return { ...base, type: "issue" };
@@ -306,7 +307,11 @@ function mergeEnrichment(item: GitHubWorkItem, subject: RelationshipEnrichmentSu
       ...item.relationships.filter((relationship) => relationship.type !== type),
       ...subject.relationships,
     ];
-    item.relatedItems = subject.relatedItems;
+    const summaries = new Map((item.relatedItems ?? []).map((related) => [related.id, related]));
+    for (const related of subject.relatedItems) {
+      summaries.set(related.id, related);
+    }
+    item.relatedItems = [...summaries.values()];
   }
 }
 
