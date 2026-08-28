@@ -6,8 +6,8 @@ export type TerminalProvisioningOutcome = "created" | "already_present";
 
 export type WebhookProvisioningStore = {
   replaceInventory(accountId: string, repositories: OwnedRepository[], observedAt: string): void;
-  getTerminalOutcome(accountId: string, repositoryId: string): { outcome: TerminalProvisioningOutcome; recordedAt: string } | null;
-  recordTerminalOutcome(accountId: string, repositoryId: string, outcome: TerminalProvisioningOutcome, recordedAt: string): void;
+  getTerminalOutcome(accountId: string, repositoryId: string): { outcome: TerminalProvisioningOutcome; specVersion: number; recordedAt: string } | null;
+  recordTerminalOutcome(accountId: string, repositoryId: string, outcome: TerminalProvisioningOutcome, recordedAt: string, specVersion?: number): void;
   close(): void;
 };
 
@@ -29,10 +29,15 @@ export function openWebhookProvisioningStore({ path }: { path: string }): Webhoo
       account_node_id TEXT NOT NULL,
       repository_node_id TEXT NOT NULL,
       outcome TEXT NOT NULL CHECK (outcome IN ('created', 'already_present')),
+      spec_version INTEGER NOT NULL DEFAULT 1,
       recorded_at TEXT NOT NULL,
       PRIMARY KEY (account_node_id, repository_node_id)
     );
   `);
+  const ledgerColumns = database.prepare("PRAGMA table_info(webhook_provisioning_ledger)").all() as Array<{ name: string }>;
+  if (!ledgerColumns.some((column) => column.name === "spec_version")) {
+    database.exec("ALTER TABLE webhook_provisioning_ledger ADD COLUMN spec_version INTEGER NOT NULL DEFAULT 1");
+  }
 
   return {
     replaceInventory(accountId, repositories, observedAt) {
@@ -50,17 +55,20 @@ export function openWebhookProvisioningStore({ path }: { path: string }): Webhoo
     },
     getTerminalOutcome(accountId, repositoryId) {
       return database.prepare(
-        `SELECT outcome, recorded_at AS recordedAt
+        `SELECT outcome, spec_version AS specVersion, recorded_at AS recordedAt
          FROM webhook_provisioning_ledger
          WHERE account_node_id = ? AND repository_node_id = ?`,
-      ).get(accountId, repositoryId) as { outcome: TerminalProvisioningOutcome; recordedAt: string } | undefined ?? null;
+      ).get(accountId, repositoryId) as { outcome: TerminalProvisioningOutcome; specVersion: number; recordedAt: string } | undefined ?? null;
     },
-    recordTerminalOutcome(accountId, repositoryId, outcome, recordedAt) {
+    recordTerminalOutcome(accountId, repositoryId, outcome, recordedAt, specVersion = 1) {
       database.prepare(
-        `INSERT INTO webhook_provisioning_ledger (account_node_id, repository_node_id, outcome, recorded_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(account_node_id, repository_node_id) DO NOTHING`,
-      ).run(accountId, repositoryId, outcome, recordedAt);
+        `INSERT INTO webhook_provisioning_ledger (account_node_id, repository_node_id, outcome, spec_version, recorded_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(account_node_id, repository_node_id) DO UPDATE SET
+           outcome = excluded.outcome,
+           spec_version = excluded.spec_version,
+           recorded_at = excluded.recorded_at`,
+      ).run(accountId, repositoryId, outcome, specVersion, recordedAt);
     },
     close() {
       database.close();

@@ -264,6 +264,100 @@ describe("bounded sampled sync", () => {
     }
   });
 
+  it("refreshes cached epic progress even when an incremental search omits the epic", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    let snapshotReads = 0;
+    let progressReads = 0;
+    const epic = {
+      ...issueItem(),
+      labels: [{ id: "L_epic", name: "epic" }],
+      subIssues: { completed: 0, total: 0 },
+    };
+    const client: SyncClient = {
+      async readAccountSnapshot() {
+        snapshotReads += 1;
+        return snapshotReads === 1
+          ? accountSnapshot({ fetchedAt: fullAt, items: [epic] })
+          : accountSnapshot({
+            fetchedAt: "2026-08-23T09:05:00.000Z",
+            items: [],
+            scope: { ...accountSnapshot().scope, reconciliation: "incremental", lastFullReconciliationAt: fullAt },
+          });
+      },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readEpicProgress({ nodeIds }: { nodeIds: string[] }) {
+        progressReads += 1;
+        return {
+          status: "complete" as const,
+          summaries: nodeIds.map((nodeId) => ({ nodeId, subIssues: progressReads === 1 ? { completed: 0, total: 0 } : { completed: 1, total: 7 } })),
+          rateLimit: { cost: 1, remaining: 4_800, resetAt: "2026-08-23T10:00:00.000Z" },
+        };
+      },
+    };
+
+    try {
+      const service = createSyncService({ cache, client });
+      await service.sync();
+      await service.sync();
+
+      expect(progressReads).toBe(2);
+      expect(cache.getItem(epic.id)?.subIssues).toEqual({ completed: 1, total: 7 });
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("retains cached epic progress and marks the sync partial when progress cannot be refreshed", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    const fullAt = "2026-08-23T09:00:00.000Z";
+    let snapshotReads = 0;
+    let progressReads = 0;
+    const epic = {
+      ...issueItem(),
+      labels: [{ id: "L_epic", name: "epic" }],
+      subIssues: { completed: 1, total: 7 },
+    };
+    const client: SyncClient = {
+      async readAccountSnapshot() {
+        snapshotReads += 1;
+        return snapshotReads === 1
+          ? accountSnapshot({ fetchedAt: fullAt, items: [epic] })
+          : accountSnapshot({
+            fetchedAt: "2026-08-23T09:05:00.000Z",
+            items: [],
+            scope: { ...accountSnapshot().scope, reconciliation: "incremental", lastFullReconciliationAt: fullAt },
+          });
+      },
+      async readRelationshipEnrichment({ nodeIds }) { return completeEnrichment(nodeIds); },
+      async readEpicProgress({ nodeIds }) {
+        progressReads += 1;
+        return progressReads === 1
+          ? {
+            status: "complete" as const,
+            summaries: nodeIds.map((nodeId) => ({ nodeId, subIssues: { completed: 1, total: 7 } })),
+            rateLimit: { cost: 1, remaining: 4_800, resetAt: "2026-08-23T10:00:00.000Z" },
+          }
+          : {
+            status: "unavailable" as const,
+            error: { code: "unavailable" as const, message: "GitHub work data is unavailable." },
+          };
+      },
+    };
+
+    try {
+      const service = createSyncService({ cache, client });
+      await service.sync();
+      await expect(service.sync()).resolves.toMatchObject({
+        status: "partial",
+        scope: { truncatedReason: "epic_progress_refresh_failed" },
+      });
+      expect(cache.getItem(epic.id)?.subIssues).toEqual({ completed: 1, total: 7 });
+    } finally {
+      cache.close();
+    }
+  });
+
   it("forces another full reconciliation after provisioning a webhook, including after a partial catch-up", async () => {
     const cache = openCache({ path: await createCachePath() });
     const reads: Array<{ updatedSince: string | null } | undefined> = [];
@@ -301,7 +395,7 @@ describe("bounded sampled sync", () => {
         webhookProvisioner: {
           async reconcile() {
             const created = provisioningRuns++ === 0 ? 1 : 0;
-            return { eligible: created, created, alreadyPresent: 0, failed: 0 };
+            return { eligible: created, created, updated: 0, alreadyPresent: 0, failed: 0 };
           },
         },
       });
@@ -346,7 +440,7 @@ describe("bounded sampled sync", () => {
         cache,
         client,
         now: () => new Date("2026-08-23T10:00:00.000Z").getTime(),
-        webhookProvisioner: { async reconcile() { return { eligible: 0, created: 0, alreadyPresent: 0, failed: 0 }; } },
+        webhookProvisioner: { async reconcile() { return { eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 }; } },
       });
 
       await service.sync();
@@ -391,7 +485,7 @@ describe("bounded sampled sync", () => {
         webhookProvisioner: {
           async reconcile() {
             const created = provisioningRuns++ === 1 ? 1 : 0;
-            return { eligible: created, created, alreadyPresent: 0, failed: 0 };
+            return { eligible: created, created, updated: 0, alreadyPresent: 0, failed: 0 };
           },
         },
       });
@@ -605,7 +699,7 @@ describe("bounded sampled sync", () => {
         webhookProvisioner: {
           async reconcile(inventory) {
             calls.push(`provision:${inventory.account.id}`);
-            return { eligible: 0, created: 0, alreadyPresent: 0, failed: 0 };
+            return { eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 };
           },
         },
         logEvent: (event) => events.push(event),

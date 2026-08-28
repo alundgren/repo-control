@@ -14,8 +14,10 @@ user-directed GitHub mutation. When the operator configures the receiver secret
 and exact HTTPS callback URL, an explicit sync may create one missing receiver
 webhook per active non-fork owned repository. Configuration is the operator's
 consent; there is no UI control, confirmation dialog, or startup provisioning.
-Existing matching or unrelated hooks are never repaired, disabled, updated, or
-deleted. Callback and secret rotation are manual operations.
+The provisioning ledger records the required webhook specification version. A
+later application version may update the one matching callback hook once when
+that specification advances. Unrelated hooks are never changed or deleted.
+Callback and secret rotation are manual operations.
 
 ## Full lists come from reconciled cache generations
 
@@ -33,10 +35,10 @@ than relying on the default result order.
 Later user-triggered syncs read items updated since the last full pass with a
 five-minute overlap. Node-ID upserts make overlap safe. An unset cursor makes
 the next explicit sync run a full pass. It is unset before the first full pass,
-after a partial full pass, and when webhook provisioning creates a repository
-hook. The last case makes the next explicit sync catch up work that existed
-before the hook. A full pass also happens after 24 hours. Repo Control does not
-poll GitHub in the background.
+after a partial full pass, and when webhook provisioning creates or updates a
+repository hook. The last case makes the next explicit sync catch up work that
+existed before the current event subscription. A full pass also happens after
+24 hours. Repo Control does not poll GitHub in the background.
 
 ## A fine-grained token stays outside application storage
 

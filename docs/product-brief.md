@@ -14,7 +14,8 @@ three questions without opening several GitHub tabs:
 
 Version one reads GitHub work data. It also has one operator-consented
 infrastructure mutation: during an explicit account sync it can create the
-receiver webhook that is missing from an eligible personal repository.
+receiver webhook that is missing from an eligible personal repository or
+update the matching receiver when the required event specification advances.
 
 - Show open pull requests, with rough size, a bounded in-place textual body
   excerpt, and a link back to GitHub.
@@ -77,9 +78,10 @@ does not force an account-wide sync.
 When both the receiver secret and a validated public receiver URL are set, an
 explicit account sync also inventories the personal account's repositories and
 creates a missing receiver webhook for each active, non-fork repository. This
-is repeat-safe and needs no browser control or startup task. Repo Control never
-repairs, disables, deletes, rotates, or otherwise changes an existing webhook;
-those remain manual operator work.
+is repeat-safe and needs no browser control or startup task. A versioned
+provisioning result may update the one matching receiver when the required
+event set changes. Repo Control never changes unrelated hooks; callback and
+secret rotation remain manual operator work.
 
 ## Later direction
 

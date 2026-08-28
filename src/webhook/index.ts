@@ -5,7 +5,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Cache } from "../cache/index.js";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import type { ItemRefreshService, UpsertOutcome } from "../refresh/index.js";
-import type { DeliveryRecord, DeliveryStore } from "./store.js";
+import type { DeliveryRecord, DeliveryStore, DeliveryTarget, SubIssueDeliveryTarget } from "./store.js";
 
 const DELIVERY_RETENTION_DAYS = 30;
 const DEFAULT_BODY_LIMIT = 256 * 1024;
@@ -96,7 +96,24 @@ export function createWebhookService({
     try {
       const timestamp = now();
       store.prune(new Date(timestamp.getTime() - DELIVERY_RETENTION_DAYS * 86_400_000).toISOString());
-      if (!target || (eventName !== "issues" && eventName !== "pull_request")) {
+      if (!target) {
+        store.finish(deliveryId, "manual_reconciliation", "unsupported_event", timestamp.toISOString());
+        logDelivery(delivery, "manual_reconciliation", "unsupported_event", logEvent);
+        return;
+      }
+
+      if (eventName === "sub_issues" && isSubIssueTarget(target)) {
+        const parentOutcome = await refreshService.refreshItem({ nodeId: target.parentNodeId });
+        if (!isSuccessfulRefresh(parentOutcome)) {
+          finishRefresh(delivery, parentOutcome, timestamp);
+          return;
+        }
+        const childOutcome = await refreshService.refreshItem({ nodeId: target.childNodeId });
+        finishRefresh(delivery, childOutcome, timestamp);
+        return;
+      }
+
+      if ((eventName !== "issues" && eventName !== "pull_request") || isSubIssueTarget(target)) {
         store.finish(deliveryId, "manual_reconciliation", "unsupported_event", timestamp.toISOString());
         logDelivery(delivery, "manual_reconciliation", "unsupported_event", logEvent);
         return;
@@ -104,6 +121,14 @@ export function createWebhookService({
 
       const cached = cache.getItem(target.nodeId);
       if (cached) {
+        const parentNodeId = cached.type === "issue" && changesChildProgress(target.action) ? parentId(cached) : null;
+        if (parentNodeId) {
+          const parentOutcome = await refreshService.refreshItem({ nodeId: parentNodeId });
+          if (!isSuccessfulRefresh(parentOutcome)) {
+            finishRefresh(delivery, parentOutcome, timestamp);
+            return;
+          }
+        }
         const outcome = await refreshService.refreshItem({ nodeId: target.nodeId });
         finishRefresh(delivery, outcome, timestamp);
         return;
@@ -112,6 +137,16 @@ export function createWebhookService({
         const outcome = refreshService.upsertItem
           ? await refreshService.upsertItem({ nodeId: target.nodeId })
           : ({ status: "failed", error: { code: "cache_write_failed" }, rateLimit: null } satisfies UpsertOutcome);
+        const parentNodeId = outcome.status === "updated" && outcome.item.type === "issue" && changesChildProgress(target.action)
+          ? parentId(outcome.item)
+          : null;
+        if (parentNodeId) {
+          const parentOutcome = await refreshService.refreshItem({ nodeId: parentNodeId });
+          if (!isSuccessfulRefresh(parentOutcome)) {
+            finishRefresh(delivery, parentOutcome, timestamp);
+            return;
+          }
+        }
         finishUpsert(delivery, outcome, timestamp);
         return;
       }
@@ -131,6 +166,10 @@ export function createWebhookService({
       const result = retryOrReconcile(delivery, outcome.error.code, retryAfter(outcome.error), retryAt(outcome.error), timestamp, outcome.error.code === "authentication_failed");
       logDelivery(delivery, result.status, outcome.error.code, logEvent, result.retryDelayMs);
     }
+  }
+
+  function isSuccessfulRefresh(outcome: Awaited<ReturnType<ItemRefreshService["refreshItem"]>>) {
+    return outcome.status === "updated" || outcome.status === "removed" || outcome.status === "not_found";
   }
 
   function finishUpsert(delivery: Awaited<ReturnType<DeliveryStore["takePending"]>>[number], outcome: UpsertOutcome, timestamp: Date) {
@@ -210,7 +249,7 @@ function logDelivery(
     deliveryId: delivery.deliveryId,
     eventName: delivery.eventName,
     action: delivery.target?.action ?? null,
-    itemType: delivery.target?.itemType ?? null,
+    itemType: delivery.target && !isSubIssueTarget(delivery.target) ? delivery.target.itemType : delivery.target ? "issue" : null,
     attempt: delivery.attempts,
     detail,
     ...(retryDelayMs === undefined ? {} : { retryDelayMs }),
@@ -260,6 +299,23 @@ function normalizeDelivery(body: Buffer, deliveryId: string | undefined, eventNa
     return null;
   }
   if (!isRecord(payload)) return null;
+  if (eventName === "sub_issues") {
+    const parent = payload.parent_issue;
+    const child = payload.sub_issue;
+    if (!isRecord(parent) || typeof parent.node_id !== "string" || !isRecord(child) || typeof child.node_id !== "string" || !isRecord(payload.repository)) {
+      return { deliveryId, eventName, target: null };
+    }
+    return {
+      deliveryId,
+      eventName,
+      target: {
+        kind: "sub_issue",
+        parentNodeId: parent.node_id,
+        childNodeId: child.node_id,
+        action: typeof payload.action === "string" ? payload.action : "unknown",
+      },
+    };
+  }
   const raw = eventName === "issues" ? payload.issue : eventName === "pull_request" ? payload.pull_request : null;
   if (!isRecord(raw) || typeof raw.node_id !== "string" || !Number.isInteger(raw.number) || !isRecord(payload.repository)) {
     return { deliveryId, eventName, target: null };
@@ -280,6 +336,19 @@ function normalizeDelivery(body: Buffer, deliveryId: string | undefined, eventNa
 
 function isUpsertAction(action: string) {
   return action === "opened" || action === "reopened" || action === "transferred";
+}
+
+function changesChildProgress(action: string) {
+  return action === "closed" || action === "reopened" || action === "transferred";
+}
+
+function isSubIssueTarget(target: DeliveryTarget): target is SubIssueDeliveryTarget {
+  return "kind" in target && target.kind === "sub_issue";
+}
+
+function parentId(item: NonNullable<ReturnType<Cache["getItem"]>>) {
+  if (item.relationshipCoverage?.parent !== "complete") return null;
+  return item.relationships?.find((relationship) => relationship.type === "parent")?.targetId ?? null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

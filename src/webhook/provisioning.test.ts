@@ -21,24 +21,103 @@ describe("webhook provisioning", () => {
     const provisioner = createWebhookProvisioner({
       store,
       client: {
-        async listHooks() { return { status: "complete" as const, hooks: [{ callbackUrl: "https://hooks.example.test/other" }] }; },
+        async listHooks() { return { status: "complete" as const, hooks: [hook({ callbackUrl: "https://hooks.example.test/other" })] }; },
         async createHook(input) { createCalls.push(input); return { status: "created" as const }; },
+        async updateHook() { throw new Error("must not update"); },
       },
       configuration: configuration(),
       now: () => "2026-08-24T12:00:00.000Z",
     });
 
     try {
-      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 1, created: 1, alreadyPresent: 0, failed: 0 });
-      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, alreadyPresent: 0, failed: 0 });
-      expect(createCalls).toEqual([expect.objectContaining({ events: ["issues", "pull_request"], active: true, contentType: "json" })]);
-      expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({ outcome: "created", recordedAt: "2026-08-24T12:00:00.000Z" });
+      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 1, created: 1, updated: 0, alreadyPresent: 0, failed: 0 });
+      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
+      expect(createCalls).toEqual([expect.objectContaining({ events: ["issues", "pull_request", "sub_issues"], active: true, contentType: "json" })]);
+      expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({ outcome: "created", specVersion: 2, recordedAt: "2026-08-24T12:00:00.000Z" });
     } finally {
       store.close();
     }
   });
 
-  it("paginates hooks and leaves an exact matching malformed hook untouched", async () => {
+  it("updates a version-one callback hook once when the required events change", async () => {
+    const store = openWebhookProvisioningStore({ path: await createStorePath() });
+    store.recordTerminalOutcome("U_fixture", "R_1", "created", "2026-08-24T12:00:00.000Z");
+    const updates: unknown[] = [];
+    let listCalls = 0;
+    const provisioner = createWebhookProvisioner({
+      store,
+      client: {
+        async listHooks() {
+          listCalls += 1;
+          return {
+            status: "complete" as const,
+            hooks: [{
+              id: 17,
+              callbackUrl: configuration().callbackUrl,
+              active: true,
+              contentType: "json",
+              events: ["issues", "pull_request"],
+            }],
+          };
+        },
+        async createHook() { throw new Error("must not create"); },
+        async updateHook(input: unknown) { updates.push(input); return { status: "updated" as const }; },
+      },
+      configuration: configuration(),
+      now: () => "2026-08-28T12:00:00.000Z",
+    });
+
+    try {
+      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 1, created: 0, updated: 1, alreadyPresent: 0, failed: 0 });
+      await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
+      expect(updates).toEqual([expect.objectContaining({
+        hookId: 17,
+        events: ["issues", "pull_request", "sub_issues"],
+        active: true,
+        contentType: "json",
+      })]);
+      expect(listCalls).toBe(1);
+      expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({
+        outcome: "already_present",
+        specVersion: 2,
+        recordedAt: "2026-08-28T12:00:00.000Z",
+      });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps the previous specification version when a hook update fails, then retries", async () => {
+    const store = openWebhookProvisioningStore({ path: await createStorePath() });
+    store.recordTerminalOutcome("U_fixture", "R_1", "created", "2026-08-24T12:00:00.000Z");
+    let updateAttempts = 0;
+    const provisioner = createWebhookProvisioner({
+      store,
+      client: {
+        async listHooks() { return { status: "complete" as const, hooks: [hook({ events: ["issues", "pull_request"] })] }; },
+        async createHook() { throw new Error("must not create"); },
+        async updateHook() {
+          updateAttempts += 1;
+          return updateAttempts === 1
+            ? { status: "failed" as const, code: "unavailable" as const }
+            : { status: "updated" as const };
+        },
+      },
+      configuration: configuration(),
+      now: () => "2026-08-28T12:00:00.000Z",
+    });
+
+    try {
+      await expect(provisioner.reconcile(inventory())).resolves.toMatchObject({ updated: 0, failed: 1 });
+      expect(store.getTerminalOutcome("U_fixture", "R_1")?.specVersion).toBe(1);
+      await expect(provisioner.reconcile(inventory())).resolves.toMatchObject({ updated: 1, failed: 0 });
+      expect(store.getTerminalOutcome("U_fixture", "R_1")?.specVersion).toBe(2);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("paginates hooks and records an exact current hook without updating it", async () => {
     const store = openWebhookProvisioningStore({ path: await createStorePath() });
     const pages: number[] = [];
     const provisioner = createWebhookProvisioner({
@@ -48,9 +127,10 @@ describe("webhook provisioning", () => {
           pages.push(page);
           return page === 1
             ? { status: "complete" as const, hooks: [], hasNextPage: true }
-            : { status: "complete" as const, hooks: [{ callbackUrl: configuration().callbackUrl }], hasNextPage: false };
+            : { status: "complete" as const, hooks: [hook()], hasNextPage: false };
         },
         async createHook() { throw new Error("must not create"); },
+        async updateHook() { throw new Error("must not update"); },
       },
       configuration: configuration(),
     });
@@ -68,7 +148,7 @@ describe("webhook provisioning", () => {
     const store = openWebhookProvisioningStore({ path: await createStorePath() });
     const provisioner = createWebhookProvisioner({
       store,
-      client: { async listHooks() { return { status: "complete" as const, hooks: [] }; }, async createHook() { return { status: "created" as const }; } },
+      client: { async listHooks() { return { status: "complete" as const, hooks: [] }; }, async createHook() { return { status: "created" as const }; }, async updateHook() { throw new Error("must not update"); } },
       configuration: configuration(),
     });
 
@@ -76,7 +156,7 @@ describe("webhook provisioning", () => {
       await expect(provisioner.reconcile(inventory({ repositories: [
         { id: "R_fork", nameWithOwner: "octo/fork", isFork: true, isArchived: false },
         { id: "R_archive", nameWithOwner: "octo/archive", isFork: false, isArchived: true },
-      ] }))).resolves.toEqual({ eligible: 0, created: 0, alreadyPresent: 0, failed: 0 });
+      ] }))).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
     } finally {
       store.close();
     }
@@ -90,6 +170,7 @@ describe("webhook provisioning", () => {
       client: {
         async listHooks() { return attempt++ === 0 ? { status: "failed" as const, code: "unavailable" } : { status: "complete" as const, hooks: [] }; },
         async createHook() { return attempt++ === 2 ? { status: "failed" as const, code: "unavailable" } : { status: "created" as const }; },
+        async updateHook() { throw new Error("must not update"); },
       },
       configuration: configuration(),
     });
@@ -110,18 +191,19 @@ describe("webhook provisioning", () => {
     const store = openWebhookProvisioningStore({ path: await createStorePath() });
     let remoteExists = false;
     let failWrite = true;
-    const backingStore = { ...store, recordTerminalOutcome(accountId: string, repositoryId: string, outcome: "created" | "already_present", recordedAt: string) {
+    const backingStore = { ...store, recordTerminalOutcome(accountId: string, repositoryId: string, outcome: "created" | "already_present", recordedAt: string, specVersion?: number) {
       if (failWrite) {
         failWrite = false;
         throw new Error("local write interrupted");
       }
-      store.recordTerminalOutcome(accountId, repositoryId, outcome, recordedAt);
+      store.recordTerminalOutcome(accountId, repositoryId, outcome, recordedAt, specVersion);
     } };
     const provisioner = createWebhookProvisioner({
       store: backingStore,
       client: {
-        async listHooks() { return { status: "complete" as const, hooks: remoteExists ? [{ callbackUrl: configuration().callbackUrl }] : [] }; },
+        async listHooks() { return { status: "complete" as const, hooks: remoteExists ? [hook()] : [] }; },
         async createHook() { remoteExists = true; return { status: "created" as const }; },
+        async updateHook() { throw new Error("must not update"); },
       },
       configuration: configuration(),
     });
@@ -140,7 +222,7 @@ describe("webhook provisioning", () => {
     const firstStore = openWebhookProvisioningStore({ path });
     const firstProvisioner = createWebhookProvisioner({
       store: firstStore,
-      client: { async listHooks() { return { status: "complete" as const, hooks: [] }; }, async createHook() { return { status: "created" as const }; } },
+      client: { async listHooks() { return { status: "complete" as const, hooks: [] }; }, async createHook() { return { status: "created" as const }; }, async updateHook() { throw new Error("must not update"); } },
       configuration: configuration(),
     });
     await firstProvisioner.reconcile(inventory());
@@ -153,11 +235,11 @@ describe("webhook provisioning", () => {
     const restartedStore = openWebhookProvisioningStore({ path });
     const restartedProvisioner = createWebhookProvisioner({
       store: restartedStore,
-      client: { async listHooks() { throw new Error("must not call GitHub"); }, async createHook() { throw new Error("must not create"); } },
+      client: { async listHooks() { throw new Error("must not call GitHub"); }, async createHook() { throw new Error("must not create"); }, async updateHook() { throw new Error("must not update"); } },
       configuration: configuration(),
     });
     try {
-      await expect(restartedProvisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, alreadyPresent: 0, failed: 0 });
+      await expect(restartedProvisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
     } finally {
       restartedStore.close();
     }
@@ -188,6 +270,17 @@ describe("webhook provisioning", () => {
 
 function configuration() {
   return { secret: "webhook-secret-for-tests", callbackUrl: "https://hooks.example.test/webhooks/github" };
+}
+
+function hook(overrides: Partial<{ id: number; callbackUrl: string; active: boolean; contentType: string; events: string[] }> = {}) {
+  return {
+    id: 17,
+    callbackUrl: configuration().callbackUrl,
+    active: true,
+    contentType: "json",
+    events: ["issues", "pull_request", "sub_issues"],
+    ...overrides,
+  };
 }
 
 function inventory(overrides: Partial<OwnedRepositoryInventory> = {}): OwnedRepositoryInventory {

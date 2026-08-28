@@ -3,8 +3,9 @@
 Repo Control accepts GitHub deliveries at one receiver: `POST
 /webhooks/github`. The receiver reads at most 256 KiB, checks
 `X-Hub-Signature-256` with `REPO_CONTROL_GITHUB_WEBHOOK_SECRET`, then parses
-and stores only the delivery ID, event name, action, node ID, repository node
-ID, item type, and number. It never logs the request body or secret.
+and stores only the delivery ID, event name, action, relevant issue node IDs,
+repository node ID, item type, and number. It never logs the request body or
+secret.
 
 Set the secret in the host environment before starting the server:
 
@@ -28,25 +29,30 @@ REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL='https://hooks.example.com/webhooks/git
 
 On each explicit account sync, Repo Control fully inventories personal-account
 repositories, then considers only active, non-fork repositories without a
-terminal provisioning result. It pages their hooks looking only for an exact
-callback URL. An exact match is left entirely untouched and recorded as
-`already_present`; when absent, Repo Control creates one active JSON webhook
-for the `issues` and `pull_request` events and records `created`.
+terminal result for the current webhook specification. The current
+specification requires one active JSON webhook for the `issues`,
+`pull_request`, and `sub_issues` events.
 
-Repo Control never updates, disables, deletes, repairs, or rotates a webhook,
-even when an existing matching hook is inactive, has the wrong events, or uses
-an old secret. Change the callback or secret manually in GitHub, then remove or
-manage the affected webhook there. A failed hook read or creation records no
-terminal result, so the next successful explicit sync retries safely. The PAT
-needs **Webhooks: Read and write** in addition to the read permissions.
+The provisioning ledger records the specification version. A current result
+skips GitHub entirely. When the application advances the specification, Repo
+Control pages hooks for the exact callback URL. It records an already-current
+hook as `already_present`, updates one older matching hook, or creates the hook
+when absent. It never changes an unrelated hook, and it treats multiple hooks
+with the configured callback as a failure rather than choosing one. A failed
+read, creation, or update leaves the earlier ledger version intact so the next
+explicit sync retries. Callback and secret changes remain manual operations.
+The PAT needs **Webhooks: Read and write** in addition to the read permissions.
 
 The webhook route acknowledges a valid new or duplicate delivery with `202`
 only after its SQLite ledger transaction commits. A worker then claims pending
 rows, refreshes cached items, and upserts opened, reopened, or transferred-in
 items after GitHub confirms that the item is open and belongs to the connected
-personal account. Failed work is marked for manual reconciliation. Pending
-and interrupted processing rows resume after restart. Terminal ledger rows are
-retained for 30 days and pruned after that period.
+personal account. A sub-issue link refreshes both the parent and child. A child
+issue change refreshes its known parent before processing the child, so closing
+the child cannot leave the parent's progress stale. Failed work is marked for
+manual reconciliation. Pending and interrupted processing rows resume after
+restart. Terminal ledger rows are retained for 30 days and pruned after that
+period.
 
 ## Cloudflare Tunnel boundary
 
@@ -70,8 +76,8 @@ ingress:
 
 The catch-all rule is intentional. The origin also accepts only `POST` for
 the receiver, while GitHub's webhook configuration should select only the
-issue and pull-request events required by this release. Do not add a second
-public ingress rule for `/api`, `/events`, `/`, or `/health`.
+issue, pull-request, and sub-issue events required by this release. Do not add
+a second public ingress rule for `/api`, `/events`, `/`, or `/health`.
 
 Tunnel ingress matches host and path, not HTTP methods. Add a Cloudflare WAF
 custom rule on `hooks.example.com` that blocks every request except `POST` to
@@ -87,12 +93,12 @@ closed at the application.
 
 ## Supported deliveries and recovery
 
-The worker handles issue changes and pull-request changes, including edits,
-labels, assignments, milestones, transfers, state changes, and pull-request
-commit updates (`synchronize`). A cached item emits an item-scoped event only
-after its cache write or removal succeeds. Closed issues, closed pull requests,
-merged pull requests, and repositories outside the connected account are
-normal removal outcomes.
+The worker handles issue, pull-request, and sub-issue changes, including edits,
+labels, assignments, milestones, transfers, state changes, parent links, and
+pull-request commit updates (`synchronize`). A cached item emits an item-scoped
+event only after its cache write or removal succeeds. Closed issues, closed
+pull requests, merged pull requests, and repositories outside the connected
+account are normal removal outcomes.
 
 The browser uses `GET /events` over SSE. It buffers events while it silently
 reconciles the overview after a reconnect, then applies them in order. A

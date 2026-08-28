@@ -1,4 +1,4 @@
-import type { Cache, CacheItem, PullRequestFacts, SuccessfulSnapshot } from "../cache/index.js";
+import type { Cache, CacheItem, PullRequestFacts, SubIssuesSummary, SuccessfulSnapshot } from "../cache/index.js";
 import type { ReconciliationCoordinator } from "../coordination/index.js";
 import type {
   AccountSnapshot,
@@ -10,13 +10,13 @@ import type {
   UnavailableRead,
   RelationshipEnrichmentSubject,
 } from "../github/read-client.js";
-import { RECONCILIATION_PAGE_SIZE, RELATIONSHIP_SUBJECT_LIMIT, SEARCH_RESULT_LIMIT } from "../github/read-client.js";
+import { EPIC_PROGRESS_SUBJECT_LIMIT, RECONCILIATION_PAGE_SIZE, RELATIONSHIP_SUBJECT_LIMIT, SEARCH_RESULT_LIMIT } from "../github/read-client.js";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import type { WebhookProvisioner } from "../webhook/provisioning.js";
 
 export const FULL_RECONCILIATION_INTERVAL_HOURS = 24;
 
-export type SyncClient = Pick<GitHubReadClient, "readAccountSnapshot" | "readRelationshipEnrichment" | "readOwnedRepositoryInventory">;
+export type SyncClient = Pick<GitHubReadClient, "readAccountSnapshot" | "readRelationshipEnrichment" | "readOwnedRepositoryInventory"> & Partial<Pick<GitHubReadClient, "readEpicProgress">>;
 
 export type SyncOutcome = SyncSuccess | SyncFailure;
 
@@ -110,13 +110,14 @@ async function reconcileWebhookProvisioning(cache: Cache, client: SyncClient, pr
       return;
     }
     const summary = await provisioner.reconcile(inventory);
-    if (summary.created > 0) cache.clearActiveGenerationLastFullReconciledAt();
+    if (summary.created > 0 || summary.updated > 0) cache.clearActiveGenerationLastFullReconciledAt();
     emitLogEvent(logEvent, {
       event: "webhook.provisioning.finished",
       level: summary.failed > 0 ? "warn" : "info",
       status: "complete",
       eligibleCount: summary.eligible,
       createdCount: summary.created,
+      updatedCount: summary.updated,
       alreadyPresentCount: summary.alreadyPresent,
       failedCount: summary.failed,
       errorCode: summary.failed > 0 ? "repository_provisioning_failed" : undefined,
@@ -166,7 +167,9 @@ async function runSync(cache: Cache, client: SyncClient, now: () => number): Pro
   const read = await client.readAccountSnapshot({ updatedSince });
   if ("status" in read) return toFailure(cache, read);
   const enriched = await enrichRelationships(client, read);
-  return toSuccess(cache, enriched.read, active, enriched.rateLimit);
+  const epicProgress = await refreshEpicProgress(cache, client, enriched.read, active);
+  const supplementalRateLimit = addOptionalRateLimits(enriched.rateLimit, epicProgress.rateLimit);
+  return toSuccess(cache, epicProgress.read, active, supplementalRateLimit, epicProgress.summaries);
 }
 
 function toFailure(cache: Cache, read: UnavailableRead): SyncFailure {
@@ -184,8 +187,9 @@ function toSuccess(
   read: AccountSnapshot,
   active: ReturnType<Cache["getActiveSnapshot"]>,
   enrichmentRateLimit: GitHubRateLimit | null,
+  epicProgress: Map<string, SubIssuesSummary> = new Map(),
 ): SyncSuccess {
-  const snapshot = toSuccessfulSnapshot(read, active);
+  const snapshot = toSuccessfulSnapshot(read, active, epicProgress);
   const generationId = cache.replaceActiveSnapshot(snapshot);
 
   return {
@@ -197,13 +201,21 @@ function toSuccess(
   };
 }
 
-function toSuccessfulSnapshot(read: AccountSnapshot, active: ReturnType<Cache["getActiveSnapshot"]>): SuccessfulSnapshot {
+function toSuccessfulSnapshot(
+  read: AccountSnapshot,
+  active: ReturnType<Cache["getActiveSnapshot"]>,
+  epicProgress: Map<string, SubIssuesSummary> = new Map(),
+): SuccessfulSnapshot {
   const reconciliation = read.scope.reconciliation ?? "full";
   const inventoryComplete = read.scope.inventoryComplete ?? !read.scope.partialReasons.some((reason) => reason.kind === "repository_limit" || reason.kind === "item_limit" || reason.kind === "search_result_limit");
   const retainPriorItems = reconciliation === "incremental" || !inventoryComplete;
   const retained = retainPriorItems && active ? active.items : [];
   const mergedItems = new Map(retained.map((item) => [item.id, item]));
   for (const item of read.items) mergedItems.set(item.id, toCacheItem(item));
+  for (const [nodeId, subIssues] of epicProgress) {
+    const item = mergedItems.get(nodeId);
+    if (item?.type === "issue") mergedItems.set(nodeId, { ...item, subIssues });
+  }
   const repositories = new Map((retainPriorItems && active ? active.repositories : []).map((repository) => [repository.id, repository]));
   for (const repository of read.repositories) repositories.set(repository.id, repository);
   const isFullInventory = reconciliation === "full" && inventoryComplete;
@@ -223,6 +235,47 @@ function toSuccessfulSnapshot(read: AccountSnapshot, active: ReturnType<Cache["g
       truncatedReason: toTruncatedReason(read.scope.partialReasons),
     },
   };
+}
+
+async function refreshEpicProgress(
+  cache: Cache,
+  client: SyncClient,
+  read: AccountSnapshot,
+  active: ReturnType<Cache["getActiveSnapshot"]>,
+) {
+  const summaries = new Map<string, SubIssuesSummary>();
+  if (!client.readEpicProgress) return { read, summaries, rateLimit: null };
+  const epicLabel = cache.getEpicLabel();
+  const candidates = new Map([...(active?.items ?? []), ...read.items].map((item) => [item.id, item]));
+  const nodeIds = [...candidates.values()]
+    .filter((item) => item.type === "issue" && item.labels.some((label) => label.name === epicLabel))
+    .map((item) => item.id);
+  let failed = false;
+  let rateLimit: GitHubRateLimit | null = null;
+  for (let index = 0; index < nodeIds.length; index += EPIC_PROGRESS_SUBJECT_LIMIT) {
+    const progress = await client.readEpicProgress({ nodeIds: nodeIds.slice(index, index + EPIC_PROGRESS_SUBJECT_LIMIT) });
+    if (progress.status === "unavailable") {
+      failed = true;
+      rateLimit = progress.rateLimit ? addOptionalRateLimits(rateLimit, progress.rateLimit) : rateLimit;
+      break;
+    }
+    rateLimit = addOptionalRateLimits(rateLimit, progress.rateLimit);
+    for (const summary of progress.summaries) summaries.set(summary.nodeId, summary.subIssues);
+    if (progress.status === "partial") failed = true;
+  }
+  return {
+    read: failed
+      ? { ...read, scope: { ...read.scope, status: "partial" as const, partialReasons: [...read.scope.partialReasons, { kind: "epic_progress_refresh_failed" as const }] } }
+      : read,
+    summaries,
+    rateLimit,
+  };
+}
+
+function addOptionalRateLimits(previous: GitHubRateLimit | null, next: GitHubRateLimit | null): GitHubRateLimit | null {
+  if (!previous) return next;
+  if (!next) return previous;
+  return addRateLimit(previous, next);
 }
 
 function toCacheItem(item: GitHubWorkItem): CacheItem {
