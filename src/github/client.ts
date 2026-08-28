@@ -90,6 +90,14 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
         return unavailableRead(error);
       }
     },
+    async readEpicProgress({ nodeIds }) {
+      try {
+        const data = await readWorkGraphQL(fetch, token, "EpicProgress", EPIC_PROGRESS_QUERY, { ids: nodeIds });
+        return parseEpicProgress(data, nodeIds);
+      } catch (error) {
+        return unavailableRead(error);
+      }
+    },
   };
 }
 
@@ -152,6 +160,14 @@ const RELATIONSHIP_QUERY = `query EnrichWorkItemRelationships($ids: [ID!]!) {
       id
       closingIssuesReferences(first: ${RELATIONSHIP_LIMIT}) { nodes { ${RELATED_ISSUE_FIELDS} } pageInfo { hasNextPage endCursor } }
     }
+  }
+  rateLimit { cost remaining resetAt }
+}`;
+
+const EPIC_PROGRESS_QUERY = `query EpicProgress($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    __typename
+    ... on Issue { id subIssuesSummary { total completed } }
   }
   rateLimit { cost remaining resetAt }
 }`;
@@ -327,6 +343,22 @@ function unavailableRelationshipSubject(nodeId: string, type?: unknown): Relatio
     relationships: [],
     relatedItems: [],
     status: "read",
+  };
+}
+
+function parseEpicProgress(data: Record<string, unknown>, requestedNodeIds: string[]): import("./read-client.js").EpicProgressRead {
+  const rateLimit = parseRateLimit(data.rateLimit);
+  if (!Array.isArray(data.nodes)) throw new WorkReadFailure("invalid_response");
+  const summaries: Array<{ nodeId: string; subIssues: import("./read-client.js").SubIssuesSummary }> = [];
+  for (const node of data.nodes) {
+    if (!isObject(node) || node.__typename !== "Issue" || !isString(node.id)) continue;
+    const subIssues = parseSubIssuesSummary(node.subIssuesSummary);
+    if (subIssues) summaries.push({ nodeId: node.id, subIssues });
+  }
+  return {
+    status: summaries.length === requestedNodeIds.length ? "complete" : "partial",
+    summaries,
+    rateLimit,
   };
 }
 

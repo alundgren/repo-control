@@ -5,6 +5,7 @@ export const BODY_EXCERPT_LIMIT = 500;
 export const LABEL_LIMIT = 20;
 export const RELATIONSHIP_LIMIT = 25;
 export const RELATIONSHIP_SUBJECT_LIMIT = 10;
+export const EPIC_PROGRESS_SUBJECT_LIMIT = 50;
 
 export type GitHubViewer = {
   id: string;
@@ -42,7 +43,14 @@ export type GitHubReadClient = {
   readAccountSnapshot(input?: { updatedSince: string | null }): Promise<AccountSnapshotRead>;
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
+  readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;
 };
+
+export type EpicProgressRead = {
+  status: "complete" | "partial";
+  summaries: Array<{ nodeId: string; subIssues: SubIssuesSummary }>;
+  rateLimit: GitHubRateLimit;
+} | UnavailableRead;
 
 export type AccountSnapshot = {
   account: { id: string; login: string };
@@ -165,7 +173,8 @@ export type SnapshotPartialReason =
   | { kind: "item_limit"; repositoryId: string; itemType: "issue" | "pull_request" }
   | { kind: "label_limit"; itemId: string }
   | { kind: "relationship_limit"; itemId: string; relationshipType: RelationshipType }
-  | { kind: "relationship_enrichment_failed" };
+  | { kind: "relationship_enrichment_failed" }
+  | { kind: "epic_progress_refresh_failed" };
 
 export type FocusedReadScope = {
   status: "complete" | "partial";

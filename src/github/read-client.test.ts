@@ -115,6 +115,31 @@ describe("GitHub work reads", () => {
     });
   });
 
+  it("reads epic progress for a batch of unchanged issue nodes", async () => {
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_url, init) => {
+      const request = JSON.parse(String(init.body)) as { operationName: string; variables: { ids: string[] } };
+      expect(request).toEqual({ operationName: "EpicProgress", query: expect.any(String), variables: { ids: ["I_epic_1", "I_epic_2"] } });
+      return response({
+        data: {
+          nodes: [
+            { __typename: "Issue", id: "I_epic_1", subIssuesSummary: { total: 7, completed: 1 } },
+            { __typename: "Issue", id: "I_epic_2", subIssuesSummary: { total: 3, completed: 3 } },
+          ],
+          rateLimit: rateLimit(),
+        },
+      });
+    });
+
+    await expect(client.readEpicProgress({ nodeIds: ["I_epic_1", "I_epic_2"] })).resolves.toEqual({
+      status: "complete",
+      summaries: [
+        { nodeId: "I_epic_1", subIssues: { total: 7, completed: 1 } },
+        { nodeId: "I_epic_2", subIssues: { total: 3, completed: 3 } },
+      ],
+      rateLimit: rateLimit(),
+    });
+  });
+
   it("marks GitHub's search-result cap as partial instead of claiming a complete inventory", async () => {    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
       const request = JSON.parse(String(init.body)) as { operationName: string; variables: { query?: string } };
       if (request.operationName === "AccountSearchViewer") return response({ data: { viewer: { id: "U_1", login: "octo" }, rateLimit: rateLimit() } });

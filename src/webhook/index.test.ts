@@ -82,6 +82,113 @@ describe("GitHub webhook delivery", () => {
     store.close();
   });
 
+  it("refreshes the parent and child for a sub-issue link delivery", async () => {
+    const store = await deliveryStore();
+    const refreshes: string[] = [];
+    const service = createWebhookService({
+      cache: { getItem: () => ({ type: "issue" }) } as unknown as Cache,
+      refreshService: {
+        refreshItem: async ({ nodeId }) => {
+          refreshes.push(nodeId);
+          return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+    });
+    const body = Buffer.from(JSON.stringify(subIssuePayload()));
+
+    try {
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-sub-issue", eventName: "sub_issues" });
+      await service.start();
+
+      expect(refreshes).toEqual(["I_parent", "I_child"]);
+      expect(store.takePending(new Date().toISOString())).toEqual([]);
+    } finally {
+      await service.stop();
+      store.close();
+    }
+  });
+
+  it("refreshes a cached parent before processing a child state change", async () => {
+    const store = await deliveryStore();
+    const refreshes: string[] = [];
+    const service = createWebhookService({
+      cache: {
+        getItem(nodeId: string) {
+          if (nodeId === "I_child") return {
+            type: "issue",
+            relationshipCoverage: { parent: "complete" },
+            relationships: [{ sourceId: "I_child", targetId: "I_parent", type: "parent" }],
+          };
+          return { type: "issue" };
+        },
+      } as unknown as Cache,
+      refreshService: {
+        refreshItem: async ({ nodeId }) => {
+          refreshes.push(nodeId);
+          return nodeId === "I_child"
+            ? { status: "removed", reason: "closed", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } }
+            : { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+    });
+    const body = Buffer.from(JSON.stringify(issuePayload({ action: "closed", nodeId: "I_child" })));
+
+    try {
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-child-closed", eventName: "issues" });
+      await service.start();
+
+      expect(refreshes).toEqual(["I_parent", "I_child"]);
+    } finally {
+      await service.stop();
+      store.close();
+    }
+  });
+
+  it("refreshes the parent discovered while upserting a reopened child", async () => {
+    const store = await deliveryStore();
+    const calls: string[] = [];
+    const service = createWebhookService({
+      cache: { getItem: () => null } as unknown as Cache,
+      refreshService: {
+        refreshItem: async ({ nodeId }) => {
+          calls.push(`refresh:${nodeId}`);
+          return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+        upsertItem: async ({ nodeId }) => {
+          calls.push(`upsert:${nodeId}`);
+          return {
+            status: "updated",
+            item: {
+              type: "issue",
+              relationshipCoverage: { parent: "complete" },
+              relationships: [{ sourceId: nodeId, targetId: "I_parent", type: "parent" }],
+            } as never,
+            fetchedAt: "now",
+            relationshipStatus: "fresh",
+            rateLimit: { cost: 1, remaining: 1, resetAt: "later" },
+          };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+    });
+    const body = Buffer.from(JSON.stringify(issuePayload({ action: "reopened", nodeId: "I_child" })));
+
+    try {
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-child-reopened", eventName: "issues" });
+      await service.start();
+
+      expect(calls).toEqual(["upsert:I_child", "refresh:I_parent"]);
+    } finally {
+      await service.stop();
+      store.close();
+    }
+  });
+
   it("keeps a persisted delivery successful when the optional logger fails", async () => {
     const store = await deliveryStore();
     let upsertCount = 0;
@@ -189,6 +296,15 @@ function issuePayload({ action = "edited", nodeId = "I_fixture", title = "Fixtur
   return {
     action,
     issue: { node_id: nodeId, number: 7, title },
+    repository: { node_id: "R_fixture" },
+  };
+}
+
+function subIssuePayload() {
+  return {
+    action: "parent_issue_added",
+    parent_issue: { node_id: "I_parent", number: 7 },
+    sub_issue: { node_id: "I_child", number: 8 },
     repository: { node_id: "R_fixture" },
   };
 }

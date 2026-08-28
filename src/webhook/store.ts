@@ -1,12 +1,21 @@
 import Database from "better-sqlite3";
 
-export type DeliveryTarget = {
+export type WorkItemDeliveryTarget = {
   nodeId: string;
   repositoryId: string | null;
   itemType: "issue" | "pull_request";
   number: number;
   action: string;
 };
+
+export type SubIssueDeliveryTarget = {
+  kind: "sub_issue";
+  parentNodeId: string;
+  childNodeId: string;
+  action: string;
+};
+
+export type DeliveryTarget = WorkItemDeliveryTarget | SubIssueDeliveryTarget;
 
 export type DeliveryRecord = {
   deliveryId: string;

@@ -21,8 +21,8 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Module | Responsibility |
 | --- | --- |
 | GitHub read client | Paginates account-scoped searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. |
-| GitHub webhook client | Separately pages repository hooks and creates one configured receiver hook. It never updates, disables, or deletes a hook. |
-| Snapshot service (`src/sync`) | Reconciles the open account inventory, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
+| GitHub webhook client | Pages repository hooks, creates one configured receiver hook, and updates that matching hook when the required specification version advances. It never changes unrelated hooks. |
+| Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
@@ -80,9 +80,11 @@ GitHub response body.
    all reads finish. The UI keeps the previous generation if a sync read fails.
 5. A focused refresh reads one GitHub node, updates its normalized records, and
    returns the new detail state.
-6. A signed issue or pull-request webhook records its delivery before
-   acknowledgement. The asynchronous worker uses focused refresh for cached
-   work and a validated focused upsert for an uncached open item.
+6. A signed issue, pull-request, or sub-issue webhook records its delivery
+   before acknowledgement. The asynchronous worker uses focused refresh for
+   cached work and a validated focused upsert for an uncached open item.
+   Sub-issue links refresh both issues, and child changes refresh a known parent
+   before processing the child.
 7. A successful item write or removal publishes one item-scoped change. The SSE
    route sends it to connected browsers without making cache reads or manual
    sync depend on stream delivery.
@@ -91,18 +93,22 @@ GitHub response body.
    inventory and commits it atomically. Only then it serially checks each
    eligible repository without a terminal ledger outcome. An exact existing
    callback records `already_present`; otherwise it creates an active JSON hook
-   for only issues and pull requests, then records `created`. A list or create
-   failure records no terminal result, so a later explicit sync retries. No
-   hook is ever repaired or removed.
+   for issues, pull requests, and sub-issues, then records `created`. The ledger
+   also stores the required specification version. When that version advances,
+   the next explicit sync updates the one matching callback hook and records
+   the new version. A list, create, or update failure leaves the earlier result
+   in place so a later explicit sync retries. Unrelated hooks are never changed.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
 these upserts idempotent. An unset reconciliation cursor forces a full pass on
 the next explicit sync. The cursor begins unset, stays unset after a partial
-full pass, and is cleared when webhook provisioning creates a repository hook
-so the following explicit sync catches up that repository's earlier work. A
-full reconciliation also runs once the prior full one is 24 hours old. There
-is no background polling. The full pass removes open-cache entries that were
+full pass, and is cleared when webhook provisioning creates or updates a
+repository hook so the following explicit sync catches up that repository's
+earlier work. Every sync also reads child counts for all cached epics by node ID
+because GitHub does not advance an epic's issue timestamp when its children
+change. A full reconciliation also runs once the prior full one is 24 hours
+old. There is no background polling. The full pass removes open-cache entries that were
 closed, deleted, or became inaccessible. GitHub search exposes at most 1,000
 results per query, so a type that reaches that cap is recorded as partial rather
 than presented as a full inventory.

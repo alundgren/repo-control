@@ -136,7 +136,9 @@ exact public HTTPS `REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL` ending in
 `/webhooks/github`. Supplying both opts into automatic provisioning during
 explicit account sync; no browser control or startup action exists.
 
-The application only creates missing hooks and never repairs existing hooks.
+The application creates missing hooks and updates its one matching callback
+hook only when the required webhook specification version advances. It never
+changes unrelated hooks.
 For a callback or secret rotation, update the receiver/tunnel and GitHub hooks
 manually, then update the host environment and recreate the container. Verify
 deliveries before removing the old hook. The provisioning ledger intentionally
