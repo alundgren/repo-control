@@ -1,5 +1,8 @@
 # Repo Control
 
+Operator documentation for publishing self-contained Archify HTML is in
+[docs/artifacts.md](docs/artifacts.md).
+
 Repo Control is a self-hosted control panel for GitHub pull requests and
 issues. It starts read-only, showing the work that needs attention across the
 repositories owned by the authenticated personal account. Later versions may

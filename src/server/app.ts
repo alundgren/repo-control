@@ -3,6 +3,7 @@ import fastifyStatic from "@fastify/static";
 
 import { apiPlugin, type ApiPluginOptions } from "../api/plugin.js";
 import { toApiItem } from "../api/read-models.js";
+import { artifactPlugin, type ArtifactService } from "../artifact/index.js";
 import type { ChangeEventHub } from "../events/index.js";
 import { registerWebhookRoutes, type WebhookService } from "../webhook/index.js";
 
@@ -11,9 +12,10 @@ export type AppOptions = {
   logger?: FastifyBaseLogger;
   eventHub?: ChangeEventHub;
   webhookService?: WebhookService;
+  artifactService?: ArtifactService;
 } & ApiPluginOptions;
 
-export async function createApp({ webRoot, logger, cache, syncService, refreshService, eventHub, webhookService }: AppOptions) {
+export async function createApp({ webRoot, logger, cache, syncService, refreshService, eventHub, webhookService, artifactService }: AppOptions) {
   const app = logger
     ? fastify({ loggerInstance: logger, logController: new LogController({ disableRequestLogging: true }) })
     : fastify();
@@ -41,6 +43,10 @@ export async function createApp({ webRoot, logger, cache, syncService, refreshSe
 
   if (webhookService) {
     await registerWebhookRoutes(app, webhookService);
+  }
+
+  if (artifactService) {
+    await app.register(artifactPlugin, { service: artifactService });
   }
 
   app.get("/events", async (request, reply) => {

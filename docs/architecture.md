@@ -2,13 +2,14 @@
 
 ## Shape
 
-Repo Control has three parts:
+Repo Control uses these runtime connections:
 
 ```text
-host environment -- token injection --> application server --> GitHub GraphQL API
-                                         ^        |
-                                         |        v
-Browser UI -> named private API ---------+  private persistent SQLite cache
+host environment -- configuration --> application server --> GitHub GraphQL API
+                                          ^      |    ^
+                                          |      v    |
+Browser UI -> named private API ----------+  SQLite   +-- public artifact reader
+Agent UI  -> private artifact upload -----+
 ```
 
 The browser talks only to the application server. The server owns GitHub
@@ -27,6 +28,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
+| Artifact service (`src/artifact`) | Validates the opt-in public origin and Archify policy, stores byte-exact HTML with a 1 GiB quota, publishes private uploads, serves public reads, and deletes expired rows on its cleanup schedule. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
 | Webhook provisioning | Atomically replaces the complete owned-repository inventory, then records only `created` or `already_present` terminal outcomes per account and repository. |
 | Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
@@ -113,6 +115,14 @@ closed, deleted, or became inaccessible. GitHub search exposes at most 1,000
 results per query, so a type that reaches that cap is recorded as partial rather
 than presented as a full inventory.
 
+An agent on the Tailnet can upload one self-contained Archify HTML document to
+the private artifact endpoint. The artifact service stores the original bytes
+in SQLite and returns view and download URLs built from the configured public
+origin. A dedicated public hostname forwards only matching `GET /public/...`
+requests. Browser rendering and export stay in the downloaded document. The
+service deletes expired rows during startup cleanup, scheduled cleanup, and a
+later publication transaction. Public caches may retain bytes after deletion.
+
 After a successful refresh proves that an item left the open version-one scope,
 the cache deletes that item and its dependent relationships. When repository
 access disappears, it deletes that repository's cached slice. Failed and
@@ -168,6 +178,9 @@ logs use fixed safe messages rather than raw GitHub responses.
 SQLite runs on a private persistent host volume, and the deployment is
 Tailnet-restricted. The [Piploy operator runbook](piploy-operator-runbook.md)
 defines the deployment payload, finite token expiry, revocation, and rotation.
+Artifact publishing remains disabled unless the operator supplies
+`REPO_CONTROL_ARTIFACT_PUBLIC_ORIGIN`. The [artifact operator guide](artifacts.md)
+defines its private upload and dedicated public-read boundary.
 
 ## Future mutations
 

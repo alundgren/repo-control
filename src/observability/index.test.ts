@@ -70,4 +70,45 @@ describe("operational logging", () => {
 
     expect(events).toEqual([{ event: "startup.finished", level: "info", status: "started", durationMs: 3 }]);
   });
+
+  it("allow-lists artifact fields without recording uploaded content", () => {
+    const output: string[] = [];
+    const logger = createOperationalLogger(new Writable({
+      write(chunk, _encoding, callback) {
+        output.push(chunk.toString());
+        callback();
+      },
+    }));
+    const emit = createLogEventSink(logger);
+
+    emit({
+      event: "artifact.publication.finished",
+      level: "info",
+      status: "published",
+      artifactId: "a".repeat(32),
+      artifactType: "archify",
+      byteCount: 42,
+      durationMs: 3,
+      content: "fixture-uploaded-content-must-not-be-logged",
+    });
+    emit({
+      event: "artifact.cleanup.finished",
+      level: "info",
+      status: "complete",
+      deletedRowCount: 2,
+      durationMs: 1,
+    });
+
+    expect(output.join("\n")).not.toContain("fixture-uploaded-content-must-not-be-logged");
+    expect(JSON.parse(output[0]!)).toMatchObject({
+      event: "artifact.publication.finished",
+      artifactId: "a".repeat(32),
+      artifactType: "archify",
+      byteCount: 42,
+    });
+    expect(JSON.parse(output[1]!)).toMatchObject({
+      event: "artifact.cleanup.finished",
+      deletedRowCount: 2,
+    });
+  });
 });

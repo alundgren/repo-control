@@ -5,6 +5,7 @@ import { Writable } from "node:stream";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { ArtifactService } from "../artifact/index.js";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
 import { createOperationalLogger } from "../observability/index.js";
@@ -44,6 +45,55 @@ describe("application server", () => {
       expect(response.statusCode).toBe(200);
       expect(response.headers["content-type"]).toContain("text/html");
       expect(response.body).toContain("<main>Browser shell</main>");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("does not register artifact routes unless an artifact service is configured", async () => {
+    const { app } = await buildApp();
+    const id = "a".repeat(32);
+
+    try {
+      expect((await app.inject({ method: "POST", url: "/api/artifacts/archify", headers: { "content-type": "text/html" }, payload: "fixture" })).statusCode).toBe(404);
+      expect((await app.inject({ method: "GET", url: `/public/${id}/view` })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("registers artifact upload and public routes when an artifact service is configured", async () => {
+    const id = "a".repeat(32);
+    const service: ArtifactService = {
+      publishArchify() {
+        return {
+          id,
+          type: "archify",
+          createdAt: "2026-08-31T10:00:00.000Z",
+          deleteAfter: "2026-09-30T10:00:00.000Z",
+          viewUrl: `https://artifacts.example.test/public/${id}/view`,
+          downloadUrl: `https://artifacts.example.test/public/${id}/download`,
+        };
+      },
+      find() {
+        return {
+          id,
+          type: "archify",
+          content: Buffer.from("<!doctype html><title>Fixture</title>"),
+          createdAt: "2026-08-31T10:00:00.000Z",
+          deleteAfter: "2026-09-30T10:00:00.000Z",
+        };
+      },
+      start() {},
+      stop() {},
+    };
+    const { app } = await buildApp({ artifactService: service });
+
+    try {
+      expect((await app.inject({ method: "POST", url: "/api/artifacts/archify", headers: { "content-type": "text/html" }, payload: "fixture" })).statusCode).toBe(201);
+      expect((await app.inject({ method: "GET", url: `/public/${id}/view` })).statusCode).toBe(200);
+      expect((await app.inject({ method: "HEAD", url: `/public/${id}/view` })).statusCode).toBe(404);
+      expect((await app.inject({ method: "HEAD", url: `/public/${id}/download` })).statusCode).toBe(404);
     } finally {
       await app.close();
     }
@@ -315,7 +365,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -333,7 +383,7 @@ describe("application server", () => {
       },
     };
 
-    const app = await createApp({ webRoot, cache, syncService, refreshService, logger: overrides.logger });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, logger: overrides.logger, artifactService: overrides.artifactService });
     return { app, cache };
   }
 
