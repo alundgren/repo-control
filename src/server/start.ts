@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
+import { ArtifactConfigurationError, createArtifactService, readArtifactConfiguration } from "../artifact/index.js";
+import { openArtifactStore } from "../artifact/store.js";
 import { openCache } from "../cache/index.js";
 import { createReconciliationCoordinator } from "../coordination/index.js";
 import { createChangeEventHub } from "../events/index.js";
@@ -43,6 +45,7 @@ export async function startServer({
   logger,
   logEvent,
 }: StartServerOptions) {
+  const artifactConfiguration = readArtifactConfiguration(environment);
   const configuration = readConnectionConfiguration(environment);
   const connection = await validateConnection(configuration, createGitHubClient(configuration.token));
   await mkdir(dataDirectory, { recursive: true });
@@ -80,11 +83,29 @@ export async function startServer({
         logEvent,
       })
     : null;
+  const artifactService = artifactConfiguration
+    ? createArtifactService({
+        configuration: artifactConfiguration,
+        store: openArtifactStore({ path: join(dataDirectory, "repo-control.sqlite") }),
+        logEvent,
+      })
+    : null;
 
   try {
-    const app = await createApp({ logger, webRoot, cache, syncService, refreshService, eventHub, webhookService: webhookService ?? undefined });
+    artifactService?.start();
+    const app = await createApp({
+      logger,
+      webRoot,
+      cache,
+      syncService,
+      refreshService,
+      eventHub,
+      webhookService: webhookService ?? undefined,
+      artifactService: artifactService ?? undefined,
+    });
     app.addHook("onClose", async () => {
       if (webhookService) await webhookService.stop();
+      artifactService?.stop();
       deliveryStore.close();
       webhookProvisioningStore?.close();
       cache.close();
@@ -101,6 +122,7 @@ export async function startServer({
     return { app, connection };
   } catch (error) {
     if (webhookService) await webhookService.stop();
+    artifactService?.stop();
     deliveryStore.close();
     webhookProvisioningStore?.close();
     cache.close();
@@ -132,10 +154,14 @@ export async function startApplication(
 }
 
 function startupFailureCode(error: unknown) {
+  if (error instanceof ArtifactConfigurationError) return error.code;
   return error instanceof ConnectionValidationError ? error.code : "authentication_failed";
 }
 
 export function startupFailureMessage(error: unknown) {
+  if (error instanceof ArtifactConfigurationError) {
+    return error.message;
+  }
   if (error instanceof ConnectionValidationError) {
     return error.message;
   }

@@ -9,6 +9,8 @@ export type LogEvent = {
     | "sync.finished"
     | "webhook.provisioning.finished"
     | "refresh.finished"
+    | "artifact.publication.finished"
+    | "artifact.cleanup.finished"
     | "webhook.delivery.finished"
     | "webhook.worker.failed";
   level: "info" | "warn" | "error";
@@ -73,6 +75,10 @@ const EVENT_FIELDS: Record<LogEvent["event"], readonly string[]> = {
     "status", "mode", "durationMs", "itemType", "relationshipStatus", "removalReason", "errorCode",
     "rateLimitCost", "rateLimitRemaining", "rateLimitResetAt",
   ],
+  "artifact.publication.finished": [
+    "status", "artifactId", "artifactType", "byteCount", "durationMs", "errorCode",
+  ],
+  "artifact.cleanup.finished": ["status", "durationMs", "deletedRowCount", "errorCode"],
   "webhook.delivery.finished": [
     "status", "deliveryId", "eventName", "action", "itemType", "attempt", "detail", "retryDelayMs",
   ],

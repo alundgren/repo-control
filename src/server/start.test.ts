@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { openArtifactStore } from "../artifact/store.js";
 import { openCache } from "../cache/index.js";
 import type { GitHubConnectionClient } from "../github/connection.js";
 import { createOperationalLogger } from "../observability/index.js";
@@ -116,6 +117,74 @@ describe("server startup", () => {
     } finally {
       cache.close();
     }
+  });
+
+  it("rejects an invalid configured artifact origin with a stable startup failure", async () => {
+    const webRoot = await createWebRoot();
+    const dataDirectory = await createDataDirectory();
+    const messages: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+
+    const started = await startApplication({
+      environment: { ...environment(), REPO_CONTROL_ARTIFACT_PUBLIC_ORIGIN: "http://artifacts.example.test/path" },
+      host: "127.0.0.1",
+      port: 0,
+      webRoot,
+      dataDirectory,
+      createGitHubClient: () => client(),
+      logEvent: (event) => events.push(event),
+    }, (message) => messages.push(message));
+
+    expect(started).toBe(false);
+    expect(messages).toEqual(["Repo Control could not start because the artifact public origin is invalid."]);
+    expect(events).toEqual([expect.objectContaining({
+      event: "startup.failed",
+      errorCode: "artifact_configuration_invalid",
+      message: "Repo Control could not start because the artifact public origin is invalid.",
+    })]);
+  });
+
+  it("starts enabled artifact routes after cleanup and closes them with the application", async () => {
+    const webRoot = await createWebRoot();
+    const dataDirectory = await createDataDirectory();
+    const path = join(dataDirectory, "repo-control.sqlite");
+    const seeded = openArtifactStore({
+      path,
+      now: () => new Date("2020-01-01T00:00:00.000Z"),
+      generateId: () => "a".repeat(32),
+    });
+    seeded.publish({ type: "archify", content: Buffer.from("expired") });
+    seeded.close();
+    const events: Array<Record<string, unknown>> = [];
+
+    const { app } = await startServer({
+      environment: { ...environment(), REPO_CONTROL_ARTIFACT_PUBLIC_ORIGIN: "https://artifacts.example.test" },
+      host: "127.0.0.1",
+      port: 0,
+      webRoot,
+      dataDirectory,
+      createGitHubClient: () => client(),
+      logEvent: (event) => events.push(event),
+    });
+
+    expect((await app.inject({ method: "GET", url: `/public/${"a".repeat(32)}/view` })).statusCode).toBe(404);
+    const upload = await app.inject({
+      method: "POST",
+      url: "/api/artifacts/archify",
+      headers: { "content-type": "text/html" },
+      payload: "<!doctype html><title>Fixture</title>",
+    });
+    expect(upload.statusCode).toBe(201);
+    expect(upload.json().viewUrl).toMatch(/^https:\/\/artifacts\.example\.test\/public\/[a-z]{32}\/view$/);
+    expect(events).toContainEqual(expect.objectContaining({
+      event: "artifact.cleanup.finished",
+      status: "complete",
+      deletedRowCount: 1,
+    }));
+
+    await app.close();
+    const reopened = openArtifactStore({ path });
+    reopened.close();
   });
 
   async function createWebRoot() {
