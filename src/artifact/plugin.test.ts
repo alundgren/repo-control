@@ -1,9 +1,9 @@
 import fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ArtifactQuotaExceededError, type StoredArtifact } from "./store.js";
+import { ArtifactQuotaExceededError, type ArtifactType, type StoredArtifact } from "./store.js";
 import {
-  ARCHIFY_MAX_BYTES,
+  HTML_ARTIFACT_MAX_BYTES,
   artifactPlugin,
   type ArtifactService,
 } from "./index.js";
@@ -15,29 +15,33 @@ describe("artifact HTTP routes", () => {
     await Promise.all(applications.splice(0).map((app) => app.close()));
   });
 
-  it("publishes supported HTML bytes and returns complete public URLs", async () => {
-    const publishArchify = vi.fn().mockReturnValue(publishedArtifact());
-    const app = await buildApp(serviceFixture({ publishArchify }));
+  it("publishes Archify documents, presentations, and mockups as supported HTML", async () => {
+    const publish = vi.fn((type) => publishedArtifact(type));
+    const app = await buildApp(serviceFixture({ publish }));
 
-    for (const contentType of ["text/html", "text/html; charset=UTF-8", "TEXT/HTML; CHARSET=\"utf-8\""]) {
+    for (const [type, contentType] of [
+      ["archify", "text/html"],
+      ["presentation", "text/html; charset=UTF-8"],
+      ["mockup", "TEXT/HTML; CHARSET=\"utf-8\""],
+    ] as const) {
       const content = Buffer.from([60, 33, 255, 0, 62]);
       const response = await app.inject({
         method: "POST",
-        url: "/api/artifacts/archify",
+        url: `/api/artifacts/${type}`,
         headers: { "content-type": contentType },
         payload: content,
       });
 
       expect(response.statusCode).toBe(201);
       expect(response.headers["cache-control"]).toBe("no-store");
-      expect(response.json()).toEqual({ status: "published", ...publishedArtifact() });
-      expect(publishArchify).toHaveBeenLastCalledWith(content);
+      expect(response.json()).toEqual({ status: "published", ...publishedArtifact(type) });
+      expect(publish).toHaveBeenLastCalledWith(type, content);
     }
   });
 
   it("applies media, size, empty-body, and quota validation in order", async () => {
     const quotaService = serviceFixture({
-      publishArchify() {
+      publish() {
         throw new ArtifactQuotaExceededError();
       },
     });
@@ -47,7 +51,7 @@ describe("artifact HTTP routes", () => {
       method: "POST",
       url: "/api/artifacts/archify",
       headers: { "content-type": "application/octet-stream" },
-      payload: Buffer.alloc(ARCHIFY_MAX_BYTES + 1),
+      payload: Buffer.alloc(HTML_ARTIFACT_MAX_BYTES + 1),
     });
     expectError(unsupportedAndLarge, 415, "artifact_media_type_unsupported");
 
@@ -63,7 +67,7 @@ describe("artifact HTTP routes", () => {
       method: "POST",
       url: "/api/artifacts/archify",
       headers: { "content-type": "text/html" },
-      payload: Buffer.alloc(ARCHIFY_MAX_BYTES + 1),
+      payload: Buffer.alloc(HTML_ARTIFACT_MAX_BYTES + 1),
     });
     expectError(tooLarge, 413, "artifact_too_large");
 
@@ -84,20 +88,32 @@ describe("artifact HTTP routes", () => {
     expectError(quota, 507, "artifact_quota_exceeded");
   });
 
-  it("serves byte-exact downloads and direct HTML with cache and security headers", async () => {
-    const id = "a".repeat(32);
+  it("serves every supported type as direct HTML with cache and security headers", async () => {
+    const artifacts = new Map<string, ArtifactType>([
+      ["a".repeat(32), "archify"],
+      ["b".repeat(32), "presentation"],
+      ["c".repeat(32), "mockup"],
+    ]);
     const content = Buffer.from([60, 104, 49, 62, 255, 60, 47, 104, 49, 62]);
-    const app = await buildApp(serviceFixture({ find: () => storedArtifact({ id, content }) }));
+    const app = await buildApp(serviceFixture({
+      find(id) {
+        const type = artifacts.get(id);
+        return type ? storedArtifact({ id, type, content }) : null;
+      },
+    }));
 
-    const view = await app.inject({ method: "GET", url: `/public/${id}/view` });
-    expect(view.statusCode).toBe(200);
-    expect(view.headers["content-type"]).toBe("text/html; charset=utf-8");
-    expect(view.rawPayload).toEqual(content);
-    expect(view.headers["content-security-policy"]).toBe(
-      "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-downloads",
-    );
-    expectPublicHeaders(view.headers);
+    for (const id of artifacts.keys()) {
+      const view = await app.inject({ method: "GET", url: `/public/${id}/view` });
+      expect(view.statusCode).toBe(200);
+      expect(view.headers["content-type"]).toBe("text/html; charset=utf-8");
+      expect(view.rawPayload).toEqual(content);
+      expect(view.headers["content-security-policy"]).toBe(
+        "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-downloads",
+      );
+      expectPublicHeaders(view.headers);
+    }
 
+    const id = "c".repeat(32);
     const download = await app.inject({ method: "GET", url: `/public/${id}/download` });
     expect(download.statusCode).toBe(200);
     expect(download.headers["content-type"]).toBe("application/octet-stream");
@@ -148,11 +164,11 @@ describe("artifact HTTP routes", () => {
   }
 });
 
-function publishedArtifact() {
+function publishedArtifact(type: ArtifactType = "archify") {
   const id = "a".repeat(32);
   return {
     id,
-    type: "archify" as const,
+    type,
     createdAt: "2026-08-31T10:00:00.000Z",
     deleteAfter: "2026-09-30T10:00:00.000Z",
     viewUrl: `https://artifacts.example.test/public/${id}/view`,
@@ -173,8 +189,8 @@ function storedArtifact(overrides: Partial<StoredArtifact>): StoredArtifact {
 
 function serviceFixture(overrides: Partial<ArtifactService> = {}): ArtifactService {
   return {
-    publishArchify() {
-      return publishedArtifact();
+    publish(type) {
+      return publishedArtifact(type);
     },
     find() {
       return null;

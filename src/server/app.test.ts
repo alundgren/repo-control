@@ -65,10 +65,10 @@ describe("application server", () => {
   it("registers artifact upload and public routes when an artifact service is configured", async () => {
     const id = "a".repeat(32);
     const service: ArtifactService = {
-      publishArchify() {
+      publish(type) {
         return {
           id,
-          type: "archify",
+          type,
           createdAt: "2026-08-31T10:00:00.000Z",
           deleteAfter: "2026-09-30T10:00:00.000Z",
           viewUrl: `https://artifacts.example.test/public/${id}/view`,
@@ -91,6 +91,8 @@ describe("application server", () => {
 
     try {
       expect((await app.inject({ method: "POST", url: "/api/artifacts/archify", headers: { "content-type": "text/html" }, payload: "fixture" })).statusCode).toBe(201);
+      expect((await app.inject({ method: "POST", url: "/api/artifacts/presentation", headers: { "content-type": "text/html" }, payload: "fixture" })).statusCode).toBe(201);
+      expect((await app.inject({ method: "POST", url: "/api/artifacts/mockup", headers: { "content-type": "text/html" }, payload: "fixture" })).statusCode).toBe(201);
       expect((await app.inject({ method: "GET", url: `/public/${id}/view` })).statusCode).toBe(200);
       expect((await app.inject({ method: "HEAD", url: `/public/${id}/view` })).statusCode).toBe(404);
       expect((await app.inject({ method: "HEAD", url: `/public/${id}/download` })).statusCode).toBe(404);

@@ -5,7 +5,7 @@ import { Worker } from "node:worker_threads";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ArtifactQuotaExceededError, openArtifactStore } from "./store.js";
+import { ArtifactQuotaExceededError, type ArtifactType, openArtifactStore } from "./store.js";
 
 describe("artifact store", () => {
   const temporaryDirectories: string[] = [];
@@ -14,20 +14,30 @@ describe("artifact store", () => {
     await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  it("keeps original bytes and UTC timestamps across reopen", async () => {
+  it("keeps each supported type, original bytes, and UTC timestamps across reopen", async () => {
     const path = await databasePath();
-    const first = openArtifactStore({ path, now: () => new Date("2026-08-31T10:00:00.000Z") });
     const content = Buffer.from([0, 255, 60, 104, 116, 109, 108, 62]);
+    const ids = ["a".repeat(32), "b".repeat(32), "c".repeat(32)];
+    const publishing = openArtifactStore({
+      path,
+      now: () => new Date("2026-08-31T10:00:00.000Z"),
+      generateId: () => ids.shift()!,
+    });
 
-    const published = first.publish({ type: "archify", content });
+    const types: ArtifactType[] = ["archify", "presentation", "mockup"];
+    const published = types.map((type) =>
+      publishing.publish({ type, content }),
+    );
 
-    expect(published.id).toMatch(/^[a-z]{32}$/);
-    expect(published.createdAt).toBe("2026-08-31T10:00:00.000Z");
-    expect(published.deleteAfter).toBe("2026-09-30T10:00:00.000Z");
-    first.close();
+    expect(published.map(({ type }) => type)).toEqual(["archify", "presentation", "mockup"]);
+    expect(published[0]!.createdAt).toBe("2026-08-31T10:00:00.000Z");
+    expect(published[0]!.deleteAfter).toBe("2026-09-30T10:00:00.000Z");
+    publishing.close();
 
     const reopened = openArtifactStore({ path });
-    expect(reopened.find(published.id)).toEqual({ ...published, content });
+    for (const artifact of published) {
+      expect(reopened.find(artifact.id)).toEqual({ ...artifact, content });
+    }
     reopened.close();
   });
 

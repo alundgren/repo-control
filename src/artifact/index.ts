@@ -1,20 +1,30 @@
 import type { FastifyError, FastifyPluginAsync, FastifyReply } from "fastify";
 
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
-import { ArtifactQuotaExceededError, type ArtifactStore, type StoredArtifact } from "./store.js";
+import {
+  ArtifactQuotaExceededError,
+  type ArtifactStore,
+  type ArtifactType,
+  type StoredArtifact,
+} from "./store.js";
 
 export const ARTIFACT_CONFIGURATION_MESSAGE = "Repo Control could not start because the artifact public origin is invalid.";
-export const ARCHIFY_MAX_BYTES = 10 * 1024 * 1024;
+export const HTML_ARTIFACT_MAX_BYTES = 10 * 1024 * 1024;
 export const ARTIFACT_CLEANUP_INTERVAL_MS = 8 * 60 * 60 * 1_000;
-export const ARTIFACT_TYPE_POLICIES = {
-  archify: {
-    mediaType: "text/html",
-    charset: "utf-8",
-    maxBytes: ARCHIFY_MAX_BYTES,
-    downloadExtension: ".html",
-    viewable: true,
-  },
+const HTML_ARTIFACT_POLICY = {
+  mediaType: "text/html",
+  charset: "utf-8",
+  maxBytes: HTML_ARTIFACT_MAX_BYTES,
+  downloadExtension: ".html",
+  viewable: true,
 } as const;
+export const ARTIFACT_TYPE_POLICIES = {
+  archify: HTML_ARTIFACT_POLICY,
+  presentation: HTML_ARTIFACT_POLICY,
+  mockup: HTML_ARTIFACT_POLICY,
+} as const satisfies Record<ArtifactType, typeof HTML_ARTIFACT_POLICY>;
+const ARTIFACT_TYPES = Object.keys(ARTIFACT_TYPE_POLICIES) as ArtifactType[];
+const ARTIFACT_UPLOAD_ROUTES = new Set(ARTIFACT_TYPES.map((type) => `/api/artifacts/${type}`));
 export const ARTIFACT_VIEW_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline' blob:",
@@ -69,10 +79,10 @@ export function readArtifactConfiguration(
   }
 }
 
-export function acceptsArchifyMediaType(contentType: string | undefined) {
+export function acceptsHtmlArtifactMediaType(contentType: string | undefined) {
   if (!contentType) return false;
   const [mediaType, ...parameters] = contentType.split(";").map((part) => part.trim());
-  if (mediaType?.toLowerCase() !== ARTIFACT_TYPE_POLICIES.archify.mediaType) return false;
+  if (mediaType?.toLowerCase() !== HTML_ARTIFACT_POLICY.mediaType) return false;
   if (parameters.length === 0) return true;
   if (parameters.length !== 1) return false;
   return /^charset\s*=\s*(?:utf-8|"utf-8")$/i.test(parameters[0]!);
@@ -84,7 +94,7 @@ export type PublishedArtifact = Omit<StoredArtifact, "content"> & {
 };
 
 export type ArtifactService = {
-  publishArchify(content: Buffer): PublishedArtifact;
+  publish(type: ArtifactType, content: Buffer): PublishedArtifact;
   find(id: string): StoredArtifact | null;
   start(): void;
   stop(): void;
@@ -93,12 +103,12 @@ export type ArtifactService = {
 export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = async (app, { service }) => {
   app.addContentTypeParser(/^text\/html(?:\s*;.*)?$/i, {
     parseAs: "buffer",
-    bodyLimit: ARCHIFY_MAX_BYTES,
+    bodyLimit: HTML_ARTIFACT_MAX_BYTES,
   }, (_request, body, done) => done(null, body));
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     reply.header("Cache-Control", "no-store");
-    if (request.routeOptions.url === "/api/artifacts/archify") {
+    if (request.routeOptions.url && ARTIFACT_UPLOAD_ROUTES.has(request.routeOptions.url)) {
       if (error.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
         reply.code(413).send(artifactError("artifact_too_large"));
         return;
@@ -107,27 +117,29 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
     reply.code(500).send(artifactError("unavailable"));
   });
 
-  app.post<{ Body: Buffer }>("/api/artifacts/archify", {
-    bodyLimit: ARCHIFY_MAX_BYTES,
-    onRequest: async (request, reply) => {
-      reply.header("Cache-Control", "no-store");
-      if (!acceptsArchifyMediaType(request.headers["content-type"])) {
-        await reply.code(415).send(artifactError("artifact_media_type_unsupported"));
+  for (const type of ARTIFACT_TYPES) {
+    app.post<{ Body: Buffer }>(`/api/artifacts/${type}`, {
+      bodyLimit: ARTIFACT_TYPE_POLICIES[type].maxBytes,
+      onRequest: async (request, reply) => {
+        reply.header("Cache-Control", "no-store");
+        if (!acceptsHtmlArtifactMediaType(request.headers["content-type"])) {
+          await reply.code(415).send(artifactError("artifact_media_type_unsupported"));
+        }
+      },
+    }, async (request, reply) => {
+      if (request.body.byteLength === 0) {
+        return reply.code(400).send(artifactError("artifact_empty"));
       }
-    },
-  }, async (request, reply) => {
-    if (request.body.byteLength === 0) {
-      return reply.code(400).send(artifactError("artifact_empty"));
-    }
-    try {
-      return reply.code(201).send({ status: "published", ...service.publishArchify(request.body) });
-    } catch (error) {
-      if (error instanceof ArtifactQuotaExceededError) {
-        return reply.code(507).send(artifactError(error.code));
+      try {
+        return reply.code(201).send({ status: "published", ...service.publish(type, request.body) });
+      } catch (error) {
+        if (error instanceof ArtifactQuotaExceededError) {
+          return reply.code(507).send(artifactError(error.code));
+        }
+        throw error;
       }
-      throw error;
-    }
-  });
+    });
+  }
 
   const publicRouteOptions = { exposeHeadRoute: false } as const;
   app.get<{ Params: { id: string } }>("/public/:id/view", publicRouteOptions, async (request, reply) => {
@@ -197,10 +209,10 @@ export function createArtifactService({
   }
 
   return {
-    publishArchify(content) {
+    publish(type, content) {
       const startedAt = clock();
       try {
-        const artifact = store.publish({ type: "archify", content });
+        const artifact = store.publish({ type, content });
         emitLogEvent(logEvent, {
           event: "artifact.publication.finished",
           level: "info",
@@ -220,7 +232,7 @@ export function createArtifactService({
           event: "artifact.publication.finished",
           level: "error",
           status: "failed",
-          artifactType: "archify",
+          artifactType: type,
           byteCount: content.byteLength,
           durationMs: clock() - startedAt,
           errorCode: error instanceof ArtifactQuotaExceededError ? error.code : "publication_failed",

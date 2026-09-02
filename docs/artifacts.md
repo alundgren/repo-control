@@ -1,9 +1,9 @@
-# Published Archify artifacts
+# Published HTML artifacts
 
-Repo Control can accept one self-contained Archify HTML document through its
-private API and return public view and download links. The upload endpoint stays
-inside the Tailnet. Public links provide bearer access, so publish only
-non-sensitive material.
+Repo Control accepts self-contained Archify documents, presentations, and
+mockups through its private API. It returns public view and download links for
+each upload. The upload endpoints stay inside the Tailnet. Public links provide
+bearer access, so publish only non-sensitive material.
 
 ## Enablement and rollback
 
@@ -27,16 +27,24 @@ module is disabled.
 
 ## Publishing contract
 
-Version one accepts only `text/html` for the `archify` type. The optional
-charset must be UTF-8. The maximum document size is 10 MiB. This fictional
-example preserves the file bytes exactly:
+The private API has one endpoint for each supported type:
+
+| Type | Upload endpoint |
+| --- | --- |
+| `archify` | `POST /api/artifacts/archify` |
+| `presentation` | `POST /api/artifacts/presentation` |
+| `mockup` | `POST /api/artifacts/mockup` |
+
+Every type accepts only `text/html`. The optional charset must be UTF-8, and
+the maximum document size is 10 MiB. The service preserves the uploaded bytes
+exactly. This fictional example publishes a presentation:
 
 ```sh
 curl --fail-with-body \
   --request POST \
   --header 'Content-Type: text/html; charset=utf-8' \
   --data-binary '@fictional-presentation.html' \
-  'http://repo-control.internal.test:3000/api/artifacts/archify'
+  'http://repo-control.internal.test:3000/api/artifacts/presentation'
 ```
 
 A successful request returns `201` and this JSON contract:
@@ -45,7 +53,7 @@ A successful request returns `201` and this JSON contract:
 {
   "status": "published",
   "id": "abcdefghijklmnopqrstuvwxyzabcdef",
-  "type": "archify",
+  "type": "presentation",
   "createdAt": "2026-08-31T10:00:00.000Z",
   "deleteAfter": "2026-09-30T10:00:00.000Z",
   "viewUrl": "https://artifacts.example.test/public/abcdefghijklmnopqrstuvwxyzabcdef/view",
@@ -83,7 +91,7 @@ Successful public responses are cacheable for 30 days from each response. A
 browser or Cloudflare cache may serve a fetched copy after SQLite deletes the
 row. Retention limits origin disk use. It does not revoke a link.
 
-View responses run under a restrictive Content Security Policy and a sandbox
+HTML view responses run under a restrictive Content Security Policy and a sandbox
 without same-origin permission. Inline scripts and styles, data and blob
 assets, blob workers, and downloads are allowed. External requests, forms,
 objects, nested frames, framing, popups, and cross-context navigation are

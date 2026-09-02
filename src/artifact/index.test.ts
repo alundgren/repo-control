@@ -6,7 +6,7 @@ import {
   ARTIFACT_CONFIGURATION_MESSAGE,
   ARTIFACT_TYPE_POLICIES,
   ArtifactConfigurationError,
-  acceptsArchifyMediaType,
+  acceptsHtmlArtifactMediaType,
   createArtifactService,
   readArtifactConfiguration,
 } from "./index.js";
@@ -33,20 +33,22 @@ describe("artifact service", () => {
     }
   });
 
-  it("accepts the Archify media type without a charset or with UTF-8 only", () => {
-    expect(ARTIFACT_TYPE_POLICIES.archify).toEqual({
-      mediaType: "text/html",
-      charset: "utf-8",
-      maxBytes: 10 * 1024 * 1024,
-      downloadExtension: ".html",
-      viewable: true,
-    });
-    expect(acceptsArchifyMediaType("text/html")).toBe(true);
-    expect(acceptsArchifyMediaType("TEXT/HTML; CHARSET=UTF-8")).toBe(true);
-    expect(acceptsArchifyMediaType("text/html; charset=\"utf-8\"")).toBe(true);
-    expect(acceptsArchifyMediaType("text/html; charset=iso-8859-1")).toBe(false);
-    expect(acceptsArchifyMediaType("text/html; charset=utf-8; boundary=nope")).toBe(false);
-    expect(acceptsArchifyMediaType("application/xhtml+xml")).toBe(false);
+  it("applies one UTF-8 HTML policy to every supported artifact type", () => {
+    expect(ARTIFACT_TYPE_POLICIES).toEqual(Object.fromEntries(
+      ["archify", "presentation", "mockup"].map((type) => [type, {
+        mediaType: "text/html",
+        charset: "utf-8",
+        maxBytes: 10 * 1024 * 1024,
+        downloadExtension: ".html",
+        viewable: true,
+      }]),
+    ));
+    expect(acceptsHtmlArtifactMediaType("text/html")).toBe(true);
+    expect(acceptsHtmlArtifactMediaType("TEXT/HTML; CHARSET=UTF-8")).toBe(true);
+    expect(acceptsHtmlArtifactMediaType("text/html; charset=\"utf-8\"")).toBe(true);
+    expect(acceptsHtmlArtifactMediaType("text/html; charset=iso-8859-1")).toBe(false);
+    expect(acceptsHtmlArtifactMediaType("text/html; charset=utf-8; boundary=nope")).toBe(false);
+    expect(acceptsHtmlArtifactMediaType("application/xhtml+xml")).toBe(false);
   });
 
   it("publishes through the store and constructs public URLs from configuration", () => {
@@ -59,9 +61,9 @@ describe("artifact service", () => {
       clock: () => 100,
     });
 
-    expect(service.publishArchify(Buffer.from("fixture"))).toEqual({
+    expect(service.publish("presentation", Buffer.from("fixture"))).toEqual({
       id: "a".repeat(32),
-      type: "archify",
+      type: "presentation",
       createdAt: "2026-08-31T10:00:00.000Z",
       deleteAfter: "2026-09-30T10:00:00.000Z",
       viewUrl: `https://artifacts.example.test/public/${"a".repeat(32)}/view`,
@@ -71,7 +73,7 @@ describe("artifact service", () => {
       event: "artifact.publication.finished",
       status: "published",
       artifactId: "a".repeat(32),
-      artifactType: "archify",
+      artifactType: "presentation",
       byteCount: 7,
       durationMs: 0,
     })]);
@@ -121,10 +123,10 @@ describe("artifact service", () => {
 
 function storeFixture(overrides: Partial<ArtifactStore> = {}): ArtifactStore {
   return {
-    publish() {
+    publish({ type }) {
       return {
         id: "a".repeat(32),
-        type: "archify",
+        type,
         createdAt: "2026-08-31T10:00:00.000Z",
         deleteAfter: "2026-09-30T10:00:00.000Z",
       };
