@@ -28,7 +28,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
-| Artifact service (`src/artifact`) | Validates the opt-in public origin and Archify policy, stores byte-exact HTML with a 1 GiB quota, publishes private uploads, serves public reads, and deletes expired rows on its cleanup schedule. |
+| Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves public reads, and deletes expired rows on its cleanup schedule. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
 | Webhook provisioning | Atomically replaces the complete owned-repository inventory, then records only `created` or `already_present` terminal outcomes per account and repository. |
 | Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
@@ -115,8 +115,8 @@ closed, deleted, or became inaccessible. GitHub search exposes at most 1,000
 results per query, so a type that reaches that cap is recorded as partial rather
 than presented as a full inventory.
 
-An agent on the Tailnet can upload one self-contained Archify HTML document to
-the private artifact endpoint. The artifact service stores the original bytes
+An agent on the Tailnet can upload one self-contained HTML artifact to a
+private artifact endpoint. The artifact service stores the original bytes
 in SQLite and returns view and download URLs built from the configured public
 origin. A dedicated public hostname forwards only matching `GET /public/...`
 requests. Browser rendering and export stay in the downloaded document. The

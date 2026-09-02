@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 export const ARTIFACT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const ARTIFACT_QUOTA_BYTES = 1024 * 1024 * 1024;
 
-export type ArtifactType = "archify";
+export type ArtifactType = "archify" | "presentation" | "mockup";
 
 export type StoredArtifact = {
   id: string;

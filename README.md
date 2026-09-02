@@ -1,6 +1,6 @@
 # Repo Control
 
-Operator documentation for publishing self-contained Archify HTML is in
+Operator documentation for publishing self-contained HTML artifacts is in
 [docs/artifacts.md](docs/artifacts.md).
 
 Repo Control is a self-hosted control panel for GitHub pull requests and
