@@ -10,8 +10,9 @@ stops being enough.
 From a selected pull request in the work queue, open a full-screen review
 surface and close it again, landing back on the same view, the same filter, and
 the same selected row. The full-screen surface lists changed files, folds and
-unfolds a diff per file, accepts comments on a line and on a whole file, and
-submits the collected comments to GitHub as one batch review.
+unfolds a diff per file, accepts line comments and an overall review summary,
+and submits them to GitHub as one review. Native file-level comments need a
+multi-call workflow and are deferred to issue #77.
 
 Three options follow. They differ in where the surface lives, whether the
 browser URL knows about it, and where draft comments are kept. Everything in
@@ -48,11 +49,17 @@ return what GitHub reports, refresh the item in a focused way afterwards.
 
 ### 2. A token permission upgrade
 
-`Pull requests: Read and write` replaces the read-only grant. The operator
-runbook (`docs/piploy-operator-runbook.md`) and the credential contract in
-`docs/architecture.md` both state the current scope and need updating. Startup
-validation should confirm the write scope is present before the review UI
-offers a submit control, and degrade to a read-only diff viewer when it is not.
+Review submission needs `Pull requests: Read and write`. Merge needs `Contents:
+Read and write`, which also permits content and ref changes beyond merge. The
+operator runbook (`docs/piploy-operator-runbook.md`) and the credential contract
+in `docs/architecture.md` both state the current scope and need updating.
+
+A fine-grained personal access token cannot report its granted permissions to
+the application. `REPO_CONTROL_GITHUB_WRITE_ACTIONS` therefore defaults to
+empty, and the operator enables `review`, `merge`, or both only after granting
+the documented permissions. This setting records operator intent rather than
+proving the token grant. GitHub permission and policy failures remain
+authoritative.
 
 ### 3. A new GitHub read path for patches
 
@@ -65,34 +72,40 @@ surface, its own error mapping, and its own rate-limit accounting. Keep it
 inside the existing client module boundary so the browser still talks only to
 named private endpoints.
 
-Verify before building: per-file `patch` is truncated or omitted above GitHub's
-size thresholds, and the files endpoint pages at 100 files per request with a
-3000-file ceiling. The UI needs a defined "diff too large, open on GitHub"
-state for both.
+The files endpoint pages at 100 files per request and stops after 3,000 files.
+The private endpoint also limits aggregate UTF-8 patch text to 5 MiB. An omitted
+patch, a parsed hunk count that disagrees with GitHub's additions and deletions,
+the byte budget, and the file ceiling all produce explicit partial or
+unavailable states. Patch text is held only for the open overlay and is never
+persisted or server-memoized.
 
 ### 4. Batch submission shape
 
 One private endpoint, for example `POST /api/items/:nodeId/review`, takes the
-whole batch: an optional body, an event (`COMMENT`, `APPROVE`,
-`REQUEST_CHANGES`), and a list of comments carrying `path`, `side`, `line`,
-optional `start_line`, and a file-level marker.
+expected head SHA, an optional summary, an event (`COMMENT`, `APPROVE`, or
+`REQUEST_CHANGES`), and line comments carrying `path`, `side`, and `line`.
+`COMMENT` and `REQUEST_CHANGES` need at least a summary or one line comment.
+`APPROVE` may be empty when GitHub accepts it.
 
-Verify before building: REST `POST /repos/{owner}/{repo}/pulls/{number}/reviews`
-accepts the comment array in one call and supports `subject_type: "file"` for
-file-level comments. The GraphQL `addPullRequestReview` path is a worse fit for
-file-level subjects. Confirm both against current GitHub docs before choosing,
-because this single fact decides whether "comment on a file" is one request or
-several.
+GitHub's REST create-review `comments` input and GraphQL
+`DraftPullRequestReviewThread` input do not expose a native file subject. The
+separate REST comment and GraphQL thread mutations do, but using them requires a
+pending review and several writes. Version one keeps a single add-review
+operation and line comments only. Issue #77 owns the decision about a later
+multi-call file-comment workflow.
 
 Rules that follow from the architecture:
 
-- Re-read the pull request head SHA immediately before submitting. Comments
-  anchored to an outdated SHA land on the wrong lines or fail.
+- Re-read the pull request head SHA immediately before submitting and block a
+  detected change. Send the expected commit ID with the review. GitHub offers
+  no atomic compare-and-submit guarantee for reviews, so the documentation and
+  failure handling must not claim the reread closes every race.
 - Submitting is externally visible, so it needs an explicit confirmation step,
   and it must never be triggered by a stray keystroke.
 - After success, run a focused refresh of that item, not an account sync.
-- Partial failure needs a defined outcome. Prefer one atomic request so there is
-  no half-posted review to reconcile.
+- An ambiguous network result preserves the draft, never retries automatically,
+  says that the submission outcome is unknown, and sends the person to GitHub
+  before any retry.
 
 ### 5. Fold, unfold, and expanded context
 
@@ -102,15 +115,13 @@ fetching the blob at the head SHA, which is a second read path and more bytes.
 Recommendation: ship without context expansion, and add it only if reviewing
 without it proves painful.
 
-Default fold state is a real UX decision. Suggested rule: unfolded when the file
-has few changed lines and the total on-screen diff stays modest, folded
-otherwise, with per-file toggles and an expand-all control. Record the chosen
-rule in `docs/ux.md`.
+The first file with available patch text starts unfolded. Every other file
+starts folded, with an independent toggle. Record this rule in `docs/ux.md`.
 
 ### 6. UX and accessibility work
 
 `docs/ux.md` gains a component entry for the review surface: file list, file
-header, diff rows, comment form, and the pending-comment count. The diff uses
+header, diff rows, line-comment form, and the pending-comment count. The diff uses
 the existing palette roles. Added and removed lines need a role mapping that is
 not colour alone, because the warm-paper palette has no green/red pair and the
 success and warning roles are already carrying status meaning elsewhere. A
@@ -133,15 +144,16 @@ confirmation step.
 The full-screen surface is a React overlay rendered by `App`, above the existing
 three-column shell, with the queue still mounted underneath.
 
-- Open from the quick-read area ("Review changed files") and with a keyboard
-  shortcut on the selected row. Close with Escape or a close control.
+- Open from the quick-read area ("Review changed files"). Close with Escape or
+  a close control.
 - No URL change. Returning to the same state is free, because nothing unmounted.
-- Diff fetched on open from `GET /api/items/:nodeId/diff`. Held in memory for
-  the session only, with a small server-side memo keyed by node ID and head SHA
-  so an accidental reopen does not re-spend rate limit.
+- Diff fetched on open from `GET /api/items/:nodeId/diff` and held only for the
+  open overlay.
 - Draft comments live in React state, mirrored to `sessionStorage` keyed by node
-  ID and head SHA so a reload does not lose typing.
-- Submit posts the batch, shows the confirmation, then closes back to the queue.
+  ID and head SHA so a reload does not lose typing. Draft count, body size, and
+  aggregate tab storage are bounded.
+- Submit posts the batch after confirmation, clears the matching draft after a
+  confirmed success, and keeps the overlay open so merge remains available.
 
 Strengths: smallest change by a wide margin. No router, no schema, no new
 persistence. The "return to the same state" requirement is satisfied by
@@ -149,8 +161,8 @@ construction. Easy to delete if the shape turns out wrong.
 
 Weaknesses: no shareable or bookmarkable URL, and the browser back button does
 not close the surface, which people will try. Drafts are tied to one tab and one
-browser. A closed tab loses work, and `sessionStorage` has a size ceiling that a
-long review with quoted code can approach.
+browser. A closed tab loses work. Storage failure degrades to in-memory drafts
+with an explicit warning that reload recovery is unavailable.
 
 Best when the goal is to learn whether reviewing here beats reviewing on GitHub.
 
@@ -236,27 +248,25 @@ separating from the write half.
 
 1. Read-only diff viewer, Option A shape. Proves the file list, folding, and
    diff rendering without touching token scope or the mutation decision.
-2. Comment drafting with no submit control. Proves the comment placement model
-   and the batch preview.
-3. Token scope, decision record, and the single batch submit endpoint with
-   confirmation.
-4. Promote to Option B, or to C, once the surface has earned it.
+2. Line-comment drafting with no submit control. Proves placement, reload, stale
+   heads, and discard behavior.
+3. The single review mutation, explicit operator enablement, and confirmation,
+   deployed with write actions disabled.
+4. Squash merge with expected-head protection, still disabled in production.
+5. Operator token rotation and explicit production enablement.
+6. Promote to Option B or C once the review surface has earned it.
 
 If the answer is "go straight to the durable one", steps 1 and 2 still work as
 slices; only their storage changes.
 
-## Open questions
+## Decisions for epic #69
 
-- Split or unified diff? Unified is far less work and fits the current column
-  widths. Split needs a wider surface than the three-column shell has.
-- Does the review need to show existing review comments and replies from
-  GitHub, or only new ones? Showing them adds another read and a threading
-  model, and its absence will be felt on any pull request with prior discussion.
-- Should approve and request-changes be offered at all in the first version, or
-  only plain comment reviews? Restricting to `COMMENT` keeps the first mutation
-  as low-stakes as possible.
-- What happens to a pending draft when the head SHA moves mid-review? Options:
-  block submission, submit anyway and let GitHub reject stale lines, or offer to
-  re-anchor. This needs a decision before drafts are persisted.
-- Should the diff be reachable for a pull request that is not in the loaded
-  cache generation?
+- Version one renders unified diffs.
+- It shows new tab-local line drafts, not existing GitHub review threads.
+- Review events are Comment, Approve, and Request changes.
+- A moved head leaves the stale draft visible for copy or discard and blocks a
+  submission when the immediate reread detects the change.
+- The overlay opens only for a pull request in the loaded queue.
+- Version one does not delete the source branch after merge. Issue #78 owns the
+  cleanup-policy question because GitHub offers no expected-SHA condition on a
+  ref deletion.
