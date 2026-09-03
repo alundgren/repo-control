@@ -7,6 +7,9 @@ import {
   type ArtifactType,
   type StoredArtifact,
 } from "./store.js";
+import { renderArtifactViewer } from "./viewer.js";
+
+export { ARTIFACT_VIEWER_RESPONSE_OVERHEAD_BYTES } from "./viewer.js";
 
 export const ARTIFACT_CONFIGURATION_MESSAGE = "Repo Control could not start because the artifact public origin is invalid.";
 export const HTML_ARTIFACT_MAX_BYTES = 10 * 1024 * 1024;
@@ -35,11 +38,9 @@ export const ARTIFACT_VIEW_CSP = [
   "worker-src blob:",
   "connect-src 'none'",
   "object-src 'none'",
-  "frame-src 'none'",
-  "frame-ancestors 'none'",
+  "frame-src blob:",
   "form-action 'none'",
   "base-uri 'none'",
-  "sandbox allow-scripts allow-downloads",
 ].join("; ");
 
 export type ArtifactConfiguration = {
@@ -148,8 +149,9 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
     if (!artifact || !policy?.viewable) return sendNotFound(reply);
     applyPublicHeaders(reply);
     reply.header("Content-Security-Policy", ARTIFACT_VIEW_CSP);
+    reply.header("X-Frame-Options", "DENY");
     reply.header("Content-Type", `${policy.mediaType}; charset=${policy.charset}`);
-    return reply.send(artifact.content);
+    return reply.send(renderArtifactViewer(artifact));
   });
 
   app.get<{ Params: { id: string } }>("/public/:id/download", publicRouteOptions, async (request, reply) => {

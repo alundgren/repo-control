@@ -91,13 +91,55 @@ Successful public responses are cacheable for 30 days from each response. A
 browser or Cloudflare cache may serve a fetched copy after SQLite deletes the
 row. Retention limits origin disk use. It does not revoke a link.
 
-HTML view responses run under a restrictive Content Security Policy and a sandbox
-without same-origin permission. Inline scripts and styles, data and blob
-assets, blob workers, and downloads are allowed. External requests, forms,
-objects, nested frames, framing, popups, and cross-context navigation are
-blocked. A raw top-level document cannot prevent every possible same-context
-navigation. Uploaders remain trusted Tailnet participants, and the no-referrer
-policy plus external-resource restrictions limit information leakage.
+`GET /public/:id/view` returns a self-contained viewer rather than the uploaded
+HTML as the top-level document. The viewer embeds the stored bytes as base64,
+decodes them with `atob` into a `Uint8Array`, creates an HTML `Blob`, and loads
+its object URL in a full-window iframe. It does not parse, rewrite, inspect, or
+inject markup into the artifact. The object URL stays live until the viewer is
+closed, so delayed scripts, blob workers, and other later behavior continue to
+work. Download responses remain the original byte sequence.
+
+Base64 expands a 10 MiB artifact to at most 13,981,016 bytes. The viewer code
+and markup are limited to another 131,072 bytes, making the maximum response
+14,112,088 bytes, about 13.46 MiB. During reconstruction, the app may hold the
+base64 text and decoded binary string at two bytes per code unit, plus the
+10 MiB typed array and a 10 MiB Blob backing allocation. That conservative
+peak is 69,905,072 bytes, about 66.67 MiB, before browser networking, the
+parsed artifact DOM, media decoding, or engine bookkeeping. The viewer clears
+the embedded text after decoding. The Blob remains for the viewer lifetime.
+
+The viewer and blob document use the same restrictive Content Security Policy.
+It allows inline scripts and styles, data and blob assets, blob workers, media,
+downloads, the artifact's blob iframe, and blob subframes. Blob subframes are
+newly allowed because `frame-src blob:` is also required to load the artifact
+itself. They inherit the artifact iframe's sandbox and request restrictions.
+The iframe sandbox omits same-origin permission and allows only scripts and
+downloads. External connections and network-loaded frames, forms, objects,
+popups, parent access, and top-level navigation remain blocked. The viewer
+response uses `X-Frame-Options: DENY`; omitting `frame-ancestors` from the
+inherited CSP is necessary so WebKit can load the sandboxed blob iframe and its
+blob children.
+
+The Share tab copies and encodes the exact canonical `/view` URL and links to
+the existing `/download` URL. QR generation and interaction code are carried
+inside the response and make no runtime request. If the Clipboard API rejects
+the copy, the panel selects the canonical URL for manual copying and does not
+report success.
+
+Previously cached immutable `/view` responses may remain raw artifacts until
+their 30-day cache entry expires. Reverting the application restores raw views
+without changing stored rows. No data migration is involved.
+
+Install the browser binaries used by the local Playwright suite through the
+pinned package manager:
+
+```sh
+corepack pnpm browser:install
+```
+
+`corepack pnpm test:focused -- src/artifact/viewer.browser.test.ts` runs that
+browser file alone in Chromium and WebKit. The full `corepack pnpm test`
+command runs both the Vitest suite and browser tests.
 
 ## Dedicated public hostname
 
