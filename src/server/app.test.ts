@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ArtifactService } from "../artifact/index.js";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
+import type { GitHubReadClient } from "../github/read-client.js";
 import { createOperationalLogger } from "../observability/index.js";
 import type { SyncService } from "../sync/index.js";
 import { createApp, type AppOptions } from "./app.js";
@@ -45,6 +46,56 @@ describe("application server", () => {
       expect(response.statusCode).toBe(200);
       expect(response.headers["content-type"]).toContain("text/html");
       expect(response.body).toContain("<main>Browser shell</main>");
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("returns complete, partial, bounded, and unavailable pull-request diff reads without caching", async () => {
+    const outcomes: Awaited<ReturnType<GitHubReadClient["readPullRequestDiff"]>>[] = [
+      {
+        status: "complete",
+        headSha: "abc123",
+        fileCount: 1,
+        files: [{ path: "src/complete.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 0, patch: { status: "available", text: "@@ -0,0 +1 @@\n+hello" } }],
+        rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
+      },
+      {
+        status: "partial",
+        headSha: "def456",
+        fileCount: 3000,
+        files: [],
+        partialReason: "file_limit",
+        rateLimit: { cost: 31, remaining: 4969, resetAt: "2026-08-24T12:00:00.000Z" },
+      },
+      {
+        status: "complete",
+        headSha: "ghi789",
+        fileCount: 1,
+        files: [{ path: "src/bounded.ts", previousPath: null, changeType: "modified", additions: 20, deletions: 0, patch: { status: "unavailable", reason: "patch_budget" } }],
+        rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
+      },
+      { status: "unavailable", error: { code: "rate_limited", message: "GitHub rate limit prevented this read.", retryAfterSeconds: 60 } },
+    ];
+    const requests: unknown[] = [];
+    const { app, cache } = await buildApp({
+      diffClient: {
+        async readPullRequestDiff(input) {
+          requests.push(input);
+          return outcomes.shift()!;
+        },
+      },
+    });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot());
+      for (const expectedStatus of ["complete", "partial", "complete", "unavailable"]) {
+        const response = await app.inject({ method: "GET", url: "/api/items/PR_1/diff" });
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.json()).toMatchObject({ status: expectedStatus });
+      }
+      expect(requests).toEqual(Array.from({ length: 4 }, () => ({ repositoryNameWithOwner: "octo-user/fictional", number: 4 })));
     } finally {
       await app.close();
     }
@@ -368,7 +419,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -386,7 +437,8 @@ describe("application server", () => {
       },
     };
 
-    const app = await createApp({ webRoot, cache, syncService, refreshService, logger: overrides.logger, artifactService: overrides.artifactService });
+    const diffClient = overrides.diffClient ?? { async readPullRequestDiff() { throw new Error("readPullRequestDiff should not be called in this test"); } };
+    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, logger: overrides.logger, artifactService: overrides.artifactService });
     return { app, cache };
   }
 

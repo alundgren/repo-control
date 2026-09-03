@@ -66,6 +66,17 @@ used.
   area carries the bounded excerpt, relationship links or their unavailable
   state, item freshness, and the focused refresh control. Status facts use
   the success, warning, and secondary text roles.
+- Pull-request diff overlay: a selected pull request opens a full-viewport
+  modal above the mounted queue. Its header names the pull request and head
+  SHA, a file list links to independently foldable unified diffs, and the first
+  file with patch text starts unfolded while every other file starts folded.
+  The close control and Escape return to the exact queue state and opening
+  control. If live updates removed that control, focus returns to the queue
+  heading. Added and removed rows use low-saturation tints derived from the
+  success and warning roles, plus visible `+` and `−` gutter markers so colour
+  is never the only distinction. Omitted, incomplete, and size-limited patches,
+  a partial file list, and a failed read each state what is missing and link to
+  GitHub.
 - Relationship pills: small static mono pills after status facts — a shortened
   epic title with its `closed/total` fraction on issue rows that belong to an
   epic (`Epic:` prefixes stripped before word-boundary truncation), and linked

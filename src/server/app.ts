@@ -15,7 +15,7 @@ export type AppOptions = {
   artifactService?: ArtifactService;
 } & ApiPluginOptions;
 
-export async function createApp({ webRoot, logger, cache, syncService, refreshService, eventHub, webhookService, artifactService }: AppOptions) {
+export async function createApp({ webRoot, logger, cache, syncService, refreshService, diffClient, eventHub, webhookService, artifactService }: AppOptions) {
   const app = logger
     ? fastify({ loggerInstance: logger, logController: new LogController({ disableRequestLogging: true }) })
     : fastify();
@@ -39,7 +39,7 @@ export async function createApp({ webRoot, logger, cache, syncService, refreshSe
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService });
+  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService, diffClient });
 
   if (webhookService) {
     await registerWebhookRoutes(app, webhookService);

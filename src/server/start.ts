@@ -99,6 +99,7 @@ export async function startServer({
       cache,
       syncService,
       refreshService,
+      diffClient: client,
       eventHub,
       webhookService: webhookService ?? undefined,
       artifactService: artifactService ?? undefined,

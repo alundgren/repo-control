@@ -6,6 +6,8 @@ export const LABEL_LIMIT = 20;
 export const RELATIONSHIP_LIMIT = 25;
 export const RELATIONSHIP_SUBJECT_LIMIT = 10;
 export const EPIC_PROGRESS_SUBJECT_LIMIT = 50;
+export const PULL_REQUEST_FILE_LIMIT = 3_000;
+export const PULL_REQUEST_PATCH_BYTE_LIMIT = 5 * 1024 * 1024;
 
 export type GitHubViewer = {
   id: string;
@@ -44,6 +46,30 @@ export type GitHubReadClient = {
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
   readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;
+  readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestDiffRead>;
+};
+
+export type PullRequestDiffRead =
+  | {
+      status: "complete" | "partial";
+      headSha: string;
+      fileCount: number;
+      files: PullRequestDiffFile[];
+      rateLimit: GitHubRateLimit;
+      partialReason?: "file_limit";
+    }
+  | UnavailableRead;
+
+export type PullRequestDiffFile = {
+  path: string;
+  previousPath: string | null;
+  changeType: string;
+  additions: number;
+  deletions: number;
+  patch:
+    | { status: "available"; text: string }
+    | { status: "incomplete"; reason: "count_mismatch"; text: string }
+    | { status: "unavailable"; reason: "github_omitted" | "patch_budget" };
 };
 
 export type EpicProgressRead = {

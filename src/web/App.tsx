@@ -1,11 +1,16 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
-import { getOverview, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
+import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
+import { getOverview, getPullRequestDiff, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
 type ItemRefreshState = "idle" | "busy" | "success" | "partial" | "failed" | "removed";
+type DiffState =
+  | { status: "loading" }
+  | { status: "loaded"; data: Exclude<PullRequestDiffRead, { status: "unavailable" }> }
+  | { status: "failed" };
 
 type ViewDetails = {
   title: string;
@@ -57,6 +62,8 @@ export function App() {
   const [itemRefreshStates, setItemRefreshStates] = useState<Record<string, ItemRefreshState>>({});
   const [compactLayout, setCompactLayout] = useState(false);
   const [liveState, setLiveState] = useState<"connected" | "unavailable">("connected");
+  const [diffItem, setDiffItem] = useState<Extract<ApiItem, { type: "pull_request" }> | null>(null);
+  const [diffState, setDiffState] = useState<DiffState | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const quickReadHeadingRef = useRef<HTMLHeadingElement>(null);
   const overviewRef = useRef<Extract<OverviewResponse, { status: "ready" }> | null>(null);
@@ -65,6 +72,9 @@ export function App() {
   const queryRef = useRef("");
   const eventBufferRef = useRef<LiveItemEvent[]>([]);
   const reconcilingLiveRef = useRef(false);
+  const diffOpenerRef = useRef<HTMLElement | null>(null);
+  const diffScrollRef = useRef(0);
+  const diffRequestRef = useRef(0);
 
   useEffect(() => {
     void loadOverview();
@@ -234,6 +244,35 @@ export function App() {
     window.requestAnimationFrame(() => document.getElementById(`item-row-${previousSelection}`)?.focus());
   }
 
+  async function openDiff(item: Extract<ApiItem, { type: "pull_request" }>, opener: HTMLElement) {
+    const requestId = diffRequestRef.current + 1;
+    diffRequestRef.current = requestId;
+    diffOpenerRef.current = opener;
+    diffScrollRef.current = window.scrollY;
+    setDiffItem(item);
+    setDiffState({ status: "loading" });
+    try {
+      const response = await getPullRequestDiff(item.id);
+      if (diffRequestRef.current !== requestId) return;
+      setDiffState(response.status === "unavailable" ? { status: "failed" } : { status: "loaded", data: response });
+    } catch {
+      if (diffRequestRef.current === requestId) setDiffState({ status: "failed" });
+    }
+  }
+
+  function closeDiff() {
+    diffRequestRef.current += 1;
+    setDiffItem(null);
+    setDiffState(null);
+    const opener = diffOpenerRef.current;
+    const scrollY = diffScrollRef.current;
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, scrollY);
+      if (opener?.isConnected) opener.focus();
+      else titleRef.current?.focus();
+    });
+  }
+
   async function reconcileLiveOverview() {
     reconcilingLiveRef.current = true;
     let reconciled = false;
@@ -313,7 +352,8 @@ export function App() {
   }
 
   return (
-    <main className="appShell">
+    <>
+    <main className="appShell" inert={diffItem ? true : undefined}>
       <aside className="navigation">
         <button className="brand" onClick={() => changeView("now")} type="button">
           <span aria-hidden="true" className="brandMark">↗</span>
@@ -411,8 +451,10 @@ export function App() {
           ) : null}
         </div>
       </section>
-      {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
+      {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
+    {diffItem && diffState ? <DiffOverlay item={diffItem} onClose={closeDiff} state={diffState} /> : null}
+    </>
   );
 }
 
@@ -555,11 +597,12 @@ function ItemRow({
   );
 }
 
-function QuickRead({ backLabel, headingRef, item, onBack, onRefresh, overview, refreshState }: {
+function QuickRead({ backLabel, headingRef, item, onBack, onOpenDiff, onRefresh, overview, refreshState }: {
   backLabel: string;
   headingRef: RefObject<HTMLHeadingElement | null>;
   item: ApiItem | null;
   onBack?: () => void;
+  onOpenDiff: (item: Extract<ApiItem, { type: "pull_request" }>, opener: HTMLElement) => void;
   onRefresh: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   refreshState: ItemRefreshState;
@@ -574,6 +617,7 @@ function QuickRead({ backLabel, headingRef, item, onBack, onRefresh, overview, r
       <p className="detailIdentity">{repositoryName(overview, item.repositoryId)} · {item.type === "pull_request" ? "PR" : "#"}{item.number}</p>
       <h2 ref={headingRef} tabIndex={-1}>{item.title}</h2>
       <p className="detailAge">Updated {relativeTime(item.updatedAt)}</p>
+      {item.type === "pull_request" ? <button className="reviewButton" onClick={(event) => void onOpenDiff(item, event.currentTarget)} type="button">Review changed files</button> : null}
       <a className="detailLink" href={item.url} rel="noreferrer" target="_blank">Open on GitHub</a>
       <p className="itemExcerpt">{item.excerpt ?? "No text excerpt is available for this item."}</p>
       <p className="itemContextFreshness">Item facts checked {relativeTime(item.observedAt ?? item.updatedAt)}.</p>
@@ -586,6 +630,122 @@ function QuickRead({ backLabel, headingRef, item, onBack, onRefresh, overview, r
       </div>
     </aside>
   );
+}
+
+function DiffOverlay({ item, onClose, state }: {
+  item: Extract<ApiItem, { type: "pull_request" }>;
+  onClose: () => void;
+  state: DiffState;
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, []);
+
+  useEffect(() => {
+    if (state.status !== "loaded") return;
+    const firstPatch = state.data.files.findIndex((file) => file.patch.status !== "unavailable");
+    setExpanded(firstPatch < 0 ? new Set() : new Set([firstPatch]));
+  }, [state]);
+
+  function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+    if (focusable.length === 0) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  return (
+    <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
+      <header className="diffHeader">
+        <div>
+          <p className="eyebrow">Changed files</p>
+          <h1 id="diff-title">{item.title}</h1>
+          <p className="diffIdentity">PR{item.number}{state.status === "loaded" ? <> · <span>{state.data.headSha}</span></> : null}</p>
+        </div>
+        <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">Close</button>
+      </header>
+      {state.status === "loading" ? <p className="diffMessage">Loading changed files…</p> : null}
+      {state.status === "failed" ? (
+        <div className="diffMessage">
+          <p>Changed files could not be loaded.</p>
+          <a href={item.url} rel="noreferrer" target="_blank">Open this pull request on GitHub</a>
+        </div>
+      ) : null}
+      {state.status === "loaded" ? (
+        <div className="diffLayout">
+          <nav aria-label="Changed files" className="diffFileList">
+            <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>
+            <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`}>{file.path}</a></li>)}</ul>
+          </nav>
+          <section aria-label="File diffs" className="diffFiles">
+            {state.data.status === "partial" ? <p className="diffNotice">GitHub limits this list to 3,000 changed files. <a href={item.url} rel="noreferrer" target="_blank">Open the pull request on GitHub</a> to see whether more files changed.</p> : null}
+            {state.data.files.map((file, index) => (
+              <DiffFile
+                expanded={expanded.has(index)}
+                file={file}
+                githubUrl={item.url}
+                id={`diff-file-${index}`}
+                key={`${file.path}-${index}`}
+                onToggle={() => setExpanded((current) => {
+                  const next = new Set(current);
+                  if (next.has(index)) next.delete(index); else next.add(index);
+                  return next;
+                })}
+              />
+            ))}
+          </section>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boolean; file: PullRequestDiffFile; githubUrl: string; id: string; onToggle: () => void }) {
+  return (
+    <article className="diffFile" id={id}>
+      <button aria-expanded={expanded} className="diffFileToggle" onClick={onToggle} type="button">
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+        <span className="diffPath">{file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}</span>
+        <span className="diffCounts">+{file.additions} −{file.deletions}</span>
+      </button>
+      {expanded ? <div className="diffBody">
+        {file.patch.status === "unavailable" ? (
+          <p className="diffNotice">{file.patch.reason === "patch_budget" ? "The 5 MiB patch limit was reached before this file." : "GitHub did not provide patch text for this file."} <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p>
+        ) : (
+          <>
+            {file.patch.status === "incomplete" ? <p className="diffNotice">This patch may be incomplete because its lines do not match GitHub's file totals. <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p> : null}
+            <pre className="unifiedDiff">{file.patch.text.split("\n").map((line, index) => <DiffLine key={index} line={line} />)}</pre>
+          </>
+        )}
+      </div> : null}
+    </article>
+  );
+}
+
+function DiffLine({ line }: { line: string }) {
+  const kind = line.startsWith("+") && !line.startsWith("+++") ? "added" : line.startsWith("-") && !line.startsWith("---") ? "removed" : line.startsWith("@@") ? "hunk" : "context";
+  const marker = kind === "added" ? "+" : kind === "removed" ? "−" : " ";
+  return <span className={`diffLine ${kind}`}><span aria-hidden="true" className="diffMarker">{marker}</span><span className="visuallyHidden">{kind === "added" ? "Added line: " : kind === "removed" ? "Removed line: " : ""}</span><span>{line}</span>{"\n"}</span>;
 }
 
 function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_request" }> }) {
