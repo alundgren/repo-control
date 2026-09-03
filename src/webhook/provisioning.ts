@@ -8,10 +8,10 @@ export type WebhookProvisioningConfiguration = {
 };
 
 const WEBHOOK_SPEC = {
-  version: 2,
+  version: 3,
   active: true,
   contentType: "json",
-  events: ["issues", "pull_request", "sub_issues"],
+  events: ["issue_dependencies", "issues", "pull_request", "sub_issues"],
 } as const;
 
 type WebhookEvent = typeof WEBHOOK_SPEC.events[number];

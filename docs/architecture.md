@@ -82,11 +82,12 @@ GitHub response body.
    all reads finish. The UI keeps the previous generation if a sync read fails.
 5. A focused refresh reads one GitHub node, updates its normalized records, and
    returns the new detail state.
-6. A signed issue, pull-request, or sub-issue webhook records its delivery
-   before acknowledgement. The asynchronous worker uses focused refresh for
-   cached work and a validated focused upsert for an uncached open item.
-   Sub-issue links refresh both issues, and child changes refresh a known parent
-   before processing the child.
+6. A signed issue, issue-dependency, pull-request, or sub-issue webhook records
+   its delivery before acknowledgement. The asynchronous worker uses focused
+   refresh for cached work and a validated focused upsert for an uncached open
+   item. Dependency changes refresh the blocked issue. Sub-issue links refresh
+   both issues, and child changes refresh a known parent before processing the
+   child.
 7. A successful item write or removal publishes one item-scoped change. The SSE
    route sends it to connected browsers without making cache reads or manual
    sync depend on stream delivery.
@@ -95,11 +96,12 @@ GitHub response body.
    inventory and commits it atomically. Only then it serially checks each
    eligible repository without a terminal ledger outcome. An exact existing
    callback records `already_present`; otherwise it creates an active JSON hook
-   for issues, pull requests, and sub-issues, then records `created`. The ledger
-   also stores the required specification version. When that version advances,
-   the next explicit sync updates the one matching callback hook and records
-   the new version. A list, create, or update failure leaves the earlier result
-   in place so a later explicit sync retries. Unrelated hooks are never changed.
+   for issue dependencies, issues, pull requests, and sub-issues, then records
+   `created`. The ledger also stores the required specification version. When
+   that version advances, the next explicit sync updates the one matching
+   callback hook and records the new version. A list, create, or update failure
+   leaves the earlier result in place so a later explicit sync retries.
+   Unrelated hooks are never changed.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make

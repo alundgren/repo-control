@@ -32,16 +32,16 @@ describe("webhook provisioning", () => {
     try {
       await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 1, created: 1, updated: 0, alreadyPresent: 0, failed: 0 });
       await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
-      expect(createCalls).toEqual([expect.objectContaining({ events: ["issues", "pull_request", "sub_issues"], active: true, contentType: "json" })]);
-      expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({ outcome: "created", specVersion: 2, recordedAt: "2026-08-24T12:00:00.000Z" });
+      expect(createCalls).toEqual([expect.objectContaining({ events: ["issue_dependencies", "issues", "pull_request", "sub_issues"], active: true, contentType: "json" })]);
+      expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({ outcome: "created", specVersion: 3, recordedAt: "2026-08-24T12:00:00.000Z" });
     } finally {
       store.close();
     }
   });
 
-  it("updates a version-one callback hook once when the required events change", async () => {
+  it("updates a version-two callback hook once when the required events change", async () => {
     const store = openWebhookProvisioningStore({ path: await createStorePath() });
-    store.recordTerminalOutcome("U_fixture", "R_1", "created", "2026-08-24T12:00:00.000Z");
+    store.recordTerminalOutcome("U_fixture", "R_1", "created", "2026-08-24T12:00:00.000Z", 2);
     const updates: unknown[] = [];
     let listCalls = 0;
     const provisioner = createWebhookProvisioner({
@@ -72,14 +72,14 @@ describe("webhook provisioning", () => {
       await expect(provisioner.reconcile(inventory())).resolves.toEqual({ eligible: 0, created: 0, updated: 0, alreadyPresent: 0, failed: 0 });
       expect(updates).toEqual([expect.objectContaining({
         hookId: 17,
-        events: ["issues", "pull_request", "sub_issues"],
+        events: ["issue_dependencies", "issues", "pull_request", "sub_issues"],
         active: true,
         contentType: "json",
       })]);
       expect(listCalls).toBe(1);
       expect(store.getTerminalOutcome("U_fixture", "R_1")).toEqual({
         outcome: "already_present",
-        specVersion: 2,
+        specVersion: 3,
         recordedAt: "2026-08-28T12:00:00.000Z",
       });
     } finally {
@@ -111,7 +111,7 @@ describe("webhook provisioning", () => {
       await expect(provisioner.reconcile(inventory())).resolves.toMatchObject({ updated: 0, failed: 1 });
       expect(store.getTerminalOutcome("U_fixture", "R_1")?.specVersion).toBe(1);
       await expect(provisioner.reconcile(inventory())).resolves.toMatchObject({ updated: 1, failed: 0 });
-      expect(store.getTerminalOutcome("U_fixture", "R_1")?.specVersion).toBe(2);
+      expect(store.getTerminalOutcome("U_fixture", "R_1")?.specVersion).toBe(3);
     } finally {
       store.close();
     }
@@ -278,7 +278,7 @@ function hook(overrides: Partial<{ id: number; callbackUrl: string; active: bool
     callbackUrl: configuration().callbackUrl,
     active: true,
     contentType: "json",
-    events: ["issues", "pull_request", "sub_issues"],
+    events: ["issue_dependencies", "issues", "pull_request", "sub_issues"],
     ...overrides,
   };
 }

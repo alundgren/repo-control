@@ -30,8 +30,8 @@ REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL='https://hooks.example.com/webhooks/git
 On each explicit account sync, Repo Control fully inventories personal-account
 repositories, then considers only active, non-fork repositories without a
 terminal result for the current webhook specification. The current
-specification requires one active JSON webhook for the `issues`,
-`pull_request`, and `sub_issues` events.
+specification requires one active JSON webhook for the `issue_dependencies`,
+`issues`, `pull_request`, and `sub_issues` events.
 
 The provisioning ledger records the specification version. A current result
 skips GitHub entirely. When the application advances the specification, Repo
@@ -93,9 +93,11 @@ closed at the application.
 
 ## Supported deliveries and recovery
 
-The worker handles issue, pull-request, and sub-issue changes, including edits,
-labels, assignments, milestones, transfers, state changes, parent links, and
-pull-request commit updates (`synchronize`). A cached item emits an item-scoped
+The worker handles issue, issue-dependency, pull-request, and sub-issue changes,
+including edits, labels, assignments, milestones, transfers, state changes,
+blocking links, parent links, and pull-request commit updates (`synchronize`).
+Dependency changes refresh the blocked issue, regardless of which side of the
+relationship GitHub names in the action. A cached item emits an item-scoped
 event only after its cache write or removal succeeds. Closed issues, closed
 pull requests, merged pull requests, and repositories outside the connected
 account are normal removal outcomes.

@@ -113,7 +113,7 @@ export function createWebhookService({
         return;
       }
 
-      if ((eventName !== "issues" && eventName !== "pull_request") || isSubIssueTarget(target)) {
+      if ((eventName !== "issues" && eventName !== "pull_request" && eventName !== "issue_dependencies") || isSubIssueTarget(target)) {
         store.finish(deliveryId, "manual_reconciliation", "unsupported_event", timestamp.toISOString());
         logDelivery(delivery, "manual_reconciliation", "unsupported_event", logEvent);
         return;
@@ -316,7 +316,13 @@ function normalizeDelivery(body: Buffer, deliveryId: string | undefined, eventNa
       },
     };
   }
-  const raw = eventName === "issues" ? payload.issue : eventName === "pull_request" ? payload.pull_request : null;
+  const raw = eventName === "issues"
+    ? payload.issue
+    : eventName === "pull_request"
+      ? payload.pull_request
+      : eventName === "issue_dependencies"
+        ? payload.blocked_issue
+        : null;
   if (!isRecord(raw) || typeof raw.node_id !== "string" || !Number.isInteger(raw.number) || !isRecord(payload.repository)) {
     return { deliveryId, eventName, target: null };
   }
@@ -327,7 +333,7 @@ function normalizeDelivery(body: Buffer, deliveryId: string | undefined, eventNa
     target: {
       nodeId: raw.node_id,
       repositoryId: typeof repository.node_id === "string" ? repository.node_id : null,
-      itemType: eventName === "issues" ? "issue" : "pull_request",
+      itemType: eventName === "pull_request" ? "pull_request" : "issue",
       number: raw.number as number,
       action: typeof payload.action === "string" ? payload.action : "unknown",
     },

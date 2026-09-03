@@ -110,6 +110,37 @@ describe("GitHub webhook delivery", () => {
     }
   });
 
+  it.each(["blocked_by_added", "blocked_by_removed", "blocking_added", "blocking_removed"])(
+    "refreshes the blocked issue for an issue dependency %s delivery",
+    async (action) => {
+      const store = await deliveryStore();
+      const refreshes: string[] = [];
+      const service = createWebhookService({
+        cache: { getItem: () => ({ type: "issue" }) } as unknown as Cache,
+        refreshService: {
+          refreshItem: async ({ nodeId }) => {
+            refreshes.push(nodeId);
+            return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+          },
+        },
+        secret: "fixture-secret",
+        store,
+      });
+      const body = Buffer.from(JSON.stringify(issueDependencyPayload(action)));
+
+      try {
+        await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: `d-${action}`, eventName: "issue_dependencies" });
+        await service.start();
+
+        expect(refreshes).toEqual(["I_blocked"]);
+        expect(store.takePending(new Date().toISOString())).toEqual([]);
+      } finally {
+        await service.stop();
+        store.close();
+      }
+    },
+  );
+
   it("refreshes a cached parent before processing a child state change", async () => {
     const store = await deliveryStore();
     const refreshes: string[] = [];
@@ -305,6 +336,15 @@ function subIssuePayload() {
     action: "parent_issue_added",
     parent_issue: { node_id: "I_parent", number: 7 },
     sub_issue: { node_id: "I_child", number: 8 },
+    repository: { node_id: "R_fixture" },
+  };
+}
+
+function issueDependencyPayload(action: string) {
+  return {
+    action,
+    blocked_issue: { node_id: "I_blocked", number: 7 },
+    blocking_issue: { node_id: "I_blocker", number: 8 },
     repository: { node_id: "R_fixture" },
   };
 }
