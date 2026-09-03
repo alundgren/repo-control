@@ -18,7 +18,7 @@ const fixtureIds = {
   nearlyBlack: "e".repeat(32),
   mixed: "f".repeat(32),
   moving: "g".repeat(32),
-  topRight: "h".repeat(32),
+  bottomRight: "h".repeat(32),
   viewportHeight: "i".repeat(32),
   fixed: "j".repeat(32),
   scrolling: "k".repeat(32),
@@ -43,7 +43,7 @@ test.beforeAll(async () => {
     [fixtureIds.nearlyBlack, storedArtifact(fixtureIds.nearlyBlack, visualFixture("nearly-black", "#090807"))],
     [fixtureIds.mixed, storedArtifact(fixtureIds.mixed, visualFixture("mixed", "linear-gradient(90deg,#fff 50%,#080808 50%)"))],
     [fixtureIds.moving, storedArtifact(fixtureIds.moving, movingFixture())],
-    [fixtureIds.topRight, storedArtifact(fixtureIds.topRight, topRightFixture())],
+    [fixtureIds.bottomRight, storedArtifact(fixtureIds.bottomRight, bottomRightFixture())],
     [fixtureIds.viewportHeight, storedArtifact(fixtureIds.viewportHeight, viewportHeightFixture())],
     [fixtureIds.fixed, storedArtifact(fixtureIds.fixed, fixedFixture())],
     [fixtureIds.scrolling, storedArtifact(fixtureIds.scrolling, scrollingFixture())],
@@ -83,10 +83,13 @@ test("opens, pins, and closes Share without exposing hidden controls", async ({ 
   expect(await page.locator("body").ariaSnapshot()).not.toContain("Copy link");
   const closedBox = await tab.boundingBox();
   expect(closedBox).not.toBeNull();
-  expect(closedBox).toMatchObject({ width: 72, height: 28 });
+  expect(closedBox).toEqual({ x: 1208, y: 686, width: 72, height: 28 });
 
   await tab.hover();
   await expect(panel).toBeVisible();
+  const openBox = await panel.boundingBox();
+  expect(openBox).not.toBeNull();
+  expect(openBox!.y + openBox!.height).toBeLessThan(closedBox!.y);
   await page.mouse.move(20, 200);
   await expect(panel).toBeHidden();
 
@@ -259,7 +262,7 @@ test("fills changing viewports without viewer scrollbars or artifact layout chan
   expect((await page.locator("[data-share-panel]").boundingBox())!.width).toBeLessThanOrEqual(344);
 
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.goto(viewUrl(fixtureIds.topRight));
+  await page.goto(viewUrl(fixtureIds.bottomRight));
   const before = await viewerMeasurements(page);
   await page.locator("[data-share-tab]").click();
   await expect(page.locator("[data-share-panel]")).toBeVisible();
@@ -315,7 +318,7 @@ test("makes matching light and dark Share tabs quieter while preserving contrast
 
   for (const id of [fixtureIds.lightNeutral, fixtureIds.lightHint, fixtureIds.darkNeutral, fixtureIds.darkHint]) {
     await page.goto(viewUrl(id));
-    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1158, y: 0, width: 122, height: 54 } });
+    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1158, y: 666, width: 122, height: 54 } });
   }
 });
 
@@ -327,7 +330,7 @@ test("keeps opposing dark-hint boundaries visible over misleading light content"
     outerBoundary: "rgb(96, 73, 57) 0px 0px 0px 2px",
   });
   await expect(page).toHaveScreenshot("share-tab-dark-over-light-block.png", {
-    clip: { x: 1158, y: 0, width: 122, height: 54 },
+    clip: { x: 1158, y: 666, width: 122, height: 54 },
   });
 });
 
@@ -377,7 +380,7 @@ function visualFixture(name: string, background: string) {
 function misleadingDarkFixture() {
   return documentFixture(
     '<main data-fixture="misleading-dark"><div></div></main>',
-    "body{min-height:100vh;background:#292019}div{position:fixed;top:0;right:0;width:128px;height:64px;background:#F2EADE}",
+    "body{min-height:100vh;background:#292019}div{position:fixed;right:0;bottom:0;width:128px;height:64px;background:#F2EADE}",
   );
 }
 
@@ -415,8 +418,8 @@ function movingFixture() {
   return documentFixture('<div data-fixture="moving"></div>', 'div{position:fixed;width:40px;height:40px;background:#765;animation:move 1s infinite alternate}@keyframes move{to{transform:translate(200px,100px)}}');
 }
 
-function topRightFixture() {
-  return documentFixture('<strong data-important-corner>Important</strong>', 'strong{position:fixed;top:0;right:0;padding:20px;background:#913;color:white}');
+function bottomRightFixture() {
+  return documentFixture('<strong data-important-corner>Important</strong>', 'strong{position:fixed;right:0;bottom:0;padding:20px;background:#913;color:white}');
 }
 
 function viewportHeightFixture() {

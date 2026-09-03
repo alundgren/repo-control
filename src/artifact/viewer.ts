@@ -59,7 +59,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1.45 system-ui, sans-serif; }
 .artifact-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
 .share-dismiss { position: fixed; z-index: 1; inset: 0; background: transparent; }
-.share-root { position: fixed; z-index: 2; top: 6px; right: 0; }
+.share-root { position: fixed; z-index: 2; right: 0; bottom: 6px; }
 .share-tab {
   display: block;
   width: 72px;
@@ -79,7 +79,7 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
 }
 .share-panel {
   position: absolute;
-  top: 32px;
+  bottom: 32px;
   right: 8px;
   width: min(288px, calc(100vw - 16px));
   padding: 16px;
