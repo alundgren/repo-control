@@ -37,22 +37,26 @@ fonts and keep their licence with the assets.
 
 ## Testing
 
-Test observable behaviour at an agreed public seam. Do not assert private
-collaborators, implementation details, or incidental logging.
+Test externally observable behaviour through stable public interfaces. Tests
+should fail when important behaviour regresses. Do not assert private
+collaborators, implementation order, or incidental logging.
 
-For each vertical slice, add one focused failing test, run only that source
-test file, then make the smallest change that turns it green. Typecheck after
-structural or type-signature changes. Run the full suite once after all slices
-are complete.
+Add or update tests when a change introduces behaviour, changes a contract, or
+fixes a bug that existing tests do not cover. Choose the implementation and
+test-writing order that is most efficient for the task.
 
-Use the pinned pnpm version through Corepack:
+Run the tests and static checks relevant to the changed code. Expand validation
+when the change affects shared infrastructure, crosses module boundaries, or
+has a high cost of failure. Run the full suite when focused checks do not give
+enough confidence. Report any relevant check that was skipped or failed and
+explain why.
+
+Use the pinned pnpm version through Corepack. For a focused test:
 
 ```sh
 corepack pnpm test:focused -- src/server/app.test.ts
-corepack pnpm typecheck
-corepack pnpm test
 ```
 
-Every test-bearing deliverable must provide the same `test:focused` contract:
-it accepts exactly one source test-file path after `--` and runs only that test
-program with compact output. The full `test` command runs the suite.
+`test:focused` accepts exactly one source test-file path after `--` and runs
+only that test program with compact output. Use the repository scripts for
+typechecking and the full suite when those checks are warranted.
