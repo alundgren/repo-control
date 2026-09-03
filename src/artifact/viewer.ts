@@ -46,15 +46,15 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
 .share-root { position: fixed; z-index: 2; top: 6px; right: 0; }
 .share-tab {
   display: block;
-  width: 104px;
-  height: 40px;
+  width: 72px;
+  height: 28px;
   border: 1px solid var(--viewer-line);
   border-right: 0;
-  border-radius: 10px 0 0 10px;
+  border-radius: 8px 0 0 8px;
   box-shadow: 0 0 0 2px var(--viewer-field);
   background: var(--viewer-raised);
   color: var(--viewer-text);
-  font: 600 16px/1 system-ui, sans-serif;
+  font: 600 13.5px/1 system-ui, sans-serif;
   cursor: pointer;
 }
 .share-tab:focus-visible, .share-panel button:focus-visible, .share-panel a:focus-visible, .share-panel input:focus-visible {
@@ -63,7 +63,7 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
 }
 .share-panel {
   position: absolute;
-  top: 44px;
+  top: 32px;
   right: 8px;
   width: min(288px, calc(100vw - 16px));
   padding: 16px;
