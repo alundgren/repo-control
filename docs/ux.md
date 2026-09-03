@@ -79,7 +79,7 @@ used.
   read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
   opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
-  72 by 28 pixel Share tab sits at the top-right edge. Its neutral treatment
+  72 by 28 pixel Share tab sits at the bottom-right edge. Its neutral treatment
   uses the raised surface with primary text, a primary-text inner boundary,
   and a field outer halo. A `light` upload hint changes only the tab fill to
   field. A `dark` hint uses Share dark ground and Share dark text, with a field
