@@ -28,7 +28,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
-| Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves public reads, and deletes expired rows on its cleanup schedule. |
+| Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves an isolated public viewer and exact download, and deletes expired rows on its cleanup schedule. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
 | Webhook provisioning | Atomically replaces the complete owned-repository inventory, then records only `created` or `already_present` terminal outcomes per account and repository. |
 | Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
@@ -119,9 +119,15 @@ An agent on the Tailnet can upload one self-contained HTML artifact to a
 private artifact endpoint. The artifact service stores the original bytes
 in SQLite and returns view and download URLs built from the configured public
 origin. A dedicated public hostname forwards only matching `GET /public/...`
-requests. Browser rendering and export stay in the downloaded document. The
-service deletes expired rows during startup cleanup, scheduled cleanup, and a
-later publication transaction. Public caches may retain bytes after deletion.
+requests. The view response base64-encodes those bytes inside a fixed viewer.
+The browser reconstructs a byte-identical Blob and renders its object URL in a
+full-window iframe without same-origin permission. The viewer's Share overlay
+uses the canonical view URL for its QR code and copy action and the existing
+download route for export. The viewer and artifact have no messaging or DOM
+access between them. The service deletes expired rows during startup cleanup,
+scheduled cleanup, and a later publication transaction. Public caches may
+retain bytes after deletion or may serve the prior raw-view format until an
+immutable entry expires.
 
 After a successful refresh proves that an item left the open version-one scope,
 the cache deletes that item and its dependent relationships. When repository

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ArtifactQuotaExceededError, type ArtifactType, type StoredArtifact } from "./store.js";
 import {
+  ARTIFACT_VIEWER_RESPONSE_OVERHEAD_BYTES,
   HTML_ARTIFACT_MAX_BYTES,
   artifactPlugin,
   type ArtifactService,
@@ -88,13 +89,16 @@ describe("artifact HTTP routes", () => {
     expectError(quota, 507, "artifact_quota_exceeded");
   });
 
-  it("serves every supported type as direct HTML with cache and security headers", async () => {
+  it("serves every supported type through a viewer that preserves the stored bytes", async () => {
     const artifacts = new Map<string, ArtifactType>([
       ["a".repeat(32), "archify"],
       ["b".repeat(32), "presentation"],
       ["c".repeat(32), "mockup"],
     ]);
-    const content = Buffer.from([60, 104, 49, 62, 255, 60, 47, 104, 49, 62]);
+    const content = Buffer.concat([
+      Buffer.from("<!doctype html><title>café 雪</title>", "utf8"),
+      Buffer.from([255, 0, 128]),
+    ]);
     const app = await buildApp(serviceFixture({
       find(id) {
         const type = artifacts.get(id);
@@ -102,14 +106,19 @@ describe("artifact HTTP routes", () => {
       },
     }));
 
-    for (const id of artifacts.keys()) {
+    for (const [id, type] of artifacts) {
       const view = await app.inject({ method: "GET", url: `/public/${id}/view` });
       expect(view.statusCode).toBe(200);
       expect(view.headers["content-type"]).toBe("text/html; charset=utf-8");
-      expect(view.rawPayload).toEqual(content);
+      expect(view.body).toContain("data-artifact-viewer");
+      expect(view.body).toContain(`title="${artifactFrameTitle(type)}"`);
+      expect(view.body).toContain('sandbox="allow-scripts allow-downloads"');
+      expect(view.body).not.toContain("allow-same-origin");
+      expect(decodeEmbeddedArtifact(view.body)).toEqual(content);
       expect(view.headers["content-security-policy"]).toBe(
-        "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; object-src 'none'; frame-src 'none'; frame-ancestors 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-downloads",
+        "default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; media-src data: blob:; worker-src blob:; connect-src 'none'; object-src 'none'; frame-src blob:; form-action 'none'; base-uri 'none'",
       );
+      expect(view.headers["x-frame-options"]).toBe("DENY");
       expectPublicHeaders(view.headers);
     }
 
@@ -121,6 +130,23 @@ describe("artifact HTTP routes", () => {
     expect(download.rawPayload).toEqual(content);
     expect(download.headers).not.toHaveProperty("content-security-policy");
     expectPublicHeaders(download.headers);
+  });
+
+  it("bounds the viewer response overhead at the maximum upload size", async () => {
+    const id = "a".repeat(32);
+    const content = Buffer.alloc(HTML_ARTIFACT_MAX_BYTES, 0xa5);
+    const app = await buildApp(serviceFixture({
+      find: () => storedArtifact({ id, content }),
+    }));
+
+    const view = await app.inject({ method: "GET", url: `/public/${id}/view` });
+    const encodedBytes = 4 * Math.ceil(content.byteLength / 3);
+
+    expect(view.statusCode).toBe(200);
+    expect(view.rawPayload.byteLength).toBeLessThanOrEqual(
+      encodedBytes + ARTIFACT_VIEWER_RESPONSE_OVERHEAD_BYTES,
+    );
+    expect(decodeEmbeddedArtifact(view.body).equals(content)).toBe(true);
   });
 
   it("returns the same missing response for malformed, unknown, and non-viewable artifacts", async () => {
@@ -214,4 +240,14 @@ function expectPublicHeaders(headers: Record<string, unknown>) {
     "x-robots-tag": "noindex, nofollow, noarchive",
     "x-content-type-options": "nosniff",
   });
+}
+
+function decodeEmbeddedArtifact(viewer: string) {
+  const match = viewer.match(/<script id="artifact-payload" type="application\/octet-stream">([A-Za-z0-9+/=]+)<\/script>/);
+  expect(match).not.toBeNull();
+  return Buffer.from(match![1]!, "base64");
+}
+
+function artifactFrameTitle(type: ArtifactType) {
+  return type === "archify" ? "Archify artifact" : type === "presentation" ? "Presentation artifact" : "Mockup artifact";
 }

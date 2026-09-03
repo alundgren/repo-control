@@ -33,14 +33,24 @@ if (!supportedTestPath.test(relativeSourcePath)) {
   throw new Error(`Focused test must be a source test under src/: ${sourceTest}`);
 }
 
+const isBrowserTest = relativeSourcePath.endsWith(".browser.test.ts");
+const runnerArguments = isBrowserTest
+  ? [
+      path.join(repositoryRoot, "node_modules", "@playwright", "test", "cli.js"),
+      "test",
+      relativeSourcePath,
+      "--reporter=line",
+    ]
+  : [
+      path.join(repositoryRoot, "node_modules", "vitest", "vitest.mjs"),
+      "run",
+      "--reporter=dot",
+      relativeSourcePath,
+    ];
+
 const result = spawnSync(
   process.execPath,
-  [
-    path.join(repositoryRoot, "node_modules", "vitest", "vitest.mjs"),
-    "run",
-    "--reporter=dot",
-    relativeSourcePath,
-  ],
+  runnerArguments,
   { cwd: repositoryRoot, stdio: "inherit" },
 );
 
