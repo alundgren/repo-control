@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
@@ -640,6 +640,7 @@ function DiffOverlay({ item, onClose, state }: {
   state: DiffState;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0 });
   const [diffView, setDiffView] = useState<DiffView>("grouped");
@@ -689,6 +690,16 @@ function DiffOverlay({ item, onClose, state }: {
     });
   }
 
+  function moveToFile(event: ReactMouseEvent<HTMLAnchorElement>, index: number) {
+    event.preventDefault();
+    const overlay = overlayRef.current;
+    const top = topRef.current;
+    const file = document.getElementById(`diff-file-${index}`);
+    if (!overlay || !top || !file) return;
+    const distance = file.getBoundingClientRect().top - overlay.getBoundingClientRect().top;
+    overlay.scrollTop = Math.max(0, overlay.scrollTop + distance - top.offsetHeight - 16);
+  }
+
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -711,7 +722,7 @@ function DiffOverlay({ item, onClose, state }: {
 
   return (
     <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
-      <div className="diffTop">
+      <div className="diffTop" ref={topRef}>
         <header className="diffHeader">
           <div>
             <p className="eyebrow">Changed files</p>
@@ -739,14 +750,14 @@ function DiffOverlay({ item, onClose, state }: {
             <nav aria-label="Changed files" className="diffFileList">
             <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>
               {diffView === "files" ? (
-                <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`}>{file.path}</a></li>)}</ul>
+                <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>)}</ul>
               ) : (
                 <ul className="diffGroupedFileList">{state.data.groups.map((group, groupIndex) => (
                   <li key={`${group.name}-${groupIndex}`}>
                     <span className="diffGroupName">{group.name}</span>
                     <ul>{group.fileIndexes.map((index) => {
                       const file = state.data.files[index]!;
-                      return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`}>{file.path}</a></li>;
+                      return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>;
                     })}</ul>
                   </li>
                 ))}</ul>

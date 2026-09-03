@@ -58,7 +58,26 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 });
 
-function overview() {
+test("keeps a linked file below the sticky review controls at a narrow width", async ({ page }) => {
+  const title = "A fictional pull request with a long title that wraps across several lines on a narrow screen";
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.route("**/events", (route) => route.abort());
+  await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
+  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff() }));
+  await page.goto(origin);
+
+  await page.getByRole("button", { name: "Pull requests 40" }).click();
+  await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
+  await page.getByRole("button", { name: "Review changed files" }).click();
+  const dialog = page.getByRole("dialog", { name: title });
+  await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
+
+  const stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
+  const fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
+  expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
+});
+
+function overview(firstTitle = "Fictional pull request 1") {
   return {
     status: "ready",
     fetchedAt: "2026-08-23T10:00:00.000Z",
@@ -69,7 +88,7 @@ function overview() {
       type: "pull_request",
       repositoryId: "R_1",
       number: index + 1,
-      title: `Fictional pull request ${index + 1}`,
+      title: index === 0 ? firstTitle : `Fictional pull request ${index + 1}`,
       excerpt: "A fictional change for browser validation.",
       url: `https://github.test/fictional-tools/garden/pull/${index + 1}`,
       updatedAt: new Date(Date.UTC(2026, 7, 23, 10, index)).toISOString(),
