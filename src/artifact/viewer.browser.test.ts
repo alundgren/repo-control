@@ -73,8 +73,7 @@ test("opens, pins, and closes Share without exposing hidden controls", async ({ 
   expect(await page.locator("body").ariaSnapshot()).not.toContain("Copy link");
   const closedBox = await tab.boundingBox();
   expect(closedBox).not.toBeNull();
-  expect(closedBox!.width).toBeLessThanOrEqual(112);
-  expect(closedBox!.height).toBeLessThanOrEqual(44);
+  expect(closedBox).toMatchObject({ width: 72, height: 28 });
 
   await tab.hover();
   await expect(panel).toBeVisible();

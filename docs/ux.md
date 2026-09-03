@@ -74,7 +74,7 @@ used.
   read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
   opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
-  104 by 40 pixel Share tab sits at the top-right edge with an opaque raised
+  72 by 28 pixel Share tab sits at the top-right edge with an opaque raised
   surface, dark border, and light outer ring so it remains legible over unknown
   content. Hover or keyboard focus opens the panel temporarily. Click or tap
   pins it. The panel contains a 128 pixel QR code, Copy link, Download, copy
@@ -91,5 +91,5 @@ The public viewer uses the system UI font stack instead of embedding IBM Plex.
 The viewer response must stay self-contained and its CSP permits no font
 request. The QR graphic alone uses pure white and black because scanner
 reliability needs maximum contrast at 128 pixels. The closed Share tab may
-cover a 104 by 40 pixel area of the artifact. The open panel may cover more,
+cover a 72 by 28 pixel area of the artifact. The open panel may cover more,
 but it never changes the artifact iframe's viewport or layout.
