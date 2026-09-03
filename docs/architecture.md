@@ -5,7 +5,9 @@
 Repo Control uses these runtime connections:
 
 ```text
-host environment -- configuration --> application server --> GitHub GraphQL API
+host environment -- configuration --> application server -- account reads --> GitHub GraphQL API
+                                          |
+                                          +-- on-demand PR diffs --> GitHub REST API
                                           ^      |    ^
                                           |      v    |
 Browser UI -> named private API ----------+  SQLite   +-- public artifact reader
@@ -21,7 +23,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 
 | Module | Responsibility |
 | --- | --- |
-| GitHub read client | Paginates account-scoped searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. |
+| GitHub read client | Paginates account-scoped GraphQL searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. On demand, its separate REST path reads one pull request's head SHA and changed files within the 3,000-file and 5 MiB patch limits. |
 | GitHub webhook client | Pages repository hooks, creates one configured receiver hook, and updates that matching hook when the required specification version advances. It never changes unrelated hooks. |
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
@@ -150,6 +152,8 @@ longer qualifies.
   connection, and report its 1,000-result search cap as partial data.
 - Track GitHub's remaining rate limit and reset time. Delay an automatic retry
   rather than hammering the API.
+- Track remaining requests and reset time from REST response headers for
+  on-demand pull-request diff reads.
 - A focused refresh has its own small request budget. It must not trigger a
   world sync.
 - Show cached data with its last successful refresh time when GitHub fails.

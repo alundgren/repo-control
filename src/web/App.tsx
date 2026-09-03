@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
+import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
 import { getOverview, getPullRequestDiff, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
@@ -734,7 +735,7 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boole
         ) : (
           <>
             {file.patch.status === "incomplete" ? <p className="diffNotice">This patch may be incomplete because its lines do not match GitHub's file totals. <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p> : null}
-            <pre className="unifiedDiff">{file.patch.text.split("\n").map((line, index) => <DiffLine key={index} line={line} />)}</pre>
+            <pre className="unifiedDiff">{parseUnifiedPatch(file.patch.text).map((line, index) => <DiffLine key={index} line={line} />)}</pre>
           </>
         )}
       </div> : null}
@@ -742,10 +743,9 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boole
   );
 }
 
-function DiffLine({ line }: { line: string }) {
-  const kind = line.startsWith("+") && !line.startsWith("+++") ? "added" : line.startsWith("-") && !line.startsWith("---") ? "removed" : line.startsWith("@@") ? "hunk" : "context";
-  const marker = kind === "added" ? "+" : kind === "removed" ? "−" : " ";
-  return <span className={`diffLine ${kind}`}><span aria-hidden="true" className="diffMarker">{marker}</span><span className="visuallyHidden">{kind === "added" ? "Added line: " : kind === "removed" ? "Removed line: " : ""}</span><span>{line}</span>{"\n"}</span>;
+function DiffLine({ line }: { line: PatchLine }) {
+  const marker = line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " ";
+  return <span className={`diffLine ${line.kind}`}><span aria-hidden="true" className="diffMarker">{marker}</span><span className="visuallyHidden">{line.kind === "added" ? "Added line: " : line.kind === "removed" ? "Removed line: " : ""}</span><span>{line.text}</span>{"\n"}</span>;
 }
 
 function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_request" }> }) {

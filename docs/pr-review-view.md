@@ -1,9 +1,9 @@
 # Full-screen pull-request review: design options
 
-Status: decided, not built. Option A, the overlay, was chosen, with aspect
-tabs over the same change. The work is planned as epic #69. The other two
-options are kept here because they remain the upgrade path if the overlay
-stops being enough.
+Status: Option A's bounded, read-only diff overlay is built. Draft comments,
+review submission, merge, and the aspect tabs remain planned under epic #69.
+The other two options remain possible upgrades if the overlay stops being
+enough.
 
 ## What this covers
 
@@ -18,7 +18,7 @@ Three options follow. They differ in where the surface lives, whether the
 browser URL knows about it, and where draft comments are kept. Everything in
 "What every option needs" applies to all three.
 
-## Where this starts from
+## Historical starting point
 
 - `src/web/App.tsx` holds all view state in React state, including `view`,
   `query`, `selectedItemId`, and scroll position implied by the DOM. There is

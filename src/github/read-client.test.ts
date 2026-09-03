@@ -16,6 +16,7 @@ describe("GitHub work reads", () => {
         restFile({ filename: "src/complete.ts", additions: 1, patch: "@@ -1 +1 @@\n-old\n+new" }),
         restFile({ filename: "src/renamed.ts", previous_filename: "src/old.ts", status: "renamed", additions: 2, patch: "@@ -1 +1 @@\n-old\n+new" }),
         restFile({ filename: "assets/image.png", additions: 0 }),
+        restFile({ filename: "src/operators.ts", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n---counter\n+++counter" }),
         restFile({ filename: "src/large.ts", additions: 1, patch: oversizedPatch }),
         restFile({ filename: "src/after-budget.ts", additions: 1, patch: "@@ -0,0 +1 @@\n+later" }),
       ], restRateLimitHeaders("4998"));
@@ -24,11 +25,12 @@ describe("GitHub work reads", () => {
     await expect(client.readPullRequestDiff({ repositoryNameWithOwner: "fictional-tools/garden", number: 17 })).resolves.toEqual({
       status: "complete",
       headSha: "abc123",
-      fileCount: 5,
+      fileCount: 6,
       files: [
         expect.objectContaining({ path: "src/complete.ts", previousPath: null, patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" } }),
         expect.objectContaining({ path: "src/renamed.ts", previousPath: "src/old.ts", patch: { status: "incomplete", reason: "count_mismatch", text: "@@ -1 +1 @@\n-old\n+new" } }),
         expect.objectContaining({ path: "assets/image.png", patch: { status: "unavailable", reason: "github_omitted" } }),
+        expect.objectContaining({ path: "src/operators.ts", patch: { status: "available", text: "@@ -1 +1 @@\n---counter\n+++counter" } }),
         expect.objectContaining({ path: "src/large.ts", patch: { status: "unavailable", reason: "patch_budget" } }),
         expect.objectContaining({ path: "src/after-budget.ts", patch: { status: "unavailable", reason: "patch_budget" } }),
       ],

@@ -31,6 +31,7 @@ import {
   type RelationshipEnrichmentSubject,
   type SnapshotPartialReason,
 } from "./read-client.js";
+import { parseUnifiedPatch } from "./unified-patch.js";
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 const GITHUB_REQUEST_TIMEOUT_MS = 15_000;
@@ -238,9 +239,9 @@ function parsePullRequestFile(value: unknown, patchBytes: number, budgetExhauste
 function countPatchChanges(patch: string) {
   let additions = 0;
   let deletions = 0;
-  for (const line of patch.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
-    if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  for (const line of parseUnifiedPatch(patch)) {
+    if (line.kind === "added") additions += 1;
+    if (line.kind === "removed") deletions += 1;
   }
   return { additions, deletions };
 }

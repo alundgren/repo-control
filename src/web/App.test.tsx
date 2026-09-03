@@ -259,7 +259,7 @@ describe("work queue overview", () => {
         fileCount: 2,
         rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
         files: [
-          { path: "src/first.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 1, patch: { status: "available", text: "@@ -1 +1 @@\n-<old>\n+<new>" } },
+          { path: "src/first.ts", previousPath: null, changeType: "modified", additions: 2, deletions: 2, patch: { status: "available", text: "@@ -1,2 +1,2 @@\n-<old>\n+<new>\n---counter\n+++counter" } },
           { path: "assets/image.png", previousPath: null, changeType: "modified", additions: 0, deletions: 0, patch: { status: "unavailable", reason: "github_omitted" } },
         ],
       }));
@@ -277,6 +277,8 @@ describe("work queue overview", () => {
     expect(within(dialog).getByText("abc123def456")).toBeTruthy();
     expect(within(dialog).getByText("-<old>")).toBeTruthy();
     expect(within(dialog).queryByRole("strong")).toBeNull();
+    expect(within(within(dialog).getByText("---counter").parentElement!).getByText("Removed line:")).toBeTruthy();
+    expect(within(within(dialog).getByText("+++counter").parentElement!).getByText("Added line:")).toBeTruthy();
     expect(within(dialog).getByRole("button", { name: /src\/first.ts/ }).getAttribute("aria-expanded")).toBe("true");
     const unavailableFile = within(dialog).getByRole("button", { name: /assets\/image.png/ });
     expect(unavailableFile.getAttribute("aria-expanded")).toBe("false");
