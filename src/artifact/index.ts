@@ -3,6 +3,7 @@ import type { FastifyError, FastifyPluginAsync, FastifyReply } from "fastify";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import {
   ArtifactQuotaExceededError,
+  type ArtifactAppearance,
   type ArtifactStore,
   type ArtifactType,
   type StoredArtifact,
@@ -89,13 +90,13 @@ export function acceptsHtmlArtifactMediaType(contentType: string | undefined) {
   return /^charset\s*=\s*(?:utf-8|"utf-8")$/i.test(parameters[0]!);
 }
 
-export type PublishedArtifact = Omit<StoredArtifact, "content"> & {
+export type PublishedArtifact = Pick<StoredArtifact, "id" | "type" | "createdAt" | "deleteAfter"> & {
   viewUrl: string;
   downloadUrl: string;
 };
 
 export type ArtifactService = {
-  publish(type: ArtifactType, content: Buffer): PublishedArtifact;
+  publish(type: ArtifactType, content: Buffer, appearance?: ArtifactAppearance): PublishedArtifact;
   find(id: string): StoredArtifact | null;
   start(): void;
   stop(): void;
@@ -125,6 +126,10 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
         reply.header("Cache-Control", "no-store");
         if (!acceptsHtmlArtifactMediaType(request.headers["content-type"])) {
           await reply.code(415).send(artifactError("artifact_media_type_unsupported"));
+          return;
+        }
+        if (readArtifactAppearance(request.headers["x-artifact-appearance"]) === INVALID_APPEARANCE) {
+          await reply.code(400).send(artifactError("artifact_appearance_invalid"));
         }
       },
     }, async (request, reply) => {
@@ -132,7 +137,11 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
         return reply.code(400).send(artifactError("artifact_empty"));
       }
       try {
-        return reply.code(201).send({ status: "published", ...service.publish(type, request.body) });
+        const appearance = readArtifactAppearance(request.headers["x-artifact-appearance"]);
+        if (appearance === INVALID_APPEARANCE) {
+          return reply.code(400).send(artifactError("artifact_appearance_invalid"));
+        }
+        return reply.code(201).send({ status: "published", ...service.publish(type, request.body, appearance) });
       } catch (error) {
         if (error instanceof ArtifactQuotaExceededError) {
           return reply.code(507).send(artifactError(error.code));
@@ -211,10 +220,10 @@ export function createArtifactService({
   }
 
   return {
-    publish(type, content) {
+    publish(type, content, appearance) {
       const startedAt = clock();
       try {
-        const artifact = store.publish({ type, content });
+        const artifact = store.publish({ type, content, appearance });
         emitLogEvent(logEvent, {
           event: "artifact.publication.finished",
           level: "info",
@@ -225,7 +234,10 @@ export function createArtifactService({
           durationMs: clock() - startedAt,
         });
         return {
-          ...artifact,
+          id: artifact.id,
+          type: artifact.type,
+          createdAt: artifact.createdAt,
+          deleteAfter: artifact.deleteAfter,
           viewUrl: `${configuration.publicOrigin}/public/${artifact.id}/view`,
           downloadUrl: `${configuration.publicOrigin}/public/${artifact.id}/download`,
         };
@@ -257,6 +269,14 @@ export function createArtifactService({
       store.close();
     },
   };
+}
+
+const INVALID_APPEARANCE = Symbol("invalid artifact appearance");
+
+function readArtifactAppearance(value: string | string[] | undefined): ArtifactAppearance | undefined | typeof INVALID_APPEARANCE {
+  if (value === undefined) return undefined;
+  if (value === "light" || value === "dark") return value;
+  return INVALID_APPEARANCE;
 }
 
 function defaultScheduleEvery(callback: () => void, intervalMs: number) {

@@ -5,7 +5,7 @@ import { PNG } from "pngjs";
 import { expect, test } from "@playwright/test";
 
 import { artifactPlugin, type ArtifactService } from "./index.js";
-import type { ArtifactType, StoredArtifact } from "./store.js";
+import type { ArtifactAppearance, ArtifactType, StoredArtifact } from "./store.js";
 
 const require = createRequire(import.meta.url);
 const jsQR = require("jsqr") as (data: Uint8ClampedArray, width: number, height: number) => QRCode | null;
@@ -24,6 +24,11 @@ const fixtureIds = {
   scrolling: "k".repeat(32),
   narrow: "l".repeat(32),
   presentation: "m".repeat(32),
+  lightNeutral: "n".repeat(32),
+  lightHint: "o".repeat(32),
+  darkNeutral: "p".repeat(32),
+  darkHint: "q".repeat(32),
+  misleadingDark: "r".repeat(32),
 } as const;
 
 let app: FastifyInstance;
@@ -44,6 +49,11 @@ test.beforeAll(async () => {
     [fixtureIds.scrolling, storedArtifact(fixtureIds.scrolling, scrollingFixture())],
     [fixtureIds.narrow, storedArtifact(fixtureIds.narrow, visualFixture("narrow", "#d8c6aa"))],
     [fixtureIds.presentation, storedArtifact(fixtureIds.presentation, presentationFixture(), "presentation")],
+    [fixtureIds.lightNeutral, storedArtifact(fixtureIds.lightNeutral, visualFixture("light-neutral", "#F2EADE"))],
+    [fixtureIds.lightHint, storedArtifact(fixtureIds.lightHint, visualFixture("light-hint", "#F2EADE"), "archify", "light")],
+    [fixtureIds.darkNeutral, storedArtifact(fixtureIds.darkNeutral, visualFixture("dark-neutral", "#292019"))],
+    [fixtureIds.darkHint, storedArtifact(fixtureIds.darkHint, visualFixture("dark-hint", "#292019"), "archify", "dark")],
+    [fixtureIds.misleadingDark, storedArtifact(fixtureIds.misleadingDark, misleadingDarkFixture(), "archify", "dark")],
   ]);
   const service: ArtifactService = {
     publish() {
@@ -268,6 +278,59 @@ test("uses no motion when reduced motion is requested", async ({ page }) => {
   })).toEqual({ animation: "0s", transition: "0s" });
 });
 
+test("makes matching light and dark Share tabs quieter while preserving contrast", async ({ page }) => {
+  const neutralLight = await shareTabColors(page, fixtureIds.lightNeutral);
+  const hintedLight = await shareTabColors(page, fixtureIds.lightHint);
+  const neutralDark = await shareTabColors(page, fixtureIds.darkNeutral);
+  const hintedDark = await shareTabColors(page, fixtureIds.darkHint);
+
+  expect(luminanceDifference(hintedLight.fill, "rgb(242, 234, 222)")).toBeLessThan(
+    luminanceDifference(neutralLight.fill, "rgb(242, 234, 222)"),
+  );
+  expect(luminanceDifference(hintedDark.fill, "rgb(41, 32, 25)")).toBeLessThan(
+    luminanceDifference(neutralDark.fill, "rgb(41, 32, 25)"),
+  );
+  for (const treatment of [neutralLight, hintedLight, neutralDark, hintedDark]) {
+    expect(contrastRatio(treatment.text, treatment.fill)).toBeGreaterThanOrEqual(4.5);
+  }
+
+  expect(neutralLight).toMatchObject({
+    fill: "rgb(224, 210, 189)",
+    text: "rgb(96, 73, 57)",
+    innerBoundary: "rgb(96, 73, 57)",
+    outerBoundary: "rgb(249, 246, 240) 0px 0px 0px 2px",
+  });
+  expect(hintedLight).toMatchObject({
+    fill: "rgb(249, 246, 240)",
+    text: "rgb(96, 73, 57)",
+    innerBoundary: "rgb(96, 73, 57)",
+    outerBoundary: "rgb(249, 246, 240) 0px 0px 0px 2px",
+  });
+  expect(hintedDark).toMatchObject({
+    fill: "rgb(41, 32, 25)",
+    text: "rgb(193, 175, 154)",
+    innerBoundary: "rgb(249, 246, 240)",
+    outerBoundary: "rgb(96, 73, 57) 0px 0px 0px 2px",
+  });
+
+  for (const id of [fixtureIds.lightNeutral, fixtureIds.lightHint, fixtureIds.darkNeutral, fixtureIds.darkHint]) {
+    await page.goto(viewUrl(id));
+    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1158, y: 0, width: 122, height: 54 } });
+  }
+});
+
+test("keeps opposing dark-hint boundaries visible over misleading light content", async ({ page }) => {
+  await page.goto(viewUrl(fixtureIds.misleadingDark));
+  const treatment = await shareTabColors(page, fixtureIds.misleadingDark);
+  expect(treatment).toMatchObject({
+    innerBoundary: "rgb(249, 246, 240)",
+    outerBoundary: "rgb(96, 73, 57) 0px 0px 0px 2px",
+  });
+  await expect(page).toHaveScreenshot("share-tab-dark-over-light-block.png", {
+    clip: { x: 1158, y: 0, width: 122, height: 54 },
+  });
+});
+
 async function viewerMeasurements(page: import("@playwright/test").Page) {
   return page.evaluate(() => {
     const frame = document.querySelector("[data-artifact-frame]")!.getBoundingClientRect();
@@ -283,11 +346,17 @@ function viewUrl(id: string) {
   return `${origin}/public/${id}/view`;
 }
 
-function storedArtifact(id: string, content: string, type: ArtifactType = "archify"): StoredArtifact {
+function storedArtifact(
+  id: string,
+  content: string,
+  type: ArtifactType = "archify",
+  appearance: ArtifactAppearance | null = null,
+): StoredArtifact {
   return {
     id,
     type,
     content: Buffer.from(content),
+    appearance,
     createdAt: "2026-09-01T00:00:00.000Z",
     deleteAfter: "2026-10-01T00:00:00.000Z",
   };
@@ -303,6 +372,43 @@ function basicFixture(name: string) {
 
 function visualFixture(name: string, background: string) {
   return documentFixture(`<main data-fixture="${name}">${name}</main>`, `body{min-height:100vh;background:${background}}`);
+}
+
+function misleadingDarkFixture() {
+  return documentFixture(
+    '<main data-fixture="misleading-dark"><div></div></main>',
+    "body{min-height:100vh;background:#292019}div{position:fixed;top:0;right:0;width:128px;height:64px;background:#F2EADE}",
+  );
+}
+
+async function shareTabColors(page: import("@playwright/test").Page, id: string) {
+  await page.goto(viewUrl(id));
+  return page.locator("[data-share-tab]").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      fill: style.backgroundColor,
+      text: style.color,
+      innerBoundary: style.borderTopColor,
+      outerBoundary: style.boxShadow,
+    };
+  });
+}
+
+function luminanceDifference(first: string, second: string) {
+  return Math.abs(relativeLuminance(first) - relativeLuminance(second));
+}
+
+function contrastRatio(first: string, second: string) {
+  const firstLuminance = relativeLuminance(first);
+  const secondLuminance = relativeLuminance(second);
+  return (Math.max(firstLuminance, secondLuminance) + 0.05) / (Math.min(firstLuminance, secondLuminance) + 0.05);
+}
+
+function relativeLuminance(color: string) {
+  const channels = color.match(/\d+/g)!.slice(0, 3).map((value) => Number(value) / 255).map((value) =>
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  );
+  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
 }
 
 function movingFixture() {

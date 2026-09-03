@@ -17,6 +17,7 @@ const artifactFrameTitles = {
 export function renderArtifactViewer(artifact: StoredArtifact) {
   const encodedArtifact = artifact.content.toString("base64");
   const frameTitle = artifactFrameTitles[artifact.type as ArtifactType];
+  const appearance = artifact.appearance === "light" || artifact.appearance === "dark" ? artifact.appearance : "neutral";
   const document = `<!doctype html>
 <html lang="en">
 <head>
@@ -35,8 +36,23 @@ export function renderArtifactViewer(artifact: StoredArtifact) {
   --viewer-muted: #66574D;
   --viewer-link: #3D5D71;
   --viewer-ok: #3D6034;
+  --viewer-share-dark-ground: #292019;
+  --viewer-share-dark-text: #C1AF9A;
+  --viewer-share-fill: var(--viewer-raised);
+  --viewer-share-text: var(--viewer-text);
+  --viewer-share-inner-boundary: var(--viewer-text);
+  --viewer-share-outer-boundary: var(--viewer-field);
   --viewer-qr-light: #FFFFFF;
   --viewer-qr-dark: #000000;
+}
+body[data-artifact-appearance="light"] {
+  --viewer-share-fill: var(--viewer-field);
+}
+body[data-artifact-appearance="dark"] {
+  --viewer-share-fill: var(--viewer-share-dark-ground);
+  --viewer-share-text: var(--viewer-share-dark-text);
+  --viewer-share-inner-boundary: var(--viewer-field);
+  --viewer-share-outer-boundary: var(--viewer-text);
 }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
@@ -48,12 +64,12 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
   display: block;
   width: 72px;
   height: 28px;
-  border: 1px solid var(--viewer-line);
+  border: 1px solid var(--viewer-share-inner-boundary);
   border-right: 0;
   border-radius: 8px 0 0 8px;
-  box-shadow: 0 0 0 2px var(--viewer-field);
-  background: var(--viewer-raised);
-  color: var(--viewer-text);
+  box-shadow: 0 0 0 2px var(--viewer-share-outer-boundary);
+  background: var(--viewer-share-fill);
+  color: var(--viewer-share-text);
   font: 600 13.5px/1 system-ui, sans-serif;
   cursor: pointer;
 }
@@ -97,7 +113,7 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
 </style>
 </head>
-<body data-artifact-viewer>
+<body data-artifact-viewer data-artifact-appearance="${appearance}">
 <iframe class="artifact-frame" data-artifact-frame title="${frameTitle}" sandbox="allow-scripts allow-downloads"></iframe>
 <div class="share-dismiss" data-share-dismiss aria-hidden="true" hidden></div>
 <aside class="share-root" data-share-root>

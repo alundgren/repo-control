@@ -6,17 +6,19 @@ export const ARTIFACT_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 export const ARTIFACT_QUOTA_BYTES = 1024 * 1024 * 1024;
 
 export type ArtifactType = "archify" | "presentation" | "mockup";
+export type ArtifactAppearance = "light" | "dark";
 
 export type StoredArtifact = {
   id: string;
   type: string;
   content: Buffer;
+  appearance: ArtifactAppearance | null;
   createdAt: string;
   deleteAfter: string;
 };
 
 export type ArtifactStore = {
-  publish(input: { type: ArtifactType; content: Buffer }): Omit<StoredArtifact, "content">;
+  publish(input: { type: ArtifactType; content: Buffer; appearance?: ArtifactAppearance }): Omit<StoredArtifact, "content">;
   find(id: string): StoredArtifact | null;
   cleanup(): number;
   close(): void;
@@ -51,16 +53,21 @@ export function openArtifactStore({
       type TEXT NOT NULL,
       content BLOB NOT NULL,
       created_at TEXT NOT NULL,
-      delete_after TEXT NOT NULL
+      delete_after TEXT NOT NULL,
+      appearance TEXT CHECK (appearance IN ('light', 'dark'))
     )
   `);
+  const columns = database.pragma("table_info(artifacts)") as Array<{ name: string }>;
+  if (!columns.some(({ name }) => name === "appearance")) {
+    database.exec("ALTER TABLE artifacts ADD COLUMN appearance TEXT CHECK (appearance IN ('light', 'dark'))");
+  }
 
   const deleteExpired = database.prepare("DELETE FROM artifacts WHERE delete_after <= ?");
   const payloadBytes = database.prepare("SELECT COALESCE(SUM(length(content)), 0) AS total FROM artifacts");
   const insert = database.prepare(
-    "INSERT INTO artifacts (id, type, content, created_at, delete_after) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO artifacts (id, type, content, created_at, delete_after, appearance) VALUES (?, ?, ?, ?, ?, ?)",
   );
-  const publish = database.transaction((input: { type: ArtifactType; content: Buffer }) => {
+  const publish = database.transaction((input: { type: ArtifactType; content: Buffer; appearance?: ArtifactAppearance }) => {
     const createdAt = now();
     const createdAtText = createdAt.toISOString();
     const deleteAfter = new Date(createdAt.getTime() + ARTIFACT_RETENTION_MS).toISOString();
@@ -73,8 +80,9 @@ export function openArtifactStore({
     for (;;) {
       const id = generateId();
       try {
-        insert.run(id, input.type, input.content, createdAtText, deleteAfter);
-        return { id, type: input.type, createdAt: createdAtText, deleteAfter };
+        const appearance = input.appearance ?? null;
+        insert.run(id, input.type, input.content, createdAtText, deleteAfter, appearance);
+        return { id, type: input.type, appearance, createdAt: createdAtText, deleteAfter };
       } catch (error) {
         if (!isIdentityConflict(error)) throw error;
       }
@@ -87,7 +95,7 @@ export function openArtifactStore({
     },
     find(id) {
       const row = database.prepare(
-        "SELECT id, type, content, created_at AS createdAt, delete_after AS deleteAfter FROM artifacts WHERE id = ?",
+        "SELECT id, type, content, appearance, created_at AS createdAt, delete_after AS deleteAfter FROM artifacts WHERE id = ?",
       ).get(id) as StoredArtifact | undefined;
       return row ?? null;
     },

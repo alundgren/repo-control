@@ -36,8 +36,56 @@ describe("artifact HTTP routes", () => {
       expect(response.statusCode).toBe(201);
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(response.json()).toEqual({ status: "published", ...publishedArtifact(type) });
-      expect(publish).toHaveBeenLastCalledWith(type, content);
+      expect(publish).toHaveBeenLastCalledWith(type, content, undefined);
     }
+  });
+
+  it("accepts absent, light, and dark appearance hints for every supported type", async () => {
+    const publish = vi.fn((type) => publishedArtifact(type));
+    const app = await buildApp(serviceFixture({ publish }));
+
+    for (const type of ["archify", "presentation", "mockup"] as const) {
+      for (const appearance of [undefined, "light", "dark"] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/artifacts/${type}`,
+          headers: {
+            "content-type": "text/html",
+            ...(appearance ? { "x-artifact-appearance": appearance } : {}),
+          },
+          payload: Buffer.from("fixture"),
+        });
+
+        expect(response.statusCode).toBe(201);
+        expect(response.json()).not.toHaveProperty("appearance");
+        expect(publish).toHaveBeenLastCalledWith(type, Buffer.from("fixture"), appearance);
+      }
+    }
+  });
+
+  it("rejects every other present appearance value before publication", async () => {
+    const publish = vi.fn((type) => publishedArtifact(type));
+    const app = await buildApp(serviceFixture({ publish }));
+
+    for (const appearance of ["", " ", "LIGHT", "mixed", "light,dark", "light, light"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/artifacts/archify",
+        headers: { "content-type": "text/html", "x-artifact-appearance": appearance },
+        payload: Buffer.from("fixture"),
+      });
+
+      expectError(response, 400, "artifact_appearance_invalid");
+    }
+
+    const repeated = await app.inject({
+      method: "POST",
+      url: "/api/artifacts/archify",
+      headers: { "content-type": "text/html", "x-artifact-appearance": ["light", "dark"] },
+      payload: Buffer.from("fixture"),
+    });
+    expectError(repeated, 400, "artifact_appearance_invalid");
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("applies media, size, empty-body, and quota validation in order", async () => {
@@ -207,6 +255,7 @@ function storedArtifact(overrides: Partial<StoredArtifact>): StoredArtifact {
     id: "a".repeat(32),
     type: "archify",
     content: Buffer.from("<!doctype html><title>Fixture</title>"),
+    appearance: null,
     createdAt: "2026-08-31T10:00:00.000Z",
     deleteAfter: "2026-09-30T10:00:00.000Z",
     ...overrides,
