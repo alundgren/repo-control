@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
-import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
+import type { PullRequestDiffFile } from "../github/read-client.js";
+import type { PullRequestReviewEvent } from "../github/write-client.js";
 import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
-import { getOverview, getPullRequestDiff, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
+import { getOverview, getPullRequestDiff, refreshItem, submitPullRequestReview, syncOverview, type LiveItemEvent, type PullRequestDiffResponse } from "./api.js";
 import { DraftCommentStore, getSessionStorage, maxDraftBodyBytes, type DraftComment, type DraftSide } from "./draft-comments.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
@@ -11,7 +12,7 @@ type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
 type ItemRefreshState = "idle" | "busy" | "success" | "partial" | "failed" | "removed";
 type DiffState =
   | { status: "loading" }
-  | { status: "loaded"; data: Exclude<PullRequestDiffRead, { status: "unavailable" }> }
+  | { status: "loaded"; data: Exclude<PullRequestDiffResponse, { status: "unavailable" }> }
   | { status: "failed" };
 type DiffView = "grouped" | "files";
 
@@ -650,6 +651,9 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
   const [diffView, setDiffView] = useState<DiffView>("grouped");
   const [draftRevision, setDraftRevision] = useState(0);
   const [draftMessage, setDraftMessage] = useState("");
+  const [reviewSummary, setReviewSummary] = useState("");
+  const [reviewEvent, setReviewEvent] = useState<PullRequestReviewEvent>("COMMENT");
+  const [submissionState, setSubmissionState] = useState<"idle" | "submitting" | "submitted" | "submitted_refresh_failed" | "submitted_cleanup_failed" | "submitted_cleanup_and_refresh_failed" | "head_changed" | "verification_failed" | "rejected" | "unknown" | "failed">("idle");
   const [newDraft, setNewDraft] = useState<{ path: string; line: number; side: DraftSide } | null>(null);
   const draftIdRef = useRef(0);
   const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
@@ -741,6 +745,39 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
     setDraftMessage(draftStore.recoveryAvailable ? "All drafts discarded." : "All in-memory drafts discarded. Reload recovery is unavailable.");
   }
 
+  async function submitReview() {
+    if (state.status !== "loaded" || !state.data.reviewEnabled || submissionState === "submitting") return;
+    const summary = reviewSummary.trim();
+    if (reviewEvent !== "APPROVE" && summary.length === 0 && currentDrafts.length === 0) {
+      setDraftMessage("Add a summary or line comment before submitting this review.");
+      return;
+    }
+    const description = reviewEvent === "APPROVE" ? "approve" : reviewEvent === "REQUEST_CHANGES" ? "request changes on" : "comment on";
+    if (!window.confirm(`Submit this review to GitHub and ${description} PR${item.number}?`)) return;
+    setSubmissionState("submitting");
+    const result = await submitPullRequestReview(item.id, {
+      expectedHeadSha: state.data.headSha,
+      summary: summary || undefined,
+      event: reviewEvent,
+      comments: currentDrafts.map(({ path, line, side, body }) => ({ path, line, side, body })),
+    });
+    if (result.status === "submitted") {
+      const cleanup = draftStore.discardCollection(item.id, state.data.headSha);
+      setDraftRevision((revision) => revision + 1);
+      setReviewSummary("");
+      const refreshFailed = result.refresh.status === "failed" || result.refresh.status === "permission_denied";
+      setSubmissionState(cleanup.persistenceCleared
+        ? refreshFailed ? "submitted_refresh_failed" : "submitted"
+        : refreshFailed ? "submitted_cleanup_and_refresh_failed" : "submitted_cleanup_failed");
+      return;
+    }
+    if (result.status === "head_changed" || result.status === "verification_failed" || result.status === "rejected" || result.status === "unknown") {
+      setSubmissionState(result.status);
+      return;
+    }
+    setSubmissionState("failed");
+  }
+
   function moveToFile(event: ReactMouseEvent<HTMLAnchorElement>, index: number) {
     event.preventDefault();
     const overlay = overlayRef.current;
@@ -814,6 +851,26 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
             {!draftStore.recoveryAvailable ? <p className="storageWarning">Reload recovery is unavailable. Drafts remain in memory while this page stays open.</p> : null}
             <p aria-live="polite">{draftMessage}</p>
           </div>
+          {state.data.reviewEnabled ? (
+            <section aria-labelledby="submit-review-title" className="reviewSubmission">
+              <h2 id="submit-review-title">Submit review</h2>
+              <label>Review outcome
+                <select onChange={(event) => setReviewEvent(event.target.value as PullRequestReviewEvent)} value={reviewEvent}>
+                  <option value="COMMENT">Comment</option>
+                  <option value="APPROVE">Approve</option>
+                  <option value="REQUEST_CHANGES">Request changes</option>
+                </select>
+              </label>
+              <label>Summary, optional
+                <textarea onChange={(event) => setReviewSummary(event.target.value)} rows={4} value={reviewSummary} />
+              </label>
+              <p>{currentDrafts.length} line {currentDrafts.length === 1 ? "comment" : "comments"} on this head commit will be submitted together.</p>
+              <button disabled={submissionState === "submitting"} onClick={() => void submitReview()} type="button">
+                {submissionState === "submitting" ? "Submitting review…" : "Submit review"}
+              </button>
+              <ReviewSubmissionMessage itemUrl={item.url} state={submissionState} />
+            </section>
+          ) : null}
           {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
             <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
             <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
@@ -890,6 +947,22 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
       ) : null}
     </div>
   );
+}
+
+function ReviewSubmissionMessage({ itemUrl, state }: {
+  itemUrl: string;
+  state: "idle" | "submitting" | "submitted" | "submitted_refresh_failed" | "submitted_cleanup_failed" | "submitted_cleanup_and_refresh_failed" | "head_changed" | "verification_failed" | "rejected" | "unknown" | "failed";
+}) {
+  if (state === "idle" || state === "submitting") return <p aria-live="polite" />;
+  if (state === "submitted") return <p aria-live="polite" className="reviewSuccess">Review submitted. Drafts for this head commit were cleared.</p>;
+  if (state === "submitted_refresh_failed") return <p aria-live="polite" className="reviewWarning">Review submitted and drafts were cleared, but the queue could not refresh. Close the review and use Refresh this item.</p>;
+  if (state === "submitted_cleanup_failed") return <p aria-live="assertive" className="reviewWarning">Review submitted, but Repo Control could not confirm that its saved reload copy was cleared. Do not submit it again. If it returns after reload, discard it.</p>;
+  if (state === "submitted_cleanup_and_refresh_failed") return <p aria-live="assertive" className="reviewWarning">Review submitted, but Repo Control could not confirm that its saved reload copy was cleared and the queue could not refresh. Do not submit it again. If it returns after reload, discard it, then use Refresh this item.</p>;
+  if (state === "head_changed") return <p aria-live="polite" className="reviewWarning">The pull request changed before submission. Drafts were kept. Close and reopen the review to inspect the new head.</p>;
+  if (state === "verification_failed") return <p aria-live="polite" className="reviewWarning">The current head could not be checked. Nothing was submitted and drafts were kept.</p>;
+  if (state === "rejected") return <p aria-live="polite" className="reviewWarning">GitHub rejected this review. Check the token permission and repository policy. Drafts were kept.</p>;
+  if (state === "unknown") return <p aria-live="assertive" className="reviewWarning"><strong>Submission outcome unknown.</strong> Drafts were kept. <a href={itemUrl} rel="noreferrer" target="_blank">Verify on GitHub before retrying.</a></p>;
+  return <p aria-live="polite" className="reviewWarning">The review was not submitted. Drafts were kept.</p>;
 }
 
 function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraft, onCancelDraft, onCreateDraft, onDeleteDraft, onSaveDraft, onToggle }: {

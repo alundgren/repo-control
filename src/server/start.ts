@@ -8,6 +8,7 @@ import { createReconciliationCoordinator } from "../coordination/index.js";
 import { createChangeEventHub } from "../events/index.js";
 import { createGitHubReadClient } from "../github/client.js";
 import { createGitHubWebhookClient } from "../github/webhook-client.js";
+import { createGitHubWriteClient } from "../github/write-client.js";
 import {
   ConnectionValidationError,
   readConnectionConfiguration,
@@ -15,6 +16,11 @@ import {
   type GitHubConnectionClient,
 } from "../github/connection.js";
 import { createItemRefreshService } from "../refresh/index.js";
+import {
+  createReviewSubmissionService,
+  GitHubWriteActionsConfigurationError,
+  readGitHubWriteActions,
+} from "../review/index.js";
 import { createSyncService } from "../sync/index.js";
 import { createWebhookService } from "../webhook/index.js";
 import { openDeliveryStore } from "../webhook/store.js";
@@ -46,6 +52,7 @@ export async function startServer({
   logEvent,
 }: StartServerOptions) {
   const artifactConfiguration = readArtifactConfiguration(environment);
+  const writeActions = readGitHubWriteActions(environment);
   const configuration = readConnectionConfiguration(environment);
   const connection = await validateConnection(configuration, createGitHubClient(configuration.token));
   await mkdir(dataDirectory, { recursive: true });
@@ -74,6 +81,14 @@ export async function startServer({
     logEvent,
   });
   const refreshService = createItemRefreshService({ cache, client, coordinator, onChange: eventHub.publish, logEvent });
+  const reviewService = createReviewSubmissionService({
+    cache,
+    readClient: client,
+    writeClient: createGitHubWriteClient(configuration.token),
+    refreshService,
+    enabled: writeActions.has("review"),
+    logEvent,
+  });
   const webhookService = environment.REPO_CONTROL_GITHUB_WEBHOOK_SECRET
     ? createWebhookService({
         cache,
@@ -100,6 +115,7 @@ export async function startServer({
       syncService,
       refreshService,
       diffClient: client,
+      reviewService,
       eventHub,
       webhookService: webhookService ?? undefined,
       artifactService: artifactService ?? undefined,
@@ -156,11 +172,15 @@ export async function startApplication(
 
 function startupFailureCode(error: unknown) {
   if (error instanceof ArtifactConfigurationError) return error.code;
+  if (error instanceof GitHubWriteActionsConfigurationError) return error.code;
   return error instanceof ConnectionValidationError ? error.code : "authentication_failed";
 }
 
 export function startupFailureMessage(error: unknown) {
   if (error instanceof ArtifactConfigurationError) {
+    return error.message;
+  }
+  if (error instanceof GitHubWriteActionsConfigurationError) {
     return error.message;
   }
   if (error instanceof ConnectionValidationError) {

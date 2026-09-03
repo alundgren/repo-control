@@ -5,12 +5,11 @@
 The name describes a personal place to inspect and eventually act on repository
 work. It does not imply that the project is made by or affiliated with GitHub.
 
-## Version one is personal-account-only with one operator-consented mutation
+## Version one is personal-account-only with operator-consented writes
 
 Version one reads only repositories owned by the authenticated personal
 account. Organization-owned repositories remain excluded even when the token
-can read them. It does not merge, edit, assign, comment, approve, or make any
-user-directed GitHub mutation. When the operator configures the receiver secret
+can read them. When the operator configures the receiver secret
 and exact HTTPS callback URL, an explicit sync may create one missing receiver
 webhook per active non-fork owned repository. Configuration is the operator's
 consent; there is no UI control, confirmation dialog, or startup provisioning.
@@ -18,6 +17,15 @@ The provisioning ledger records the required webhook specification version. A
 later application version may update the one matching callback hook once when
 that specification advances. Unrelated hooks are never changed or deleted.
 Callback and secret rotation are manual operations.
+
+Pull-request review submission is the first user-directed GitHub mutation.
+It remains disabled unless the operator includes `review` in
+`REPO_CONTROL_GITHUB_WRITE_ACTIONS` after granting Pull requests read-and-write
+permission. The setting records operator intent. It cannot prove the token's
+permission. The browser asks for confirmation, the server checks the current
+head SHA, and one `addPullRequestReview` operation sends the summary and every
+line comment. Read and write clients remain separate so private read routes do
+not acquire mutation behavior. Repo Control never retries an ambiguous result.
 
 ## Full lists come from reconciled cache generations
 
@@ -42,8 +50,9 @@ existed before the current event subscription. A full pass also happens after
 
 ## A fine-grained token stays outside application storage
 
-The first release uses a fine-grained personal access token with Metadata,
-Issues, Pull requests, and Webhooks read-and-write permissions. Piploy's daemon injects it from its
+The first release uses a fine-grained personal access token with Metadata and
+Issues read-only, Pull requests read-and-write when review submission is
+enabled, and Webhooks read-and-write permissions. Piploy's daemon injects it from its
 host-managed environment; the server reads it but the browser, logs, and SQLite
 do not. A token is finite: expiry, revocation, and rotation are normal operator
 events.

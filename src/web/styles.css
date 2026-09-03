@@ -32,10 +32,10 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; font-size: 1rem; font-weight: 400; line-height: 1.6; }
-a, button, input, textarea { font: inherit; }
+a, button, input, select, textarea { font: inherit; }
 a { color: var(--color-link); }
 button { color: inherit; }
-a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 0.1875rem solid var(--color-focus); outline-offset: 0.125rem; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 0.1875rem solid var(--color-focus); outline-offset: 0.125rem; }
 
 .appShell { display: grid; grid-template-columns: 14.6875rem minmax(22.8125rem, 1fr) minmax(20.625rem, 0.9fr); min-height: 100vh; }
 .navigation { position: sticky; top: 0; align-self: start; min-height: 100vh; max-height: 100vh; padding: 1.75rem 1.25rem; overflow-y: auto; border-right: 1px solid var(--color-divider); }
@@ -130,6 +130,16 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 .diffViewControls .discardAll, .discardDraft { color: var(--color-danger); text-decoration: underline; }
 .draftStatus { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; padding: 0.5rem 2rem; border-bottom: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 0.84375rem; }
 .draftStatus .storageWarning { color: var(--color-warning); }
+.reviewSubmission { display: grid; max-width: 70ch; gap: 0.75rem; padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
+.reviewSubmission h2 { font-size: 1.0625rem; }
+.reviewSubmission label { display: grid; gap: 0.375rem; color: var(--color-text-muted); font-size: 0.84375rem; }
+.reviewSubmission select, .reviewSubmission textarea { width: 100%; padding: 0.625rem; border: 1px solid var(--color-divider); border-radius: var(--radius-field); background: var(--color-field); color: var(--color-text); }
+.reviewSubmission textarea { resize: vertical; line-height: 1.5; }
+.reviewSubmission > button { justify-self: start; padding: 0.625rem 0.875rem; border: 0; border-radius: var(--radius-control); background: var(--color-accent); color: var(--color-field); cursor: pointer; font-weight: 600; }
+.reviewSubmission > button:disabled { cursor: wait; opacity: 0.7; }
+.reviewSubmission > p { color: var(--color-text-muted); font-size: 0.84375rem; }
+.reviewSubmission .reviewSuccess { color: var(--color-success); }
+.reviewSubmission .reviewWarning { color: var(--color-warning); }
 .staleDrafts { padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
 .staleDrafts > p { margin-top: 0.375rem; }
 .staleDraftGroup { margin-top: 1rem; }
@@ -187,7 +197,7 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
   .sectionHeading { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
   .diffHeader { padding: 1rem 1.25rem; }
   .diffViewControls { flex-wrap: wrap; padding-inline: 1.25rem; }
-  .draftStatus, .staleDrafts { padding-inline: 1.25rem; }
+  .draftStatus, .reviewSubmission, .staleDrafts { padding-inline: 1.25rem; }
   .diffLayout { display: block; }
   .diffFileList { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--color-divider); }
   .diffFiles { padding: 0.75rem 1.25rem 3rem; }
