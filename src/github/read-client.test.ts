@@ -4,6 +4,77 @@ import { createGitHubReadClient } from "./client.js";
 import { RELATIONSHIP_SUBJECT_LIMIT } from "./read-client.js";
 
 describe("GitHub work reads", () => {
+  it("reads pull-request files through bounded REST pages and reports patch fidelity", async () => {
+    const urls: string[] = [];
+    const oversizedPatch = `@@ -0,0 +1,1 @@\n+${"x".repeat(5 * 1024 * 1024)}`;
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (url) => {
+      urls.push(url);
+      if (!url.endsWith("/files?per_page=100&page=1")) {
+        return response({ head: { sha: "abc123" } }, restRateLimitHeaders());
+      }
+      return response([
+        restFile({ filename: "src/complete.ts", additions: 1, patch: "@@ -1 +1 @@\n-old\n+new" }),
+        restFile({ filename: "src/renamed.ts", previous_filename: "src/old.ts", status: "renamed", additions: 2, patch: "@@ -1 +1 @@\n-old\n+new" }),
+        restFile({ filename: "assets/image.png", additions: 0 }),
+        restFile({ filename: "src/operators.ts", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n---counter\n+++counter" }),
+        restFile({ filename: "src/large.ts", additions: 1, patch: oversizedPatch }),
+        restFile({ filename: "src/after-budget.ts", additions: 1, patch: "@@ -0,0 +1 @@\n+later" }),
+      ], restRateLimitHeaders("4998"));
+    });
+
+    await expect(client.readPullRequestDiff({ repositoryNameWithOwner: "fictional-tools/garden", number: 17 })).resolves.toEqual({
+      status: "complete",
+      headSha: "abc123",
+      fileCount: 6,
+      files: [
+        expect.objectContaining({ path: "src/complete.ts", previousPath: null, patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" } }),
+        expect.objectContaining({ path: "src/renamed.ts", previousPath: "src/old.ts", patch: { status: "incomplete", reason: "count_mismatch", text: "@@ -1 +1 @@\n-old\n+new" } }),
+        expect.objectContaining({ path: "assets/image.png", patch: { status: "unavailable", reason: "github_omitted" } }),
+        expect.objectContaining({ path: "src/operators.ts", patch: { status: "available", text: "@@ -1 +1 @@\n---counter\n+++counter" } }),
+        expect.objectContaining({ path: "src/large.ts", patch: { status: "unavailable", reason: "patch_budget" } }),
+        expect.objectContaining({ path: "src/after-budget.ts", patch: { status: "unavailable", reason: "patch_budget" } }),
+      ],
+      rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
+    });
+    expect(urls).toEqual([
+      "https://api.github.com/repos/fictional-tools/garden/pulls/17",
+      "https://api.github.com/repos/fictional-tools/garden/pulls/17/files?per_page=100&page=1",
+    ]);
+  });
+
+  it("stops at GitHub's 3,000-file REST ceiling and marks the list partial", async () => {
+    const pages: number[] = [];
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (url) => {
+      if (!url.includes("/files?")) return response({ head: { sha: "def456" } }, restRateLimitHeaders());
+      const page = Number(new URL(url).searchParams.get("page"));
+      pages.push(page);
+      return response(Array.from({ length: 100 }, (_, index) => restFile({
+        filename: `src/file-${page}-${index}.ts`,
+        additions: 0,
+        deletions: 0,
+        patch: "",
+      })), restRateLimitHeaders(String(5000 - page)));
+    });
+
+    const result = await client.readPullRequestDiff({ repositoryNameWithOwner: "fictional-tools/garden", number: 18 });
+
+    expect(result).toMatchObject({ status: "partial", headSha: "def456", fileCount: 3000, partialReason: "file_limit" });
+    expect(pages).toEqual(Array.from({ length: 30 }, (_, index) => index + 1));
+  });
+
+  it("maps REST rate-limit headers to the safe unavailable read", async () => {
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async () => response(
+      { message: "rate limited" },
+      { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1787558400" },
+      403,
+    ));
+
+    await expect(client.readPullRequestDiff({ repositoryNameWithOwner: "fictional-tools/garden", number: 19 })).resolves.toEqual({
+      status: "unavailable",
+      error: { code: "rate_limited", message: "GitHub rate limit prevented this read.", retryAt: "2026-08-24T08:00:00.000Z" },
+    });
+  });
+
   it("paginates separate open issue and pull-request searches, retaining only personal-account repositories", async () => {
     const requests: Array<{ operationName: string; variables: { query?: string; after?: string | null } }> = [];
     const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {
@@ -402,4 +473,22 @@ function response(body: unknown, headers: Record<string, string> = {}, status = 
     headers: { "content-type": "application/json", ...headers },
     status,
   });
+}
+
+function restFile(overrides: Partial<Record<"filename" | "previous_filename" | "status" | "patch", string> & Record<"additions" | "deletions", number>>) {
+  return {
+    filename: "src/file.ts",
+    status: "modified",
+    additions: 1,
+    deletions: 1,
+    changes: 2,
+    ...overrides,
+  };
+}
+
+function restRateLimitHeaders(remaining = "4999") {
+  return {
+    "x-ratelimit-remaining": remaining,
+    "x-ratelimit-reset": "1787572800",
+  };
 }

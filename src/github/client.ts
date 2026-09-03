@@ -5,6 +5,8 @@ import {
   BODY_EXCERPT_LIMIT,
   INCREMENTAL_RECONCILIATION_OVERLAP_MINUTES,
   LABEL_LIMIT,
+  PULL_REQUEST_FILE_LIMIT,
+  PULL_REQUEST_PATCH_BYTE_LIMIT,
   RECONCILIATION_PAGE_SIZE,
   RELATIONSHIP_LIMIT,
   RELATIONSHIP_SUBJECT_LIMIT,
@@ -20,6 +22,8 @@ import {
   type GitHubWorkItem,
   type OwnedRepository,
   type OwnedRepositoryInventoryRead,
+  type PullRequestDiffFile,
+  type PullRequestDiffRead,
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
@@ -27,6 +31,7 @@ import {
   type RelationshipEnrichmentSubject,
   type SnapshotPartialReason,
 } from "./read-client.js";
+import { parseUnifiedPatch } from "./unified-patch.js";
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
 const GITHUB_REQUEST_TIMEOUT_MS = 15_000;
@@ -98,7 +103,147 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
         return unavailableRead(error);
       }
     },
+    async readPullRequestDiff(input): Promise<PullRequestDiffRead> {
+      try {
+        return await readPullRequestDiff(fetch, token, input);
+      } catch (error) {
+        return unavailableRead(error);
+      }
+    },
   };
+}
+
+const PULL_REQUEST_FILE_PAGE_SIZE = 100;
+
+async function readPullRequestDiff(
+  fetch: Fetch,
+  token: string,
+  { repositoryNameWithOwner, number }: { repositoryNameWithOwner: string; number: number },
+): Promise<Exclude<PullRequestDiffRead, { status: "unavailable" }>> {
+  const [owner, repository, ...extra] = repositoryNameWithOwner.split("/");
+  if (!owner || !repository || extra.length > 0 || !Number.isInteger(number) || number < 1) {
+    throw new WorkReadFailure("invalid_response");
+  }
+  const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${number}`;
+  const pullRequest = await readRestJson(fetch, token, base);
+  if (!isObject(pullRequest.payload) || !isObject(pullRequest.payload.head) || !isString(pullRequest.payload.head.sha)) {
+    throw new WorkReadFailure("invalid_response");
+  }
+
+  const files: PullRequestDiffFile[] = [];
+  let patchBytes = 0;
+  let budgetExhausted = false;
+  let latestRateLimit = pullRequest.rateLimit;
+  const maximumPages = PULL_REQUEST_FILE_LIMIT / PULL_REQUEST_FILE_PAGE_SIZE;
+  for (let page = 1; page <= maximumPages; page += 1) {
+    const result = await readRestJson(fetch, token, `${base}/files?per_page=${PULL_REQUEST_FILE_PAGE_SIZE}&page=${page}`);
+    latestRateLimit = result.rateLimit;
+    if (!Array.isArray(result.payload)) throw new WorkReadFailure("invalid_response");
+    for (const value of result.payload) {
+      const parsed = parsePullRequestFile(value, patchBytes, budgetExhausted);
+      files.push(parsed.file);
+      patchBytes = parsed.patchBytes;
+      budgetExhausted = parsed.budgetExhausted;
+    }
+    if (result.payload.length < PULL_REQUEST_FILE_PAGE_SIZE) {
+      return {
+        status: "complete",
+        headSha: pullRequest.payload.head.sha,
+        fileCount: files.length,
+        files,
+        rateLimit: { cost: page + 1, remaining: latestRateLimit.remaining, resetAt: latestRateLimit.resetAt },
+      };
+    }
+  }
+  return {
+    status: "partial",
+    headSha: pullRequest.payload.head.sha,
+    fileCount: files.length,
+    files,
+    partialReason: "file_limit",
+    rateLimit: { cost: maximumPages + 1, remaining: latestRateLimit.remaining, resetAt: latestRateLimit.resetAt },
+  };
+}
+
+async function readRestJson(fetch: Fetch, token: string, url: string): Promise<{ payload: unknown; rateLimit: GitHubRateLimit }> {
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(fetch, url, {
+      method: "GET",
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${token}`,
+        "x-github-api-version": "2022-11-28",
+      },
+    });
+  } catch {
+    throw new WorkReadFailure("unavailable");
+  }
+  if (!response.ok) {
+    if (response.status === 429 || isRateLimited(response.headers)) throw rateLimitFailure(response.headers);
+    throw new WorkReadFailure(response.status === 401 || response.status === 403 ? "authentication_failed" : "unavailable");
+  }
+  const rateLimit = parseRestRateLimit(response.headers);
+  try {
+    return { payload: await response.json(), rateLimit };
+  } catch {
+    throw new WorkReadFailure("invalid_response");
+  }
+}
+
+function parseRestRateLimit(headers: Headers): GitHubRateLimit {
+  const remaining = nonNegativeInteger(headers.get("x-ratelimit-remaining"));
+  const reset = positiveInteger(headers.get("x-ratelimit-reset"));
+  if (remaining === undefined || reset === undefined) throw new WorkReadFailure("invalid_response");
+  return { cost: 1, remaining, resetAt: new Date(reset * 1_000).toISOString() };
+}
+
+function parsePullRequestFile(value: unknown, patchBytes: number, budgetExhausted: boolean) {
+  if (!isObject(value) || !isString(value.filename) || !isString(value.status) || !Number.isInteger(value.additions) || !Number.isInteger(value.deletions) || (value.previous_filename !== undefined && !isString(value.previous_filename)) || (value.patch !== undefined && !isString(value.patch))) {
+    throw new WorkReadFailure("invalid_response");
+  }
+  const additions = value.additions as number;
+  const deletions = value.deletions as number;
+  let patch: PullRequestDiffFile["patch"];
+  if (budgetExhausted) {
+    patch = { status: "unavailable", reason: "patch_budget" };
+  } else if (value.patch === undefined) {
+    patch = { status: "unavailable", reason: "github_omitted" };
+  } else {
+    const bytes = Buffer.byteLength(value.patch, "utf8");
+    if (patchBytes + bytes > PULL_REQUEST_PATCH_BYTE_LIMIT) {
+      budgetExhausted = true;
+      patch = { status: "unavailable", reason: "patch_budget" };
+    } else {
+      patchBytes += bytes;
+      const counts = countPatchChanges(value.patch);
+      patch = counts.additions === additions && counts.deletions === deletions
+        ? { status: "available", text: value.patch }
+        : { status: "incomplete", reason: "count_mismatch", text: value.patch };
+    }
+  }
+  return {
+    file: {
+      path: value.filename,
+      previousPath: isString(value.previous_filename) ? value.previous_filename : null,
+      changeType: value.status,
+      additions,
+      deletions,
+      patch,
+    },
+    patchBytes,
+    budgetExhausted,
+  };
+}
+
+function countPatchChanges(patch: string) {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of parseUnifiedPatch(patch)) {
+    if (line.kind === "added") additions += 1;
+    if (line.kind === "removed") deletions += 1;
+  }
+  return { additions, deletions };
 }
 
 const VIEWER_QUERY = `query AuthenticatedViewer {
@@ -757,6 +902,12 @@ function positiveInteger(value: string | null) {
   if (value === null || !/^\d+$/.test(value)) return undefined;
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
+}
+
+function nonNegativeInteger(value: string | null) {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : undefined;
 }
 
 function parseViewer(value: unknown): GitHubViewer {

@@ -248,6 +248,82 @@ describe("work queue overview", () => {
     expect(screen.getByText("Second item context.")).toBeTruthy();
   });
 
+  it("opens, folds, unfolds, and closes a pull-request diff while restoring focus", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({
+        status: "complete",
+        headSha: "abc123def456",
+        fileCount: 2,
+        rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
+        files: [
+          { path: "src/first.ts", previousPath: null, changeType: "modified", additions: 2, deletions: 2, patch: { status: "available", text: "@@ -1,2 +1,2 @@\n-<old>\n+<new>\n---counter\n+++counter" } },
+          { path: "assets/image.png", previousPath: null, changeType: "modified", additions: 0, deletions: 0, patch: { status: "unavailable", reason: "github_omitted" } },
+        ],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    const opener = screen.getByRole("button", { name: "Review changed files" });
+    opener.focus();
+    await user.click(opener);
+
+    const dialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
+    expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true);
+    expect(within(dialog).getByText("abc123def456")).toBeTruthy();
+    expect(within(dialog).getByText("-<old>")).toBeTruthy();
+    expect(within(dialog).queryByRole("strong")).toBeNull();
+    expect(within(within(dialog).getByText("---counter").parentElement!).getByText("Removed line:")).toBeTruthy();
+    expect(within(within(dialog).getByText("+++counter").parentElement!).getByText("Added line:")).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: /src\/first.ts/ }).getAttribute("aria-expanded")).toBe("true");
+    const unavailableFile = within(dialog).getByRole("button", { name: /assets\/image.png/ });
+    expect(unavailableFile.getAttribute("aria-expanded")).toBe("false");
+    await user.click(unavailableFile);
+    expect(within(dialog).getByText("GitHub did not provide patch text for this file.")).toBeTruthy();
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+    expect(screen.getByRole("heading", { name: "Now" })).toBeTruthy();
+  });
+
+  it("states partial, incomplete, budget-limited, and failed diff reads with a GitHub fallback", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({
+        status: "partial",
+        partialReason: "file_limit",
+        headSha: "abc123",
+        fileCount: 3000,
+        rateLimit: { cost: 31, remaining: 4900, resetAt: "2026-08-24T12:00:00.000Z" },
+        files: [
+          { path: "src/incomplete.ts", previousPath: null, changeType: "modified", additions: 2, deletions: 0, patch: { status: "incomplete", reason: "count_mismatch", text: "@@ -0,0 +1 @@\n+one" } },
+          { path: "src/bounded.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 0, patch: { status: "unavailable", reason: "patch_budget" } },
+        ],
+      }))
+      .mockResolvedValueOnce(response({ status: "unavailable", error: { code: "unavailable", message: "GitHub work data is unavailable." } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    expect(await screen.findByText(/GitHub limits this list to 3,000 changed files/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open the pull request on GitHub" })).toBeTruthy();
+    expect(screen.getByText("This patch may be incomplete because its lines do not match GitHub's file totals.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /src\/bounded.ts/ }));
+    expect(screen.getByText("The 5 MiB patch limit was reached before this file.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close changed files" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    expect(await screen.findByText("Changed files could not be loaded.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open this pull request on GitHub" })).toBeTruthy();
+  });
+
   it("moves a refreshed issue to its returned queue in queue order", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();

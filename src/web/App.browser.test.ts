@@ -1,0 +1,80 @@
+import { expect, test } from "@playwright/test";
+import { createServer, type ViteDevServer } from "vite";
+
+let server: ViteDevServer;
+let origin: string;
+
+test.beforeAll(async () => {
+  server = await createServer({ configFile: "vite.config.ts", server: { host: "127.0.0.1", port: 0 } });
+  await server.listen();
+  origin = server.resolvedUrls!.local[0]!;
+});
+
+test.afterAll(async () => {
+  await server.close();
+});
+
+test("restores queue view, selection, filter, and browser scroll after closing changed files", async ({ page }) => {
+  await page.route("**/events", (route) => route.abort());
+  await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
+  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff() }));
+  await page.goto(origin);
+
+  await page.getByRole("button", { name: "Pull requests 40" }).click();
+  await page.getByRole("button", { name: "Select Fictional pull request 1", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Filter pull requests and issues" });
+  await search.fill("Fictional");
+  await page.evaluate(() => window.scrollTo(0, 700));
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(500);
+
+  await page.getByRole("button", { name: "Review changed files" }).click();
+  await expect(page.getByRole("dialog", { name: "Fictional pull request 1" })).toBeVisible();
+  await page.getByRole("button", { name: "Close changed files" }).click();
+
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Pull requests" })).toBeVisible();
+  await expect(search).toHaveValue("Fictional");
+  await expect(page.getByRole("button", { name: "Select Fictional pull request 1", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Review changed files" })).toBeFocused();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
+});
+
+function overview() {
+  return {
+    status: "ready",
+    fetchedAt: "2026-08-23T10:00:00.000Z",
+    repositories: [{ id: "R_1", nameWithOwner: "fictional-tools/garden" }],
+    scope: { repositoryCount: 1, itemCount: 40, truncatedReason: null },
+    pullRequests: Array.from({ length: 40 }, (_, index) => ({
+      id: `PR_${index + 1}`,
+      type: "pull_request",
+      repositoryId: "R_1",
+      number: index + 1,
+      title: `Fictional pull request ${index + 1}`,
+      excerpt: "A fictional change for browser validation.",
+      url: `https://github.test/fictional-tools/garden/pull/${index + 1}`,
+      updatedAt: new Date(Date.UTC(2026, 7, 23, 10, index)).toISOString(),
+      isDraft: false,
+      additions: 1,
+      deletions: 1,
+      closingIssues: { status: "complete", items: [] },
+    })),
+    queues: [
+      { name: "agent", issues: [] },
+      { name: "human", issues: [] },
+      { name: "triage", issues: [] },
+    ],
+    epics: [],
+  };
+}
+
+function diff() {
+  return {
+    status: "complete",
+    headSha: "abc123def456",
+    fileCount: 1,
+    files: [{ path: "src/example.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 1, patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" } }],
+    rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
+  };
+}
