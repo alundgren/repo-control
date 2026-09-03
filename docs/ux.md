@@ -26,6 +26,7 @@ Ground: warm paper.
 | Link | `#3D5D71` |
 | Success | `#3D6034` |
 | Warning | `#7E5220` |
+| Danger | `#8F3A2D` |
 | Share dark ground | `#292019` |
 | Share dark text | `#C1AF9A` |
 
@@ -74,8 +75,22 @@ used.
   groups. Each view keeps its own scroll position and per-file fold state. The
   first file with patch text starts unfolded while every other file starts folded.
   The close control and Escape return to the exact queue state and opening
-  control. If live updates removed that control, focus returns to the queue
-  heading. Added and removed rows use low-saturation tints derived from the
+  control. Each comment form belongs to a path, line, old or new side, and the
+  displayed head SHA. Saved forms appear with their line in both Grouped and
+  Files, while a live pending count stays in the overlay controls. Drafts are
+  limited to 100 per pull request and head SHA, 16 KiB of UTF-8 text per body,
+  and 1 MiB of serialized draft data across the tab. A rejected addition or edit
+  leaves saved drafts unchanged and explains which limit was reached. Drafts
+  live in the current browser tab and use session storage for same-tab reloads.
+  If storage is unavailable or a write fails, the form keeps working in memory
+  and warns that reload recovery is unavailable. Drafts saved against an earlier
+  head SHA remain in a separate stale section where their text can be copied or
+  discarded. Closing the overlay and switching arrangements never clears,
+  moves, or duplicates them. Each draft has its own discard action, and Discard
+  all asks for confirmation before removing every current and stale draft for
+  that pull request. A later confirmed GitHub submission may clear only the
+  drafts it submitted. If live updates removed the opening control, focus
+  returns to the queue heading. Added and removed rows use low-saturation tints derived from the
   success and warning roles, plus visible `+` and `−` gutter markers so colour
   is never the only distinction. Omitted, incomplete, and size-limited patches,
   a partial file list, and a failed read each state what is missing and link to

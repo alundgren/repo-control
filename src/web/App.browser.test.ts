@@ -70,6 +70,21 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
   await page.getByRole("button", { name: "Review changed files" }).click();
   const dialog = page.getByRole("dialog", { name: title });
+  const lineComment = dialog.getByRole("button", { name: "Draft comment on new line 1" }).first();
+  const lineCommentBox = await lineComment.boundingBox();
+  expect(lineCommentBox).not.toBeNull();
+  expect(lineCommentBox!.x + lineCommentBox!.width).toBeLessThanOrEqual(375);
+  await lineComment.click();
+  await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Keep this fictional name.");
+  await dialog.getByRole("button", { name: "Save draft" }).click();
+  await expect(dialog.getByText("1 pending")).toBeVisible();
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  const savedDraft = dialog.getByRole("textbox", { name: "Edit draft comment on src/example-1.ts, new line 1" });
+  await expect(savedDraft).toHaveValue("Keep this fictional name.");
+  await savedDraft.fill("Use this clearer fictional name.");
+  await dialog.getByRole("button", { name: "Save draft" }).click();
+  await expect(savedDraft).toHaveValue("Use this clearer fictional name.");
+  await dialog.getByRole("button", { name: "Grouped" }).click();
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
 
   const stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
@@ -113,7 +128,7 @@ function diff() {
     changeType: "modified",
     additions: 1,
     deletions: 1,
-    patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" },
+    patch: { status: "available", text: `@@ -1 +1 @@\n-old\n+const fictionalValue = "${"long-value-".repeat(18)}";` },
   }));
   return {
     status: "complete",

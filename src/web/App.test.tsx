@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { OverviewResponse } from "../api/read-models.js";
 import { App } from "./App.js";
+import { DraftCommentStore, maxDraftBodyBytes } from "./draft-comments.js";
 
 describe("work queue overview", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    window.sessionStorage.clear();
     vi.useRealTimers();
   });
 
@@ -344,6 +346,186 @@ describe("work queue overview", () => {
     expect(screen.getByRole("link", { name: "Open this pull request on GitHub" })).toBeTruthy();
   });
 
+  it("creates, edits, restores, and deletes a line draft across both arrangements", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff()))
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const firstRender = render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    const dialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
+    await user.click(within(dialog).getByRole("button", { name: "Draft comment on new line 1" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "New draft comment" }), "Please keep this fictional name.");
+    await user.click(within(dialog).getByRole("button", { name: "Save draft" }));
+
+    expect(within(dialog).getByText("1 pending")).toBeTruthy();
+    const groupedDraft = within(dialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" });
+    expect((groupedDraft as HTMLTextAreaElement).value).toBe("Please keep this fictional name.");
+    await user.click(within(dialog).getByRole("button", { name: "Files" }));
+    expect(within(dialog).getByText("1 pending")).toBeTruthy();
+    expect(within(dialog).getAllByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" })).toHaveLength(1);
+    const filesDraft = within(dialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" });
+    await user.clear(filesDraft);
+    await user.type(filesDraft, "Use the clearer fictional name.");
+    await user.click(within(dialog).getByRole("button", { name: "Save draft" }));
+
+    firstRender.unmount();
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    const restoredDialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
+    expect((within(restoredDialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" }) as HTMLTextAreaElement).value).toBe("Use the clearer fictional name.");
+    await user.click(within(restoredDialog).getByRole("button", { name: "Discard draft" }));
+    expect(within(restoredDialog).getByText("0 pending")).toBeTruthy();
+    expect(within(restoredDialog).queryByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" })).toBeNull();
+  });
+
+  it("keeps a moved-head draft visible until confirmed discard", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff("old-head")))
+      .mockResolvedValueOnce(response(draftDiff("new-head"))));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
+    await user.type(screen.getByRole("textbox", { name: "New draft comment" }), "Copy this draft before discarding it.");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Draft comment on old line 1" }));
+    const secondDraft = screen.getByRole("textbox", { name: "New draft comment" });
+    await user.type(secondDraft, "A second stale draft.");
+    await user.click(within(secondDraft.closest("form")!).getByRole("button", { name: "Save draft" }));
+    await user.click(screen.getByRole("button", { name: "Close changed files" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+
+    expect(await screen.findByRole("heading", { name: "Drafts from an earlier head commit" })).toBeTruthy();
+    expect(screen.getByText("old-head")).toBeTruthy();
+    expect(screen.getAllByRole("textbox", { name: "Draft body" }).map((element) => (element as HTMLTextAreaElement).value)).toEqual([
+      "Copy this draft before discarding it.",
+      "A second stale draft.",
+    ]);
+    await user.click(screen.getAllByRole("button", { name: "Discard draft" })[0]!);
+    expect(screen.getByText("1 pending")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Discard all" }));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("1 pending")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Discard all" }));
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Drafts from an earlier head commit" })).toBeNull();
+  });
+
+  it("warns when a quota failure leaves drafts in memory only", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new DOMException("Quota exceeded", "QuotaExceededError"); });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff())));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
+    await user.type(screen.getByRole("textbox", { name: "New draft comment" }), "Keep this in memory.");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(screen.getByText("Reload recovery is unavailable. Drafts remain in memory while this page stays open.")).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" }) as HTMLTextAreaElement).value).toBe("Keep this in memory.");
+  });
+
+  it("warns immediately when session storage is unavailable and keeps a draft in memory", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, "sessionStorage", "get").mockImplementation(() => { throw new DOMException("Blocked", "SecurityError"); });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff())));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    expect(await screen.findByText("Reload recovery is unavailable. Drafts remain in memory while this page stays open.")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Draft comment on new line 1" }));
+    await user.type(screen.getByRole("textbox", { name: "New draft comment" }), "Keep this without storage.");
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+    expect(screen.getByText("1 pending")).toBeTruthy();
+  });
+
+  it("states the UTF-8 body limit without saving the rejected draft", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff())));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New draft comment" }), { target: { value: "å".repeat(maxDraftBodyBytes / 2 + 1) } });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(screen.getByText("This comment is larger than the 16 KiB UTF-8 limit. The existing draft was kept.")).toBeTruthy();
+    expect(screen.getByText("0 pending")).toBeTruthy();
+  });
+
+  it("states the 100-comment limit without losing saved drafts", async () => {
+    const user = userEvent.setup();
+    const store = new DraftCommentStore(window.sessionStorage);
+    for (let index = 0; index < 100; index += 1) {
+      store.save("PR_1", "abc123def456", { id: `draft-${index}`, path: "src/first.ts", line: 1, side: "RIGHT", body: `Draft ${index}` });
+    }
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff())));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    expect(await screen.findByText("100 pending")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Draft comment on new line 1" }));
+    await user.type(screen.getByRole("textbox", { name: "New draft comment" }), "One draft too many.");
+    await user.click(screen.getAllByRole("button", { name: "Save draft" }).at(-1)!);
+
+    expect(screen.getByText("This head commit already has 100 draft comments. Existing drafts were kept.")).toBeTruthy();
+    expect(screen.getByText("100 pending")).toBeTruthy();
+  });
+
+  it("states the aggregate tab limit without saving the rejected draft", async () => {
+    const user = userEvent.setup();
+    const store = new DraftCommentStore(window.sessionStorage);
+    const fullBody = "x".repeat(maxDraftBodyBytes);
+    let index = 0;
+    while (store.save(`OTHER_PR_${index}`, "head", { id: `draft-${index}`, path: "src/example.ts", line: 1, side: "RIGHT", body: fullBody }).status === "saved") index += 1;
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response(draftDiff())));
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New draft comment" }), { target: { value: fullBody } });
+    await user.click(screen.getByRole("button", { name: "Save draft" }));
+
+    expect(screen.getByText("Saved drafts in this tab would exceed 1 MiB. Existing drafts were kept.")).toBeTruthy();
+    expect(screen.getByText("0 pending")).toBeTruthy();
+  });
+
   it("moves a refreshed issue to its returned queue in queue order", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();
@@ -627,6 +809,24 @@ function deferred<Value>() {
 
 function response(body: unknown) {
   return { ok: true, json: async () => body };
+}
+
+function draftDiff(headSha = "abc123def456") {
+  return {
+    status: "complete",
+    headSha,
+    fileCount: 1,
+    rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-08-24T12:00:00.000Z" },
+    files: [{
+      path: "src/first.ts",
+      previousPath: null,
+      changeType: "modified",
+      additions: 1,
+      deletions: 1,
+      patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" },
+    }],
+    groups: [{ name: "src", fileIndexes: [0] }],
+  };
 }
 
 class TestEventSource {
