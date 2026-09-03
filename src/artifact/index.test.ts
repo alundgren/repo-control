@@ -127,6 +127,7 @@ function storeFixture(overrides: Partial<ArtifactStore> = {}): ArtifactStore {
       return {
         id: "a".repeat(32),
         type,
+        appearance: null,
         createdAt: "2026-08-31T10:00:00.000Z",
         deleteAfter: "2026-09-30T10:00:00.000Z",
       };

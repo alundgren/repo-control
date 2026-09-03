@@ -43,6 +43,7 @@ exactly. This fictional example publishes a presentation:
 curl --fail-with-body \
   --request POST \
   --header 'Content-Type: text/html; charset=utf-8' \
+  --header 'X-Artifact-Appearance: light' \
   --data-binary '@fictional-presentation.html' \
   'http://repo-control.internal.test:3000/api/artifacts/presentation'
 ```
@@ -64,12 +65,19 @@ A successful request returns `201` and this JSON contract:
 Retries are not idempotent. A retry may create another artifact and consume
 quota again.
 
+`X-Artifact-Appearance` is optional on every upload endpoint. Its exact value
+may be `light` or `dark`. Omit it when the artifact has mixed or unknown
+appearance. Any other present value, including an empty value, surrounding
+whitespace, different casing, comma-joined values, or a repeated header,
+returns `400` before publication. The response does not echo the hint.
+
 Upload responses use `Cache-Control: no-store`. Rejections return only a safe
 error code:
 
 | HTTP status | Error code | Meaning |
 | --- | --- | --- |
 | `400` | `artifact_empty` | The request contained no document bytes. |
+| `400` | `artifact_appearance_invalid` | The optional appearance header was present but was not exactly `light` or `dark`. |
 | `413` | `artifact_too_large` | The document exceeded 10 MiB while being read. |
 | `415` | `artifact_media_type_unsupported` | The media type or charset was not accepted. |
 | `507` | `artifact_quota_exceeded` | The stored payload total would exceed 1 GiB. |
@@ -125,6 +133,21 @@ the existing `/download` URL. QR generation and interaction code are carried
 inside the response and make no runtime request. If the Clipboard API rejects
 the copy, the panel selects the canonical URL for manual copying and does not
 report success.
+
+The optional appearance hint changes only the collapsed Share tab. Neutral
+uses raised `#E0D2BD` with text `#604939`; light uses field `#F9F6F0` with text
+`#604939`; dark uses ground `#292019` with text `#C1AF9A`. Neutral and light
+use a dark inner boundary and light outer halo. Dark swaps those boundary
+roles. The expanded panel, QR code, dimensions, interactions, and artifact
+iframe do not change. The server does not inspect document pixels, markup,
+styles, or type to choose a treatment, and it does not expose artifact CSS to
+the viewer.
+
+SQLite stores the hint in a nullable column. Rows created before the column
+was added, and uploads without the header, read as neutral. The migration is
+additive, so the earlier application can still read and insert rows after a
+rollback. Removing the header restores neutral behavior for later uploads.
+The migration does not alter uploaded or downloaded bytes.
 
 Previously cached immutable `/view` responses may remain raw artifacts until
 their 30-day cache entry expires. Reverting the application restores raw views

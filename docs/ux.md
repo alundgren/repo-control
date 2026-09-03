@@ -26,9 +26,14 @@ Ground: warm paper.
 | Link | `#3D5D71` |
 | Success | `#3D6034` |
 | Warning | `#7E5220` |
+| Share dark ground | `#292019` |
+| Share dark text | `#C1AF9A` |
 
 Every implementation maps these roles to its native token system. The roles,
 not CSS property names, are the stable contract.
+
+The two Share dark roles apply only to the collapsed public-viewer tab. They
+do not introduce a dark application theme.
 
 ## Type
 
@@ -74,12 +79,16 @@ used.
   read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
   opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
-  72 by 28 pixel Share tab sits at the top-right edge with an opaque raised
-  surface, dark border, and light outer ring so it remains legible over unknown
-  content. Hover or keyboard focus opens the panel temporarily. Click or tap
-  pins it. The panel contains a 128 pixel QR code, Copy link, Download, copy
-  status, and a selectable link when clipboard access fails. Hidden panel
-  controls leave both keyboard order and the accessibility tree.
+  72 by 28 pixel Share tab sits at the top-right edge. Its neutral treatment
+  uses the raised surface with primary text, a primary-text inner boundary,
+  and a field outer halo. A `light` upload hint changes only the tab fill to
+  field. A `dark` hint uses Share dark ground and Share dark text, with a field
+  inner boundary and primary-text outer halo. The expanded panel always keeps
+  the warm-paper treatment. Hover or keyboard focus opens the panel
+  temporarily. Click or tap pins it. The panel contains a 128 pixel QR code,
+  Copy link, Download, copy status, and a selectable link when clipboard
+  access fails. Hidden panel controls leave both keyboard order and the
+  accessibility tree.
 
 ## Deviations
 

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ArtifactQuotaExceededError, type ArtifactType, openArtifactStore } from "./store.js";
@@ -25,8 +26,9 @@ describe("artifact store", () => {
     });
 
     const types: ArtifactType[] = ["archify", "presentation", "mockup"];
-    const published = types.map((type) =>
-      publishing.publish({ type, content }),
+    const appearances = [undefined, "light", "dark"] as const;
+    const published = types.map((type, index) =>
+      publishing.publish({ type, content, appearance: appearances[index] }),
     );
 
     expect(published.map(({ type }) => type)).toEqual(["archify", "presentation", "mockup"]);
@@ -39,6 +41,52 @@ describe("artifact store", () => {
       expect(reopened.find(artifact.id)).toEqual({ ...artifact, content });
     }
     reopened.close();
+  });
+
+  it("migrates existing rows to neutral and remains writable by the earlier schema", async () => {
+    const path = await databasePath();
+    const original = new Database(path);
+    original.exec(`
+      CREATE TABLE artifacts (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        content BLOB NOT NULL,
+        created_at TEXT NOT NULL,
+        delete_after TEXT NOT NULL
+      )
+    `);
+    original.prepare("INSERT INTO artifacts VALUES (?, ?, ?, ?, ?)").run(
+      "a".repeat(32),
+      "archify",
+      Buffer.from([0, 255, 1]),
+      "2026-08-31T10:00:00.000Z",
+      "2026-09-30T10:00:00.000Z",
+    );
+    original.close();
+
+    const migrated = openArtifactStore({ path, generateId: () => "b".repeat(32) });
+    expect(migrated.find("a".repeat(32))).toMatchObject({ appearance: null, content: Buffer.from([0, 255, 1]) });
+    const hinted = migrated.publish({ type: "mockup", content: Buffer.from([2, 0, 254]), appearance: "dark" });
+    migrated.close();
+
+    const reopened = openArtifactStore({ path });
+    expect(reopened.find(hinted.id)).toMatchObject({ appearance: "dark", content: Buffer.from([2, 0, 254]) });
+    reopened.close();
+
+    const earlierSchema = new Database(path);
+    expect(earlierSchema.prepare(
+      "SELECT id, type, content, created_at, delete_after FROM artifacts WHERE id = ?",
+    ).get(hinted.id)).toMatchObject({ id: hinted.id, content: Buffer.from([2, 0, 254]) });
+    expect(() => earlierSchema.prepare(
+      "INSERT INTO artifacts (id, type, content, created_at, delete_after) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "c".repeat(32),
+      "presentation",
+      Buffer.from("earlier binary"),
+      "2026-09-01T10:00:00.000Z",
+      "2026-10-01T10:00:00.000Z",
+    )).not.toThrow();
+    earlierSchema.close();
   });
 
   it("retries a generated ID after a uniqueness conflict", async () => {
