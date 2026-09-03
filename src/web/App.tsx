@@ -4,6 +4,7 @@ import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
 import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
 import { getOverview, getPullRequestDiff, refreshItem, syncOverview, type LiveItemEvent } from "./api.js";
+import { DraftCommentStore, getSessionStorage, maxDraftBodyBytes, type DraftComment, type DraftSide } from "./draft-comments.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
@@ -77,6 +78,8 @@ export function App() {
   const diffOpenerRef = useRef<HTMLElement | null>(null);
   const diffScrollRef = useRef(0);
   const diffRequestRef = useRef(0);
+  const draftStoreRef = useRef<DraftCommentStore | null>(null);
+  if (!draftStoreRef.current) draftStoreRef.current = new DraftCommentStore(getSessionStorage());
 
   useEffect(() => {
     void loadOverview();
@@ -455,7 +458,7 @@ export function App() {
       </section>
       {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
-    {diffItem && diffState ? <DiffOverlay item={diffItem} onClose={closeDiff} state={diffState} /> : null}
+    {diffItem && diffState ? <DiffOverlay draftStore={draftStoreRef.current} item={diffItem} onClose={closeDiff} state={diffState} /> : null}
     </>
   );
 }
@@ -634,7 +637,8 @@ function QuickRead({ backLabel, headingRef, item, onBack, onOpenDiff, onRefresh,
   );
 }
 
-function DiffOverlay({ item, onClose, state }: {
+function DiffOverlay({ draftStore, item, onClose, state }: {
+  draftStore: DraftCommentStore;
   item: Extract<ApiItem, { type: "pull_request" }>;
   onClose: () => void;
   state: DiffState;
@@ -644,6 +648,10 @@ function DiffOverlay({ item, onClose, state }: {
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0 });
   const [diffView, setDiffView] = useState<DiffView>("grouped");
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [draftMessage, setDraftMessage] = useState("");
+  const [newDraft, setNewDraft] = useState<{ path: string; line: number; side: DraftSide } | null>(null);
+  const draftIdRef = useRef(0);
   const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
     grouped: new Set(),
     files: new Set(),
@@ -690,6 +698,49 @@ function DiffOverlay({ item, onClose, state }: {
     });
   }
 
+  function saveDraft(draft: DraftComment) {
+    if (state.status !== "loaded") return false;
+    if (draft.body.trim().length === 0) {
+      setDraftMessage("Enter a comment before saving this draft.");
+      return false;
+    }
+    const result = draftStore.save(item.id, state.data.headSha, draft);
+    if (result.status === "rejected") {
+      setDraftMessage(result.reason === "body_limit"
+        ? "This comment is larger than the 16 KiB UTF-8 limit. The existing draft was kept."
+        : result.reason === "comment_limit"
+          ? "This head commit already has 100 draft comments. Existing drafts were kept."
+          : "Saved drafts in this tab would exceed 1 MiB. Existing drafts were kept.");
+      return false;
+    }
+    setDraftRevision((revision) => revision + 1);
+    setDraftMessage(draftStore.recoveryAvailable ? "Draft saved in this tab." : "Draft saved in memory. Reload recovery is unavailable.");
+    return true;
+  }
+
+  function createDraft(body: string) {
+    if (!newDraft) return false;
+    draftIdRef.current += 1;
+    const saved = saveDraft({ ...newDraft, body, id: `${Date.now()}-${draftIdRef.current}` });
+    if (saved) setNewDraft(null);
+    return saved;
+  }
+
+  function deleteDraft(headSha: string, draftId: string) {
+    draftStore.delete(item.id, headSha, draftId);
+    setDraftRevision((revision) => revision + 1);
+    setDraftMessage(draftStore.recoveryAvailable ? "Draft discarded." : "Draft discarded from memory. Reload recovery is unavailable.");
+  }
+
+  function discardAll() {
+    const count = draftStore.collectionsFor(item.id).reduce((total, collection) => total + collection.drafts.length, 0);
+    if (count === 0 || !window.confirm(`Discard all ${count} draft ${count === 1 ? "comment" : "comments"} for this pull request?`)) return;
+    draftStore.discardPullRequest(item.id);
+    setNewDraft(null);
+    setDraftRevision((revision) => revision + 1);
+    setDraftMessage(draftStore.recoveryAvailable ? "All drafts discarded." : "All in-memory drafts discarded. Reload recovery is unavailable.");
+  }
+
   function moveToFile(event: ReactMouseEvent<HTMLAnchorElement>, index: number) {
     event.preventDefault();
     const overlay = overlayRef.current;
@@ -707,7 +758,7 @@ function DiffOverlay({ item, onClose, state }: {
       return;
     }
     if (event.key !== "Tab") return;
-    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
     if (focusable.length === 0) return;
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
@@ -719,6 +770,13 @@ function DiffOverlay({ item, onClose, state }: {
       first.focus();
     }
   }
+
+  void draftRevision;
+  const collections = draftStore.collectionsFor(item.id);
+  const currentHeadSha = state.status === "loaded" ? state.data.headSha : null;
+  const currentDrafts = collections.find((collection) => collection.headSha === currentHeadSha)?.drafts ?? [];
+  const staleCollections = collections.filter((collection) => collection.headSha !== currentHeadSha);
+  const pendingCount = collections.reduce((total, collection) => total + collection.drafts.length, 0);
 
   return (
     <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
@@ -733,8 +791,12 @@ function DiffOverlay({ item, onClose, state }: {
         </header>
         {state.status === "loaded" ? (
           <div aria-label="Changed file arrangement" className="diffViewControls">
-            <button aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
-            <button aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+            <div className="diffViewButtons">
+              <button aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
+              <button aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+            </div>
+            <p aria-live="polite" className="pendingCount">{pendingCount} pending</p>
+            {pendingCount > 0 ? <button className="discardAll" onClick={discardAll} type="button">Discard all</button> : null}
           </div>
         ) : null}
       </div>
@@ -746,7 +808,23 @@ function DiffOverlay({ item, onClose, state }: {
         </div>
       ) : null}
       {state.status === "loaded" ? (
-        <div className="diffLayout">
+        <>
+          <div className="draftStatus">
+            <p>Drafts live in this tab only.</p>
+            {!draftStore.recoveryAvailable ? <p className="storageWarning">Reload recovery is unavailable. Drafts remain in memory while this page stays open.</p> : null}
+            <p aria-live="polite">{draftMessage}</p>
+          </div>
+          {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
+            <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
+            <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
+            {staleCollections.map((collection) => (
+              <div className="staleDraftGroup" key={collection.headSha}>
+                <h3>{collection.headSha}</h3>
+                {collection.drafts.map((draft) => <StaleDraftCard draft={draft} key={draft.id} onDelete={() => deleteDraft(collection.headSha, draft.id)} />)}
+              </div>
+            ))}
+          </section> : null}
+          <div className="diffLayout">
             <nav aria-label="Changed files" className="diffFileList">
             <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>
               {diffView === "files" ? (
@@ -772,6 +850,13 @@ function DiffOverlay({ item, onClose, state }: {
                   githubUrl={item.url}
                   id={`diff-file-${index}`}
                   key={`${file.path}-${index}`}
+                  drafts={currentDrafts}
+                  newDraft={newDraft}
+                  onBeginDraft={setNewDraft}
+                  onCancelDraft={() => setNewDraft(null)}
+                  onCreateDraft={createDraft}
+                  onDeleteDraft={(draftId) => deleteDraft(state.data.headSha, draftId)}
+                  onSaveDraft={saveDraft}
                   onToggle={() => toggleFile(index)}
                 />
               )) : state.data.groups.map((group, groupIndex) => (
@@ -786,6 +871,13 @@ function DiffOverlay({ item, onClose, state }: {
                         githubUrl={item.url}
                         id={`diff-file-${index}`}
                         key={`${file.path}-${index}`}
+                        drafts={currentDrafts}
+                        newDraft={newDraft}
+                        onBeginDraft={setNewDraft}
+                        onCancelDraft={() => setNewDraft(null)}
+                        onCreateDraft={createDraft}
+                        onDeleteDraft={(draftId) => deleteDraft(state.data.headSha, draftId)}
+                        onSaveDraft={saveDraft}
                         onToggle={() => toggleFile(index)}
                       />
                     );
@@ -793,15 +885,29 @@ function DiffOverlay({ item, onClose, state }: {
                 </div>
               ))}
             </section>
-        </div>
+          </div>
+        </>
       ) : null}
     </div>
   );
 }
 
-function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boolean; file: PullRequestDiffFile; githubUrl: string; id: string; onToggle: () => void }) {
+function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraft, onCancelDraft, onCreateDraft, onDeleteDraft, onSaveDraft, onToggle }: {
+  drafts: DraftComment[];
+  expanded: boolean;
+  file: PullRequestDiffFile;
+  githubUrl: string;
+  id: string;
+  newDraft: { path: string; line: number; side: DraftSide } | null;
+  onBeginDraft: (anchor: { path: string; line: number; side: DraftSide }) => void;
+  onCancelDraft: () => void;
+  onCreateDraft: (body: string) => boolean;
+  onDeleteDraft: (draftId: string) => void;
+  onSaveDraft: (draft: DraftComment) => boolean;
+  onToggle: () => void;
+}) {
   return (
-    <article className="diffFile" id={id}>
+    <article aria-label={file.path} className="diffFile" id={id}>
       <button aria-expanded={expanded} className="diffFileToggle" onClick={onToggle} type="button">
         <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
         <span className="diffPath">{file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}</span>
@@ -813,7 +919,21 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boole
         ) : (
           <>
             {file.patch.status === "incomplete" ? <p className="diffNotice">This patch may be incomplete because its lines do not match GitHub's file totals. <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p> : null}
-            <pre className="unifiedDiff">{parseUnifiedPatch(file.patch.text).map((line, index) => <DiffLine key={index} line={line} />)}</pre>
+            <div className="unifiedDiff">{parseUnifiedPatch(file.patch.text).map((line, index) => {
+              const lineDrafts = line.line === null || line.side === null ? [] : drafts.filter((draft) => draft.path === file.path && draft.line === line.line && draft.side === line.side);
+              const editorOpen = line.line !== null && line.side !== null && newDraft?.path === file.path && newDraft.line === line.line && newDraft.side === line.side;
+              return <DiffLine
+                drafts={lineDrafts}
+                editorOpen={editorOpen}
+                key={index}
+                line={line}
+                onBeginDraft={() => line.line !== null && line.side !== null && onBeginDraft({ path: file.path, line: line.line, side: line.side })}
+                onCancelDraft={onCancelDraft}
+                onCreateDraft={onCreateDraft}
+                onDeleteDraft={onDeleteDraft}
+                onSaveDraft={onSaveDraft}
+              />;
+            })}</div>
           </>
         )}
       </div> : null}
@@ -821,9 +941,59 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle }: { expanded: boole
   );
 }
 
-function DiffLine({ line }: { line: PatchLine }) {
+function DiffLine({ drafts, editorOpen, line, onBeginDraft, onCancelDraft, onCreateDraft, onDeleteDraft, onSaveDraft }: {
+  drafts: DraftComment[];
+  editorOpen: boolean;
+  line: PatchLine;
+  onBeginDraft: () => void;
+  onCancelDraft: () => void;
+  onCreateDraft: (body: string) => boolean;
+  onDeleteDraft: (draftId: string) => void;
+  onSaveDraft: (draft: DraftComment) => boolean;
+}) {
   const marker = line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " ";
-  return <span className={`diffLine ${line.kind}`}><span aria-hidden="true" className="diffMarker">{marker}</span><span className="visuallyHidden">{line.kind === "added" ? "Added line: " : line.kind === "removed" ? "Removed line: " : ""}</span><span>{line.text}</span>{"\n"}</span>;
+  const anchorLabel = line.line === null || line.side === null ? null : `${line.side === "LEFT" ? "old" : "new"} line ${line.line}`;
+  return <div className={`diffLineBlock ${line.kind}`}>
+    <div className="diffLine">
+      <span aria-hidden="true" className="diffMarker">{marker}</span>
+      {anchorLabel ? <button aria-label={`Draft comment on ${anchorLabel}`} className="lineCommentButton" onClick={onBeginDraft} type="button">Comment</button> : <span aria-hidden="true" />}
+      <span className="visuallyHidden">{line.kind === "added" ? "Added line: " : line.kind === "removed" ? "Removed line: " : ""}</span>
+      <span>{line.text}</span>
+    </div>
+    {drafts.map((draft) => <DraftEditor draft={draft} key={draft.id} onCancel={null} onDelete={() => onDeleteDraft(draft.id)} onSave={onSaveDraft} />)}
+    {editorOpen ? <DraftEditor draft={null} key="new" onCancel={onCancelDraft} onDelete={null} onSaveBody={onCreateDraft} /> : null}
+  </div>;
+}
+
+function DraftEditor({ draft, onCancel, onDelete, onSave, onSaveBody }: {
+  draft: DraftComment | null;
+  onCancel: (() => void) | null;
+  onDelete: (() => void) | null;
+  onSave?: (draft: DraftComment) => boolean;
+  onSaveBody?: (body: string) => boolean;
+}) {
+  const [body, setBody] = useState(draft?.body ?? "");
+  const label = draft ? `Edit draft comment on ${draft.path}, ${draft.side === "LEFT" ? "old" : "new"} line ${draft.line}` : "New draft comment";
+  return <form className="draftEditor" onSubmit={(event) => {
+    event.preventDefault();
+    if (draft && onSave) onSave({ ...draft, body });
+    else onSaveBody?.(body);
+  }}>
+    <label>{label}<textarea autoFocus={!draft} maxLength={maxDraftBodyBytes} onChange={(event) => setBody(event.target.value)} rows={4} value={body} /></label>
+    <div className="draftActions">
+      <button type="submit">Save draft</button>
+      {onCancel ? <button className="quietButton" onClick={onCancel} type="button">Cancel</button> : null}
+      {onDelete ? <button className="discardDraft" onClick={onDelete} type="button">Discard draft</button> : null}
+    </div>
+  </form>;
+}
+
+function StaleDraftCard({ draft, onDelete }: { draft: DraftComment; onDelete: () => void }) {
+  return <article className="staleDraftCard">
+    <p><span className="diffPath">{draft.path}</span>, {draft.side === "LEFT" ? "old" : "new"} line {draft.line}</p>
+    <label>Draft body<textarea readOnly rows={4} value={draft.body} /></label>
+    <button className="discardDraft" onClick={onDelete} type="button">Discard draft</button>
+  </article>;
 }
 
 function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_request" }> }) {

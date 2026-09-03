@@ -1,8 +1,8 @@
 # Full-screen pull-request review: design options
 
-Status: Option A's bounded, read-only diff overlay is built. Draft comments,
-review submission, merge, and the aspect tabs remain planned under epic #69.
-The other two options remain possible upgrades if the overlay stops being
+Status: Option A's bounded diff overlay and tab-local line-comment drafting are
+built. Review submission, merge, and the aspect tabs remain planned under epic
+#69. The other two options remain possible upgrades if the overlay stops being
 enough.
 
 ## What this covers
