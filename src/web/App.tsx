@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile, PullRequestDiffRead } from "../github/read-client.js";
@@ -12,6 +12,7 @@ type DiffState =
   | { status: "loading" }
   | { status: "loaded"; data: Exclude<PullRequestDiffRead, { status: "unavailable" }> }
   | { status: "failed" };
+type DiffView = "grouped" | "files";
 
 type ViewDetails = {
   title: string;
@@ -639,8 +640,14 @@ function DiffOverlay({ item, onClose, state }: {
   state: DiffState;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const topRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0 });
+  const [diffView, setDiffView] = useState<DiffView>("grouped");
+  const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
+    grouped: new Set(),
+    files: new Set(),
+  });
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -651,9 +658,47 @@ function DiffOverlay({ item, onClose, state }: {
 
   useEffect(() => {
     if (state.status !== "loaded") return;
-    const firstPatch = state.data.files.findIndex((file) => file.patch.status !== "unavailable");
-    setExpanded(firstPatch < 0 ? new Set() : new Set([firstPatch]));
+    const firstFilePatch = state.data.files.findIndex((file) => file.patch.status !== "unavailable");
+    const firstGroupedPatch = state.data.groups
+      .flatMap((group) => group.fileIndexes)
+      .find((index) => state.data.files[index]?.patch.status !== "unavailable");
+    setExpandedByView({
+      grouped: firstGroupedPatch === undefined ? new Set() : new Set([firstGroupedPatch]),
+      files: firstFilePatch < 0 ? new Set() : new Set([firstFilePatch]),
+    });
+    scrollPositions.current = { grouped: 0, files: 0 };
+    setDiffView("grouped");
   }, [state]);
+
+  useLayoutEffect(() => {
+    if (state.status === "loaded" && overlayRef.current) {
+      overlayRef.current.scrollTop = scrollPositions.current[diffView];
+    }
+  }, [diffView, state]);
+
+  function selectDiffView(nextView: DiffView) {
+    if (nextView === diffView) return;
+    if (overlayRef.current) scrollPositions.current[diffView] = overlayRef.current.scrollTop;
+    setDiffView(nextView);
+  }
+
+  function toggleFile(index: number) {
+    setExpandedByView((current) => {
+      const next = new Set(current[diffView]);
+      if (next.has(index)) next.delete(index); else next.add(index);
+      return { ...current, [diffView]: next };
+    });
+  }
+
+  function moveToFile(event: ReactMouseEvent<HTMLAnchorElement>, index: number) {
+    event.preventDefault();
+    const overlay = overlayRef.current;
+    const top = topRef.current;
+    const file = document.getElementById(`diff-file-${index}`);
+    if (!overlay || !top || !file) return;
+    const distance = file.getBoundingClientRect().top - overlay.getBoundingClientRect().top;
+    overlay.scrollTop = Math.max(0, overlay.scrollTop + distance - top.offsetHeight - 16);
+  }
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -677,14 +722,22 @@ function DiffOverlay({ item, onClose, state }: {
 
   return (
     <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
-      <header className="diffHeader">
-        <div>
-          <p className="eyebrow">Changed files</p>
-          <h1 id="diff-title">{item.title}</h1>
-          <p className="diffIdentity">PR{item.number}{state.status === "loaded" ? <> · <span>{state.data.headSha}</span></> : null}</p>
-        </div>
-        <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">Close</button>
-      </header>
+      <div className="diffTop" ref={topRef}>
+        <header className="diffHeader">
+          <div>
+            <p className="eyebrow">Changed files</p>
+            <h1 id="diff-title">{item.title}</h1>
+            <p className="diffIdentity">PR{item.number}{state.status === "loaded" ? <> · <span>{state.data.headSha}</span></> : null}</p>
+          </div>
+          <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">Close</button>
+        </header>
+        {state.status === "loaded" ? (
+          <div aria-label="Changed file arrangement" className="diffViewControls">
+            <button aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
+            <button aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+          </div>
+        ) : null}
+      </div>
       {state.status === "loading" ? <p className="diffMessage">Loading changed files…</p> : null}
       {state.status === "failed" ? (
         <div className="diffMessage">
@@ -694,27 +747,52 @@ function DiffOverlay({ item, onClose, state }: {
       ) : null}
       {state.status === "loaded" ? (
         <div className="diffLayout">
-          <nav aria-label="Changed files" className="diffFileList">
+            <nav aria-label="Changed files" className="diffFileList">
             <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>
-            <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`}>{file.path}</a></li>)}</ul>
-          </nav>
-          <section aria-label="File diffs" className="diffFiles">
-            {state.data.status === "partial" ? <p className="diffNotice">GitHub limits this list to 3,000 changed files. <a href={item.url} rel="noreferrer" target="_blank">Open the pull request on GitHub</a> to see whether more files changed.</p> : null}
-            {state.data.files.map((file, index) => (
-              <DiffFile
-                expanded={expanded.has(index)}
-                file={file}
-                githubUrl={item.url}
-                id={`diff-file-${index}`}
-                key={`${file.path}-${index}`}
-                onToggle={() => setExpanded((current) => {
-                  const next = new Set(current);
-                  if (next.has(index)) next.delete(index); else next.add(index);
-                  return next;
-                })}
-              />
-            ))}
-          </section>
+              {diffView === "files" ? (
+                <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>)}</ul>
+              ) : (
+                <ul className="diffGroupedFileList">{state.data.groups.map((group, groupIndex) => (
+                  <li key={`${group.name}-${groupIndex}`}>
+                    <span className="diffGroupName">{group.name}</span>
+                    <ul>{group.fileIndexes.map((index) => {
+                      const file = state.data.files[index]!;
+                      return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>;
+                    })}</ul>
+                  </li>
+                ))}</ul>
+              )}
+            </nav>
+            <section aria-label="File diffs" className="diffFiles">
+              {state.data.status === "partial" ? <p className="diffNotice">GitHub limits this list to 3,000 changed files. <a href={item.url} rel="noreferrer" target="_blank">Open the pull request on GitHub</a> to see whether more files changed.</p> : null}
+              {diffView === "files" ? state.data.files.map((file, index) => (
+                <DiffFile
+                  expanded={expandedByView.files.has(index)}
+                  file={file}
+                  githubUrl={item.url}
+                  id={`diff-file-${index}`}
+                  key={`${file.path}-${index}`}
+                  onToggle={() => toggleFile(index)}
+                />
+              )) : state.data.groups.map((group, groupIndex) => (
+                <div className="diffGroup" key={`${group.name}-${groupIndex}`}>
+                  <h2>{group.name}</h2>
+                  {group.fileIndexes.map((index) => {
+                    const file = state.data.files[index]!;
+                    return (
+                      <DiffFile
+                        expanded={expandedByView.grouped.has(index)}
+                        file={file}
+                        githubUrl={item.url}
+                        id={`diff-file-${index}`}
+                        key={`${file.path}-${index}`}
+                        onToggle={() => toggleFile(index)}
+                      />
+                    );
+                  })}
+                </div>
+              ))}
+            </section>
         </div>
       ) : null}
     </div>

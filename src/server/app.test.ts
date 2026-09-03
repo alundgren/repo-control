@@ -58,6 +58,7 @@ describe("application server", () => {
         headSha: "abc123",
         fileCount: 1,
         files: [{ path: "src/complete.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 0, patch: { status: "available", text: "@@ -0,0 +1 @@\n+hello" } }],
+        groups: [{ name: "src", fileIndexes: [0] }],
         rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
       },
       {
@@ -65,6 +66,7 @@ describe("application server", () => {
         headSha: "def456",
         fileCount: 3000,
         files: [],
+        groups: [],
         partialReason: "file_limit",
         rateLimit: { cost: 31, remaining: 4969, resetAt: "2026-08-24T12:00:00.000Z" },
       },
@@ -73,6 +75,7 @@ describe("application server", () => {
         headSha: "ghi789",
         fileCount: 1,
         files: [{ path: "src/bounded.ts", previousPath: null, changeType: "modified", additions: 20, deletions: 0, patch: { status: "unavailable", reason: "patch_budget" } }],
+        groups: [{ name: "src", fileIndexes: [0] }],
         rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
       },
       { status: "unavailable", error: { code: "rate_limited", message: "GitHub rate limit prevented this read.", retryAfterSeconds: 60 } },

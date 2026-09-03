@@ -29,7 +29,25 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   expect(before).toBeGreaterThan(500);
 
   await page.getByRole("button", { name: "Review changed files" }).click();
-  await expect(page.getByRole("dialog", { name: "Fictional pull request 1" })).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
+  const firstFile = dialog.getByRole("button", { name: /src\/example-1.ts/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Grouped" })).toHaveAttribute("aria-pressed", "true");
+  await expect(firstFile).toHaveAttribute("aria-expanded", "true");
+  await firstFile.click();
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect(firstFile).toHaveAttribute("aria-expanded", "true");
+  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await expect(firstFile).toHaveAttribute("aria-expanded", "false");
+
+  await dialog.evaluate((element) => { element.scrollTop = 300; });
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(0);
+  await dialog.evaluate((element) => { element.scrollTop = 500; });
+  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(300);
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(500);
   await page.getByRole("button", { name: "Close changed files" }).click();
 
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -40,7 +58,26 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 });
 
-function overview() {
+test("keeps a linked file below the sticky review controls at a narrow width", async ({ page }) => {
+  const title = "A fictional pull request with a long title that wraps across several lines on a narrow screen";
+  await page.setViewportSize({ width: 375, height: 700 });
+  await page.route("**/events", (route) => route.abort());
+  await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
+  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff() }));
+  await page.goto(origin);
+
+  await page.getByRole("button", { name: "Pull requests 40" }).click();
+  await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
+  await page.getByRole("button", { name: "Review changed files" }).click();
+  const dialog = page.getByRole("dialog", { name: title });
+  await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
+
+  const stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
+  const fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
+  expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
+});
+
+function overview(firstTitle = "Fictional pull request 1") {
   return {
     status: "ready",
     fetchedAt: "2026-08-23T10:00:00.000Z",
@@ -51,7 +88,7 @@ function overview() {
       type: "pull_request",
       repositoryId: "R_1",
       number: index + 1,
-      title: `Fictional pull request ${index + 1}`,
+      title: index === 0 ? firstTitle : `Fictional pull request ${index + 1}`,
       excerpt: "A fictional change for browser validation.",
       url: `https://github.test/fictional-tools/garden/pull/${index + 1}`,
       updatedAt: new Date(Date.UTC(2026, 7, 23, 10, index)).toISOString(),
@@ -70,11 +107,20 @@ function overview() {
 }
 
 function diff() {
+  const files = Array.from({ length: 30 }, (_, index) => ({
+    path: `src/example-${index + 1}.ts`,
+    previousPath: null,
+    changeType: "modified",
+    additions: 1,
+    deletions: 1,
+    patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" },
+  }));
   return {
     status: "complete",
     headSha: "abc123def456",
-    fileCount: 1,
-    files: [{ path: "src/example.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 1, patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" } }],
+    fileCount: files.length,
+    files,
+    groups: [{ name: "src", fileIndexes: files.map((_, index) => index) }],
     rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
   };
 }

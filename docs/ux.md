@@ -68,8 +68,11 @@ used.
   the success, warning, and secondary text roles.
 - Pull-request diff overlay: a selected pull request opens a full-viewport
   modal above the mounted queue. Its header names the pull request and head
-  SHA, a file list links to independently foldable unified diffs, and the first
-  file with patch text starts unfolded while every other file starts folded.
+  SHA. Grouped and Files controls change how the same changed files are
+  arranged, with Grouped selected on open. The server assigns every file to
+  one group from its path and filename. Category groups precede directory
+  groups. Each view keeps its own scroll position and per-file fold state. The
+  first file with patch text starts unfolded while every other file starts folded.
   The close control and Escape return to the exact queue state and opening
   control. If live updates removed that control, focus returns to the queue
   heading. Added and removed rows use low-saturation tints derived from the
