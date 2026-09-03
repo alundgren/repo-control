@@ -1,6 +1,7 @@
 import {
   ConnectionValidationError,
 } from "./connection.js";
+import { groupPullRequestFiles } from "../domain/pull-request-file-groups.js";
 import {
   BODY_EXCERPT_LIMIT,
   INCREMENTAL_RECONCILIATION_OVERLAP_MINUTES,
@@ -151,6 +152,7 @@ async function readPullRequestDiff(
         headSha: pullRequest.payload.head.sha,
         fileCount: files.length,
         files,
+        groups: groupPullRequestFiles(files),
         rateLimit: { cost: page + 1, remaining: latestRateLimit.remaining, resetAt: latestRateLimit.resetAt },
       };
     }
@@ -160,6 +162,7 @@ async function readPullRequestDiff(
     headSha: pullRequest.payload.head.sha,
     fileCount: files.length,
     files,
+    groups: groupPullRequestFiles(files),
     partialReason: "file_limit",
     rateLimit: { cost: maximumPages + 1, remaining: latestRateLimit.remaining, resetAt: latestRateLimit.resetAt },
   };

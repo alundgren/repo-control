@@ -262,6 +262,10 @@ describe("work queue overview", () => {
           { path: "src/first.ts", previousPath: null, changeType: "modified", additions: 2, deletions: 2, patch: { status: "available", text: "@@ -1,2 +1,2 @@\n-<old>\n+<new>\n---counter\n+++counter" } },
           { path: "assets/image.png", previousPath: null, changeType: "modified", additions: 0, deletions: 0, patch: { status: "unavailable", reason: "github_omitted" } },
         ],
+        groups: [
+          { name: "Assets", fileIndexes: [1] },
+          { name: "src", fileIndexes: [0] },
+        ],
       }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -273,7 +277,11 @@ describe("work queue overview", () => {
     await user.click(opener);
 
     const dialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
+    const overlay = dialog as HTMLDivElement;
     expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true);
+    expect(within(dialog).getByRole("button", { name: "Grouped" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog).getByRole("heading", { name: "Assets" })).toBeTruthy();
+    expect(within(dialog).getByRole("heading", { name: "src" })).toBeTruthy();
     expect(within(dialog).getByText("abc123def456")).toBeTruthy();
     expect(within(dialog).getByText("-<old>")).toBeTruthy();
     expect(within(dialog).queryByRole("strong")).toBeNull();
@@ -284,6 +292,17 @@ describe("work queue overview", () => {
     expect(unavailableFile.getAttribute("aria-expanded")).toBe("false");
     await user.click(unavailableFile);
     expect(within(dialog).getByText("GitHub did not provide patch text for this file.")).toBeTruthy();
+    overlay.scrollTop = 140;
+    await user.click(within(dialog).getByRole("button", { name: "Files" }));
+    expect(overlay.scrollTop).toBe(0);
+    expect(within(dialog).getByRole("button", { name: /assets\/image.png/ }).getAttribute("aria-expanded")).toBe("false");
+    expect(within(dialog).getByRole("button", { name: /src\/first.ts/ }).getAttribute("aria-expanded")).toBe("true");
+    overlay.scrollTop = 260;
+    await user.click(within(dialog).getByRole("button", { name: "Grouped" }));
+    expect(overlay.scrollTop).toBe(140);
+    expect(within(dialog).getByRole("button", { name: /assets\/image.png/ }).getAttribute("aria-expanded")).toBe("true");
+    await user.click(within(dialog).getByRole("button", { name: "Files" }));
+    expect(overlay.scrollTop).toBe(260);
     await user.keyboard("{Escape}");
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -305,6 +324,7 @@ describe("work queue overview", () => {
           { path: "src/incomplete.ts", previousPath: null, changeType: "modified", additions: 2, deletions: 0, patch: { status: "incomplete", reason: "count_mismatch", text: "@@ -0,0 +1 @@\n+one" } },
           { path: "src/bounded.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 0, patch: { status: "unavailable", reason: "patch_budget" } },
         ],
+        groups: [{ name: "src", fileIndexes: [0, 1] }],
       }))
       .mockResolvedValueOnce(response({ status: "unavailable", error: { code: "unavailable", message: "GitHub work data is unavailable." } }));
     vi.stubGlobal("fetch", fetchMock);

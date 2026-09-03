@@ -28,6 +28,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
+| Pull-request file classifier | Assigns each on-demand changed file to an ordered category or its immediate parent directory from the new path alone. The browser receives the ordered groups and does not repeat the classification rules. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
 | Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves an isolated public viewer and exact download, and deletes expired rows on its cleanup schedule. |

@@ -29,7 +29,25 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   expect(before).toBeGreaterThan(500);
 
   await page.getByRole("button", { name: "Review changed files" }).click();
-  await expect(page.getByRole("dialog", { name: "Fictional pull request 1" })).toBeVisible();
+  const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
+  const firstFile = dialog.getByRole("button", { name: /src\/example-1.ts/ });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Grouped" })).toHaveAttribute("aria-pressed", "true");
+  await expect(firstFile).toHaveAttribute("aria-expanded", "true");
+  await firstFile.click();
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect(firstFile).toHaveAttribute("aria-expanded", "true");
+  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await expect(firstFile).toHaveAttribute("aria-expanded", "false");
+
+  await dialog.evaluate((element) => { element.scrollTop = 300; });
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(0);
+  await dialog.evaluate((element) => { element.scrollTop = 500; });
+  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(300);
+  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(500);
   await page.getByRole("button", { name: "Close changed files" }).click();
 
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -70,11 +88,20 @@ function overview() {
 }
 
 function diff() {
+  const files = Array.from({ length: 30 }, (_, index) => ({
+    path: `src/example-${index + 1}.ts`,
+    previousPath: null,
+    changeType: "modified",
+    additions: 1,
+    deletions: 1,
+    patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" },
+  }));
   return {
     status: "complete",
     headSha: "abc123def456",
-    fileCount: 1,
-    files: [{ path: "src/example.ts", previousPath: null, changeType: "modified", additions: 1, deletions: 1, patch: { status: "available", text: "@@ -1 +1 @@\n-old\n+new" } }],
+    fileCount: files.length,
+    files,
+    groups: [{ name: "src", fileIndexes: files.map((_, index) => index) }],
     rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
   };
 }

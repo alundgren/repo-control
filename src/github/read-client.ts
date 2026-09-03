@@ -55,10 +55,16 @@ export type PullRequestDiffRead =
       headSha: string;
       fileCount: number;
       files: PullRequestDiffFile[];
+      groups: PullRequestDiffGroup[];
       rateLimit: GitHubRateLimit;
       partialReason?: "file_limit";
     }
   | UnavailableRead;
+
+export type PullRequestDiffGroup = {
+  name: string;
+  fileIndexes: number[];
+};
 
 export type PullRequestDiffFile = {
   path: string;

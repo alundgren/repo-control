@@ -113,19 +113,29 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 .epicProgress .progressFill { display: block; height: 100%; border-radius: 999px; background: var(--color-success); }
 
 .diffOverlay { position: fixed; z-index: 10; inset: 0; overflow: auto; background: var(--color-background); color: var(--color-text); }
-.diffHeader { position: sticky; z-index: 2; top: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-raised-surface); }
+.diffTop { position: sticky; z-index: 2; top: 0; }
+.diffHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-raised-surface); }
 .diffHeader h1 { font-size: clamp(1.5rem, 3vw, 2rem); }
 .diffIdentity { margin-top: 0.375rem; color: var(--color-text-muted); }
 .diffIdentity span, .diffPath, .diffFileList { font-family: var(--font-mono); }
 .diffClose { padding: 0.5625rem 0.75rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); background: var(--color-field); cursor: pointer; }
 .diffMessage { max-width: 70ch; padding: 2rem; }
 .diffMessage a { display: inline-block; margin-top: 0.75rem; }
+.diffViewControls { display: flex; gap: 0.25rem; padding: 0.75rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
+.diffViewControls button { padding: 0.375rem 0.75rem; border: 0; border-radius: var(--radius-control); background: transparent; cursor: pointer; }
+.diffViewControls button[aria-pressed="true"] { background: var(--color-raised-surface); font-weight: 600; }
 .diffLayout { display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); }
-.diffFileList { position: sticky; top: 7.5rem; align-self: start; max-height: calc(100vh - 7.5rem); padding: 1.25rem; overflow: auto; border-right: 1px solid var(--color-divider); font-size: 0.84375rem; }
+.diffFileList { position: sticky; top: 10.5rem; align-self: start; max-height: calc(100vh - 10.5rem); padding: 1.25rem; overflow: auto; border-right: 1px solid var(--color-divider); font-size: 0.84375rem; }
 .diffFileList ul { margin: 0.75rem 0 0; padding-left: 1.25rem; overflow-wrap: anywhere; }
 .diffFileList li + li { margin-top: 0.375rem; }
+.diffGroupedFileList { list-style: none; }
+.diffGroupedFileList > li + li { margin-top: 1rem; }
+.diffGroupedFileList ul { margin-top: 0.25rem; }
+.diffGroupName { font-family: var(--font-sans); font-weight: 600; }
 .diffFiles { min-width: 0; padding: 1.25rem 2rem 4rem; }
 .diffNotice { padding: 0.75rem 1rem; background: var(--color-surface); color: var(--color-warning); }
+.diffGroup + .diffGroup { margin-top: 2rem; }
+.diffGroup h2 { font-size: 1.0625rem; }
 .diffFile { margin-top: 1rem; border: 1px solid var(--color-divider); border-radius: var(--radius-field); overflow: hidden; background: var(--color-field); scroll-margin-top: 8rem; }
 .diffFileToggle { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; width: 100%; gap: 0.625rem; padding: 0.75rem 1rem; border: 0; background: var(--color-raised-surface); cursor: pointer; text-align: left; }
 .diffPath { overflow-wrap: anywhere; }
@@ -157,6 +167,7 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
   .itemAge { grid-column: 2; }
   .sectionHeading { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
   .diffHeader { padding: 1rem 1.25rem; }
+  .diffViewControls { padding-inline: 1.25rem; }
   .diffLayout { display: block; }
   .diffFileList { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--color-divider); }
   .diffFiles { padding: 0.75rem 1.25rem 3rem; }
