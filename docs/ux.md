@@ -79,11 +79,15 @@ used.
   the issue becomes claimed or blocked, then announce the reason. The Ready
   count and Now preview update with the row.
 - Pull-request diff overlay: a selected pull request opens a full-viewport
-  modal above the mounted queue. Its compact header keeps the repository, pull
-  request, change totals, pending-comment count, and close action together.
-  Grouped and Files controls change how the same changed files are arranged,
-  with Grouped selected on open. A persistent bottom review bar keeps the
-  current-head comment count, commit, review outcome, submit action, merge
+  modal above the mounted queue. On laptop screens, its single-row sticky
+  header is at most 3.5rem high and keeps the repository, pull request, head
+  commit, change totals, Grouped and Files controls, pending-comment count,
+  conditional Discard all action, and close action together. Long titles
+  truncate in that row; the title disclosure shows the complete text to
+  keyboard and pointer users. On narrow screens, the same header uses compact
+  title, head-commit, and control lines so every action remains reachable
+  without horizontal page scrolling. Grouped is selected on open. A persistent bottom review bar keeps
+  the current-head comment count, commit, review outcome, submit action, merge
   action, and merge readiness in one place. The optional review summary opens
   above that bar as the explicit submission confirmation step. The server
   assigns every file to one group from its path and filename. Category groups

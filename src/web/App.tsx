@@ -686,6 +686,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0 });
   const [diffView, setDiffView] = useState<DiffView>("grouped");
+  const [titleExpanded, setTitleExpanded] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [draftMessage, setDraftMessage] = useState("");
   const [reviewSummary, setReviewSummary] = useState("");
@@ -917,22 +918,24 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
       <div className="diffTop" ref={topRef}>
         <header className="diffHeader">
           <div className="diffHeaderSummary">
-            <p className="diffIdentity">{repository} · PR {item.number}</p>
-            <h1 id="diff-title">{item.title}</h1>
-          </div>
-          {changedFileCount === null ? null : <p className="diffMeta">{changedFileCount.toLocaleString()} {changedFileCount === 1 ? "file" : "files"}{changeTotals ? ` · ${changeTotals}` : ""}</p>}
-          <span className="diffHeaderGrow" />
-          {state.status === "loaded" && pendingCount > 0 ? <p className="pendingChip">{pendingCount} pending {pendingCount === 1 ? "comment" : "comments"}</p> : null}
-          <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">×</button>
-        </header>
-        {state.status === "loaded" ? (
-          <div aria-label="Changed file arrangement" className="diffViewControls">
-            <div className="diffViewButtons">
-              <button aria-label="Grouped" aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button"><span>Grouped</span><span aria-hidden="true">by area</span></button>
-              <button aria-label="Files" aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button"><span>Files</span><span aria-hidden="true">{state.data.fileCount.toLocaleString()} changed</span></button>
+            <p className="diffIdentity"><span className="diffRepository">{repository} · </span>PR {item.number}</p>
+            {currentHeadSha ? <p className="diffHeadSha">{currentHeadSha}</p> : null}
+            <div className="diffTitleDisclosure">
+              <button aria-controls="diff-full-title" aria-expanded={titleExpanded} aria-label="Show full pull request title" onClick={() => setTitleExpanded((expanded) => !expanded)} type="button"><h1 id="diff-title">{item.title}</h1></button>
+              <p hidden={!titleExpanded} id="diff-full-title">{item.title}</p>
             </div>
           </div>
-        ) : null}
+          {changedFileCount === null ? null : <p className="diffMeta">{changedFileCount.toLocaleString()} {changedFileCount === 1 ? "file" : "files"}{changeTotals ? ` · ${changeTotals}` : ""}</p>}
+          {state.status === "loaded" ? (
+            <div aria-label="Changed file arrangement" className="diffViewControls">
+              <button aria-label="Grouped" aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
+              <button aria-label="Files" aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+            </div>
+          ) : null}
+          {state.status === "loaded" && pendingCount > 0 ? <p aria-label={`${pendingCount} pending ${pendingCount === 1 ? "comment" : "comments"}`} aria-live="polite" className="pendingChip"><span aria-hidden="true"><span>{pendingCount}</span><span className="pendingWide"> pending {pendingCount === 1 ? "comment" : "comments"}</span><span className="pendingNarrow"> pending</span></span></p> : null}
+          {pendingCount > 0 ? <button className="discardAll diffDiscardAll" onClick={discardAll} type="button">Discard all</button> : null}
+          <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">×</button>
+        </header>
       </div>
       {state.status === "loading" ? <p className="diffMessage">Loading changed files…</p> : null}
       {state.status === "failed" ? (
@@ -1041,7 +1044,6 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
             <div aria-label="Review and merge" className="reviewBar">
               <span className="reviewCount">{currentDrafts.length} {currentDrafts.length === 1 ? "comment" : "comments"} pending</span>
               <span className="reviewCommit">against commit <span className="mono">{state.data.headSha}</span></span>
-              {pendingCount > 0 ? <button className="discardAll" onClick={discardAll} type="button">Discard all</button> : null}
               <span className="reviewBarGrow" />
               {state.data.reviewEnabled ? <>
                 <label className="visuallyHidden" htmlFor="review-outcome">Review outcome</label>
