@@ -202,6 +202,157 @@ describe("work queue overview", () => {
     expect(screen.getByText("Water the fictional garden")).toBeTruthy();
   });
 
+  it("filters Ready everywhere but lets Ready and Now searches find hidden work with a reason", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    const eligible = issue({ id: "I_ready", number: 30, title: "Start fictional irrigation" });
+    const unavailable = { ...issue({ id: "I_unknown", number: 31, title: "Check fictional weather" }), readiness: { kind: "unavailable" as const } };
+    const claimed = { ...issue({ id: "I_claimed", number: 32, title: "Plant claimed bulbs" }), readyExclusion: "claimed" as const };
+    const blocked = {
+      ...issue({ id: "I_blocked", number: 33, title: "Repair blocked trellis" }),
+      readiness: { kind: "blocked" as const, blockers: [{ status: "unknown" as const, id: "I_blocker" }] },
+      readyExclusion: "blocked" as const,
+    };
+    const humanClaimed = { ...overview.queues[1]!.issues[0]!, title: "Review human claim", readyExclusion: null };
+    overview.queues[1]!.issues = [humanClaimed];
+    overview.issues = [eligible, unavailable, claimed, blocked, humanClaimed, ...overview.queues.slice(2).flatMap((queue) => queue.issues)];
+    overview.queues[0]!.issues = [eligible, unavailable];
+    overview.scope.itemCount = overview.pullRequests.length + overview.issues.length;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+
+    await screen.findByText("Start fictional irrigation");
+    const readyPreview = screen.getByRole("region", { name: "Ready for agent" });
+    expect(within(readyPreview).getByText("Check fictional weather")).toBeTruthy();
+    expect(within(readyPreview).queryByText("Plant claimed bulbs")).toBeNull();
+    expect(within(readyPreview).queryByText("Repair blocked trellis")).toBeNull();
+    expect(screen.getByRole("button", { name: "Ready for agent 2" })).toBeTruthy();
+    expect(screen.queryByText("Unblocked")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
+    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    await user.type(search, "claimed bulbs");
+    expect(screen.getByText("Plant claimed bulbs")).toBeTruthy();
+    expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: `Now ${overview.scope.itemCount - 2}` }));
+    await user.type(search, "blocked trellis");
+    expect(screen.getByText("Repair blocked trellis")).toBeTruthy();
+    expect(screen.getByText("Hidden from Ready: blocked")).toBeTruthy();
+
+    await user.clear(search);
+    await user.type(search, "human claim");
+    expect(screen.getByText("Review human claim")).toBeTruthy();
+    expect(screen.queryByText(/Hidden from Ready:/)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Needs me 1" }));
+    await user.type(search, "blocked trellis");
+    expect(screen.queryByText("Repair blocked trellis")).toBeNull();
+  });
+
+  it("keeps an already-hidden Ready search result selected after focused refresh", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    const claimed = { ...overview.issues[0]!, title: "Claimed fictional seed", readyExclusion: "claimed" as const };
+    overview.issues = overview.issues.map((item) => item.id === claimed.id ? claimed : item);
+    overview.queues[0]!.issues = overview.queues[0]!.issues.filter((item) => item.id !== claimed.id);
+    const refreshed = { ...claimed, title: "Refreshed claimed fictional seed" };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(overview))
+      .mockResolvedValueOnce(response({ status: "updated", item: refreshed, fetchedAt: "2026-08-23T11:00:00.000Z", relationshipStatus: "fresh" })));
+
+    render(<App />);
+    await screen.findByText("Review fictional moss");
+    await user.click(screen.getByRole("button", { name: "Ready for agent 1" }));
+    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    await user.type(search, "claimed fictional");
+    await user.click(screen.getByRole("button", { name: "Select Claimed fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByRole("heading", { name: "Refreshed claimed fictional seed" })).toBeTruthy();
+    expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
+    expect(screen.queryByText(/left Ready for agent/)).toBeNull();
+  });
+
+  it("removes a Ready issue selected from Now when focused refresh marks it claimed", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    const refreshed = { ...overview.issues[0]!, readyExclusion: "claimed" as const };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(overview))
+      .mockResolvedValueOnce(response({ status: "updated", item: refreshed, fetchedAt: "2026-08-23T11:00:00.000Z", relationshipStatus: "fresh" })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByText("This issue left Ready for agent because it is claimed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    await user.type(search, "fictional seed");
+    expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
+  });
+
+  it("keeps a Now search selection when focused refresh hides the issue from Ready", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    const refreshed = { ...overview.issues[0]!, readyExclusion: "claimed" as const };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(overview))
+      .mockResolvedValueOnce(response({ status: "updated", item: refreshed, fetchedAt: "2026-08-23T11:00:00.000Z", relationshipStatus: "fresh" })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    await user.type(search, "fictional seed");
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByRole("heading", { name: "Add a fictional seed" })).toBeTruthy();
+    expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
+    expect(screen.queryByText(/left Ready for agent/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
+  });
+
+  it("reconciles a Ready issue selected from Now after account sync without restoring stale data", async () => {
+    const user = userEvent.setup();
+    const before = readyOverview();
+    const after = readyOverview();
+    const claimed = { ...after.issues[0]!, readyExclusion: "claimed" as const };
+    after.issues = after.issues.map((item) => item.id === claimed.id ? claimed : item);
+    after.queues[0]!.issues = after.queues[0]!.issues.filter((item) => item.id !== claimed.id);
+    const sync = deferred<ReturnType<typeof response>>();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(before))
+      .mockImplementationOnce(() => sync.promise)
+      .mockResolvedValueOnce(response(after));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("EventSource", TestEventSource);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Sync account" }));
+    sync.resolve(response({ status: "complete", fetchedAt: after.fetchedAt, scope: after.scope }));
+
+    expect(await screen.findByText("This issue left Ready for agent because it is claimed.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select Add a fictional seed" })).toBeNull();
+
+    TestEventSource.last?.emit({
+      type: "updated",
+      item: { ...after.issues[1]!, title: "Updated fictional moss" },
+      repositories: after.repositories,
+      scope: after.scope,
+    });
+    expect(await screen.findByText("Updated fictional moss")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Select Add a fictional seed" })).toBeNull();
+  });
+
   it("shows partial account sync as a warning without clearing the queue", async () => {
     const user = userEvent.setup();
     const partialOverview = { ...readyOverview(), scope: { ...readyOverview().scope, truncatedReason: "item_limit" } };
@@ -882,6 +1033,31 @@ describe("work queue overview", () => {
     expect(screen.queryByText("Updated fictional seed")).toBeNull();
   });
 
+  it("removes and announces a Ready issue selected from Now that becomes blocked in a live update", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+    vi.stubGlobal("EventSource", TestEventSource);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Select Add a fictional seed" }));
+    TestEventSource.last?.emit({
+      type: "updated",
+      item: {
+        ...overview.issues[0]!,
+        readiness: { kind: "blocked", blockers: [{ status: "unknown", id: "I_blocker" }] },
+        readyExclusion: "blocked",
+      },
+      repositories: overview.repositories,
+      scope: overview.scope,
+    });
+
+    expect(await screen.findByText("This issue left Ready for agent because it has an open blocker.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+  });
+
   it("announces unselected removals and distinguishes a search exit from a queue move", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn()
@@ -1061,6 +1237,13 @@ function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
       truncatedReason: "item_limit",
     },
     pullRequests: [pullRequest({ id: "PR_1", number: 41, title: "Keep fictional paths tidy" })],
+    issues: [
+      issue({ id: "I_1", number: 22, title: "Add a fictional seed" }),
+      issue({ id: "I_2", number: 23, title: "Review fictional moss" }),
+      issue({ id: "I_3", number: 24, title: "Choose a garden name" }),
+      issue({ id: "I_4", number: 25, title: "Clarify fictional soil" }),
+      issue({ id: "I_5", number: 26, title: "Sort fictional leaves" }),
+    ],
     queues: [
       { name: "agent", issues: [issue({ id: "I_1", number: 22, title: "Add a fictional seed" }), issue({ id: "I_2", number: 23, title: "Review fictional moss" })] },
       { name: "human", issues: [issue({ id: "I_3", number: 24, title: "Choose a garden name" })] },
@@ -1137,6 +1320,7 @@ function issue({ id, number, title }: { id: string; number: number; title: strin
     updatedAt: "2026-08-20T10:00:00.000Z",
     queue: "agent" as const,
     readiness: { kind: "unblocked" as const },
+    readyExclusion: null,
     epic: null,
     subIssues: null,
   };

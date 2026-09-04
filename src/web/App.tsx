@@ -166,7 +166,10 @@ export function App() {
       const response = await syncOverview();
       if (response.status === "complete" || response.status === "partial") {
         const nextOverview = await getOverview();
-        setOverview(nextOverview.status === "ready" ? nextOverview : null);
+        const readyOverview = nextOverview.status === "ready" ? nextOverview : null;
+        if (readyOverview) reconcileSelectionAfterOverview(overviewRef.current, readyOverview, "account sync");
+        setOverview(readyOverview);
+        overviewRef.current = readyOverview;
         setSyncState(response.status === "partial" ? "partial" : "success");
       } else {
         setSyncState("failed");
@@ -182,22 +185,28 @@ export function App() {
     try {
       const response = await refreshItem(nodeId);
       if (response.status === "updated") {
-        const nextOverview = overviewRef.current ? replaceOverviewItem(overviewRef.current, response.item, { repositories: response.repositories, scope: response.scope }) : null;
+        const previousOverview = overviewRef.current;
+        const previousItem = previousOverview ? itemFromOverview(previousOverview, nodeId) : null;
+        const nextOverview = previousOverview ? replaceOverviewItem(previousOverview, response.item, { repositories: response.repositories, scope: response.scope }) : null;
         if (nextOverview) {
           overviewRef.current = nextOverview;
           setOverview(nextOverview);
         }
         setItemRefreshStates((states) => ({ ...states, [nodeId]: response.relationshipStatus === "fresh" ? "success" : "partial" }));
         const currentQueue = views[viewRef.current].queue;
+        const readyExclusion = readyExclusionTransition(previousItem, response.item);
+        const remainsVisible = nextOverview
+          ? filterItems(itemsForDisplay(nextOverview, viewRef.current, queryRef.current), queryRef.current, nextOverview).some((item) => item.id === nodeId)
+          : false;
         const movedQueue = response.item.type === "issue"
           && currentQueue !== undefined
           && response.item.queue !== currentQueue
           ? response.item.queue
           : null;
-        if (movedQueue && selectedItemRef.current === nodeId) {
+        if (((readyExclusion && (viewRef.current === "agent" || !remainsVisible)) || movedQueue) && selectedItemRef.current === nodeId) {
           selectedItemRef.current = null;
           setSelectedItemId(null);
-          setItemMessage(`Item refreshed and moved to ${queueTitle(movedQueue)}.`);
+          setItemMessage(readyExclusion ? readyExclusionAnnouncement(readyExclusion) : `Item refreshed and moved to ${queueTitle(movedQueue)}.`);
           focusNextRowOrPageHeading();
         }
         return;
@@ -238,7 +247,8 @@ export function App() {
 
   const currentView = views[view];
   const items = overview ? itemsForView(overview, view) : [];
-  const filteredItems = overview ? filterItems(items, query, overview) : [];
+  const searchableItems = overview && query.trim() ? itemsForSearch(overview, view) : items;
+  const filteredItems = overview ? filterItems(searchableItems, query, overview) : [];
   const selectedItem = filteredItems.find((item) => item.id === selectedItemId) ?? null;
   const statusMessage = itemMessage || syncStatusMessage(syncState);
 
@@ -317,14 +327,17 @@ export function App() {
       overviewRef.current = next;
       setOverview(next);
       if (selectedItemRef.current === event.item.id) {
-        const remainsVisible = filterItems(itemsForView(next, viewRef.current), queryRef.current, next).some((item) => item.id === event.item.id);
-        if (!remainsVisible) {
-          const previousItem = itemFromOverview(current, event.item.id);
+        const previousItem = itemFromOverview(current, event.item.id);
+        const readyExclusion = readyExclusionTransition(previousItem, event.item);
+        const remainsVisible = filterItems(itemsForDisplay(next, viewRef.current, queryRef.current), queryRef.current, next).some((item) => item.id === event.item.id);
+        if ((readyExclusion && (viewRef.current === "agent" || !remainsVisible)) || !remainsVisible) {
           selectedItemRef.current = null;
           setSelectedItemId(null);
           const queueMoved = previousItem?.type === "issue" && event.item.type === "issue" && previousItem.queue !== event.item.queue;
           const nextQueue = event.item.type === "issue" ? event.item.queue : null;
-          setItemMessage(queueMoved
+          setItemMessage(readyExclusion
+            ? readyExclusionAnnouncement(readyExclusion)
+            : queueMoved
             ? `Item refreshed and moved to ${queueTitle(nextQueue!)}.`
             : queryRef.current
               ? "Item refreshed and no longer matches this search."
@@ -349,15 +362,21 @@ export function App() {
     }
   }
 
-  function reconcileSelectionAfterOverview(previous: Extract<OverviewResponse, { status: "ready" }> | null, next: Extract<OverviewResponse, { status: "ready" }>) {
+  function reconcileSelectionAfterOverview(previous: Extract<OverviewResponse, { status: "ready" }> | null, next: Extract<OverviewResponse, { status: "ready" }>, source = "live updates") {
     const selected = selectedItemRef.current;
     if (!selected || !previous) return;
+    const previousItem = itemFromOverview(previous, selected);
     const stillLoaded = itemFromOverview(next, selected);
-    const stillVisible = filterItems(itemsForView(next, viewRef.current), queryRef.current, next).some((item) => item.id === selected);
-    if (!stillLoaded || !stillVisible) {
+    const readyExclusion = readyExclusionTransition(previousItem, stillLoaded);
+    const stillVisible = filterItems(itemsForDisplay(next, viewRef.current, queryRef.current), queryRef.current, next).some((item) => item.id === selected);
+    if (!stillLoaded || (readyExclusion && (viewRef.current === "agent" || !stillVisible)) || !stillVisible) {
       selectedItemRef.current = null;
       setSelectedItemId(null);
-      setItemMessage(stillLoaded ? "The selected item moved out of this view while live updates reconnected." : "The selected item was removed while live updates reconnected.");
+      setItemMessage(readyExclusion
+        ? readyExclusionAnnouncement(readyExclusion)
+        : stillLoaded
+          ? `The selected item moved out of this view after ${source}.`
+          : `The selected item was removed after ${source}.`);
       focusNextRowOrPageHeading();
     }
   }
@@ -454,6 +473,8 @@ export function App() {
                       overview={overview}
                       selectedItemId={selectedItemId}
                       title={currentView.title}
+                      view={view}
+                      searching={Boolean(query.trim())}
                     />
                   )}
                 </div> : null}
@@ -514,7 +535,7 @@ function NowView({
   selectedItemId: string | null;
 }) {
   if (query.trim()) {
-    return <ListSection items={filteredItems} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind title="Search results" />;
+    return <ListSection items={filteredItems} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind searching title="Search results" view="now" />;
   }
 
   const previewViews: View[] = ["pullRequests", "agent", "human", "triage", "epics"];
@@ -528,7 +549,7 @@ function NowView({
             <div className="sectionHeading">
               <h2>{details.sectionTitle}</h2>
             </div>
-            <ItemList items={items.slice(0, previewLimit)} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} />
+            <ItemList items={items.slice(0, previewLimit)} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} searching={false} view={view} />
           </section>
         );
       })}
@@ -543,6 +564,8 @@ function ListSection({
   selectedItemId,
   showKind = false,
   title,
+  view,
+  searching,
 }: {
   items: ApiItem[];
   onSelect: (nodeId: string) => void;
@@ -550,10 +573,12 @@ function ListSection({
   selectedItemId: string | null;
   showKind?: boolean;
   title: string;
+  view: View;
+  searching: boolean;
 }) {
   return (
     <section className="queueSection fullList" aria-label={title}>
-      <ItemList items={items} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind={showKind} />
+      <ItemList items={items} onSelect={onSelect} overview={overview} selectedItemId={selectedItemId} showKind={showKind} searching={searching} view={view} />
       {items.length === 0 ? <p className="emptyState">No loaded items match this view.</p> : null}
     </section>
   );
@@ -565,16 +590,20 @@ function ItemList({
   overview,
   selectedItemId,
   showKind = false,
+  searching,
+  view,
 }: {
   items: ApiItem[];
   onSelect: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   selectedItemId: string | null;
   showKind?: boolean;
+  searching: boolean;
+  view: View;
 }) {
   return (
     <ul className="itemList">
-      {items.map((item) => <ItemRow item={item} key={item.id} onSelect={onSelect} overview={overview} selected={selectedItemId === item.id} showKind={showKind} />)}
+      {items.map((item) => <ItemRow item={item} key={item.id} onSelect={onSelect} overview={overview} selected={selectedItemId === item.id} showKind={showKind} showReadyExclusion={searching && (view === "now" || view === "agent")} />)}
     </ul>
   );
 }
@@ -585,12 +614,14 @@ function ItemRow({
   overview,
   selected,
   showKind,
+  showReadyExclusion,
 }: {
   item: ApiItem;
   onSelect: (nodeId: string) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   selected: boolean;
   showKind: boolean;
+  showReadyExclusion: boolean;
 }) {
   const repository = repositoryName(overview, item.repositoryId);
   return (
@@ -600,7 +631,7 @@ function ItemRow({
         <span className="itemBody">
           <span className="itemTitle">{item.title}</span>
           <span className="itemIdentity">{repository} · #{item.number}</span>
-          <ItemFacts item={item} overview={overview} showKind={showKind} />
+          <ItemFacts item={item} overview={overview} showKind={showKind} showReadyExclusion={showReadyExclusion} />
         </span>
         <span className="itemAge">Updated {relativeTime(item.updatedAt)}</span>
       </button>
@@ -1239,10 +1270,12 @@ function ItemFacts({
   item,
   overview,
   showKind,
+  showReadyExclusion,
 }: {
   item: ApiItem;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   showKind: boolean;
+  showReadyExclusion: boolean;
 }) {
   const facts: Array<{ className: string; text: string }> = [];
   if (showKind) {
@@ -1263,7 +1296,12 @@ function ItemFacts({
   } else if (item.queue === null) {
     facts.push(epicProgressFact(item));
   } else {
-    facts.push(readinessFact(item, overview));
+    if (!(item.queue === "agent" && item.readiness.kind === "unblocked")) {
+      facts.push(readinessFact(item, overview));
+    }
+    if (showReadyExclusion && item.readyExclusion) {
+      facts.push({ className: "warning", text: readyExclusionFact(item.readyExclusion) });
+    }
     if (item.epic) {
       facts.push({ className: "mono", text: epicPillText(item.epic) });
     }
@@ -1338,8 +1376,22 @@ function itemsForView(overview: Extract<OverviewResponse, { status: "ready" }>, 
   return overview.queues.find((queue) => queue.name === views[view].queue)?.issues ?? [];
 }
 
+function itemsForSearch(overview: Extract<OverviewResponse, { status: "ready" }>, view: View): ApiItem[] {
+  if (view === "now") {
+    return [...overview.pullRequests, ...overview.issues];
+  }
+  if (view === "agent") {
+    return overview.issues.filter((issue) => issue.queue === "agent");
+  }
+  return itemsForView(overview, view);
+}
+
+function itemsForDisplay(overview: Extract<OverviewResponse, { status: "ready" }>, view: View, query: string): ApiItem[] {
+  return query.trim() ? itemsForSearch(overview, view) : itemsForView(overview, view);
+}
+
 function itemFromOverview(overview: Extract<OverviewResponse, { status: "ready" }>, nodeId: string): ApiItem | null {
-  return [...overview.pullRequests, ...overview.epics, ...overview.queues.flatMap((queue) => queue.issues)].find((item) => item.id === nodeId) ?? null;
+  return [...overview.pullRequests, ...overview.issues].find((item) => item.id === nodeId) ?? null;
 }
 
 function countForView(overview: Extract<OverviewResponse, { status: "ready" }>, view: View) {
@@ -1396,6 +1448,28 @@ function queueTitle(queue: string | null) {
   return view ? views[view].title : queue;
 }
 
+function readyExclusionFact(reason: NonNullable<Extract<ApiItem, { type: "issue" }>["readyExclusion"]>) {
+  if (reason === "claimed") return "Hidden from Ready: claimed";
+  if (reason === "blocked") return "Hidden from Ready: blocked";
+  return "Hidden from Ready: claimed and blocked";
+}
+
+function readyExclusionAnnouncement(reason: NonNullable<Extract<ApiItem, { type: "issue" }>["readyExclusion"]>) {
+  if (reason === "claimed") return "This issue left Ready for agent because it is claimed.";
+  if (reason === "blocked") return "This issue left Ready for agent because it has an open blocker.";
+  return "This issue left Ready for agent because it is claimed and has an open blocker.";
+}
+
+function readyExclusionTransition(previous: ApiItem | null, next: ApiItem | null) {
+  return previous?.type === "issue"
+    && next?.type === "issue"
+    && previous.queue === "agent"
+    && next.queue === "agent"
+    && previous.readyExclusion === null
+    ? next.readyExclusion
+    : null;
+}
+
 function replaceOverviewItem(
   overview: Extract<OverviewResponse, { status: "ready" }>,
   updated: ApiItem,
@@ -1406,12 +1480,18 @@ function replaceOverviewItem(
     ...overview,
     repositories: metadata.repositories ?? overview.repositories,
     scope: metadata.scope ?? { ...overview.scope, itemCount: overview.scope.itemCount },
+    issues: updated.type === "issue"
+      ? [...overview.issues.filter((item) => item.id !== updated.id), updated].sort(compareIssues)
+      : overview.issues,
     pullRequests: updated.type === "pull_request"
       ? [...overview.pullRequests.filter((item) => item.id !== updated.id), updated].sort(comparePullRequests)
       : overview.pullRequests.filter((item) => item.id !== updated.id),
     queues: overview.queues.map((queue) => ({
       ...queue,
-      issues: updated.type === "issue" && updated.queue !== null && queue.name === updated.queue
+      issues: updated.type === "issue"
+        && updated.queue !== null
+        && queue.name === updated.queue
+        && (queue.name !== "agent" || updated.readyExclusion === null)
         ? [...queue.issues.filter((item) => item.id !== updated.id), updated].sort(compareIssues)
         : queue.issues.filter((item) => item.id !== updated.id),
     })),
@@ -1454,6 +1534,7 @@ function removeOverviewItem(
   return {
     ...overview,
     scope: scope ?? overview.scope,
+    issues: overview.issues.filter((item) => item.id !== nodeId),
     pullRequests: overview.pullRequests.filter((item) => item.id !== nodeId),
     queues: overview.queues.map((queue) => ({ ...queue, issues: queue.issues.filter((item) => item.id !== nodeId) })),
     epics: overview.epics.filter((item) => item.id !== nodeId),

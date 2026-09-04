@@ -333,7 +333,7 @@ describe("application server", () => {
         ]);
         expect(body.pullRequests).toEqual([expect.objectContaining({ id: "PR_1", type: "pull_request" })]);
         expect(Object.keys(body.queues[0].issues[0]).sort()).toEqual(
-          ["createdAt", "epic", "excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "subIssues", "title", "type", "updatedAt", "url"].sort(),
+          ["createdAt", "epic", "excerpt", "id", "number", "observedAt", "queue", "readiness", "readyExclusion", "repositoryId", "subIssues", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(body.pullRequests[0]).sort()).toEqual(
           [

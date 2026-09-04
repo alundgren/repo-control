@@ -1,7 +1,7 @@
 import type { Cache, CacheItem, SuccessfulSnapshot } from "../cache/index.js";
 import type { RefreshError, RefreshOutcome } from "../refresh/index.js";
 import type { SyncOutcome } from "../sync/index.js";
-import { classifyIssues, type ClassifiedIssue, type IssueReadiness, type QueueMapping } from "../domain/workflow.js";
+import { classifyIssues, type ClassifiedIssue, type IssueReadiness, type QueueMapping, type ReadyExclusion } from "../domain/workflow.js";
 import type { GitHubReadError } from "../github/read-client.js";
 
 export type ApiScope = SuccessfulSnapshot["scope"];
@@ -55,6 +55,7 @@ export type ApiIssue = {
   observedAt?: string;
   queue: string | null;
   readiness: ApiReadiness;
+  readyExclusion: ReadyExclusion;
   epic: ApiEpicMembership | null;
   subIssues: ApiSubIssues | null;
 };
@@ -87,6 +88,7 @@ export type OverviewResponse =
       repositories: ApiRepository[];
       scope: ApiScope;
       queues: ApiQueue[];
+      issues: ApiIssue[];
       pullRequests: ApiPullRequest[];
       epics: ApiIssue[];
     }
@@ -125,7 +127,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
   );
 
   const blockerCache = new Map<string, ApiBlocker>();
-  const apiIssues = classifyIssues(mapping, issues, { epicLabel }).map((classified) =>
+  const apiIssues = classifyIssues(mapping, issues, { epicLabel, claimedLabel: cache.getClaimedLabel() }).map((classified) =>
     toApiIssue(cache, classified, blockerCache),
   );
 
@@ -134,6 +136,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
     fetchedAt: snapshot.fetchedAt,
     repositories: snapshot.repositories,
     scope: snapshot.scope,
+    issues: apiIssues,
     queues: groupIntoQueues(mapping, apiIssues.filter((issue): issue is ApiIssue & { queue: string } => issue.queue !== null)),
     pullRequests: pullRequests.map((item) => toApiPullRequest(cache, item)).sort(comparePullRequests),
     epics: apiIssues
@@ -191,7 +194,7 @@ export function toApiItem(cache: Cache, item: CacheItem): ApiItem {
     return toApiPullRequest(cache, item);
   }
   const mapping = cache.getQueueMapping();
-  const [classified] = classifyIssues(mapping, [item], { epicLabel: cache.getEpicLabel() });
+  const [classified] = classifyIssues(mapping, [item], { epicLabel: cache.getEpicLabel(), claimedLabel: cache.getClaimedLabel() });
   return toApiIssue(cache, classified!);
 }
 
@@ -213,6 +216,7 @@ function toApiIssue(
     updatedAt: classified.updatedAt,
     queue: classified.queue,
     readiness: toApiReadiness(cache, classified.readiness, blockerCache),
+    readyExclusion: classified.readyExclusion,
     epic: toApiEpicMembership(cache, classified),
     subIssues: classified.subIssues ?? null,
   };
@@ -332,6 +336,9 @@ function groupIntoQueues(mapping: QueueMapping, issues: Array<ApiIssue & { queue
     byQueue.set(name, []);
   }
   for (const issue of issues) {
+    if (issue.queue === "agent" && issue.readyExclusion !== null) {
+      continue;
+    }
     const existing = byQueue.get(issue.queue);
     if (existing) {
       existing.push(issue);

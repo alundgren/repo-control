@@ -193,7 +193,9 @@ describe("api read models", () => {
         if (overview.status !== "ready") {
           throw new Error("expected a ready overview");
         }
-        const blocked = overview.queues.flatMap((queue) => queue.issues).find((item) => item.id === "I_blocked");
+        const blocked = overview.issues.find((item) => item.id === "I_blocked");
+
+        expect(overview.queues.find((queue) => queue.name === "agent")?.issues).toEqual([]);
 
         expect(blocked?.readiness).toEqual({
           kind: "blocked",
@@ -210,6 +212,83 @@ describe("api read models", () => {
             { status: "unknown", id: "I_missing_blocker" },
           ],
         });
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("keeps every issue in the read model while the Ready projection omits claimed and confirmed-blocked work", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceQueueMapping({ defaultQueue: "triage", labels: [{ label: "ready-for-agent", queue: "agent" }] });
+        cache.replaceActiveSnapshot(snapshot({
+          items: [
+            issue({ id: "I_unblocked", labels: ["ready-for-agent"] }),
+            issue({
+              id: "I_unavailable",
+              labels: ["ready-for-agent"],
+              relationshipCoverage: { blocker: "unavailable", closing_issue: "complete", parent: "complete" },
+            }),
+            issue({ id: "I_claimed", labels: ["ready-for-agent", "claimed"] }),
+            issue({
+              id: "I_blocked",
+              labels: ["ready-for-agent"],
+              relationships: [{ sourceId: "I_blocked", targetId: "I_blocker", type: "blocker" }],
+            }),
+            issue({
+              id: "I_both",
+              labels: ["ready-for-agent", "claimed"],
+              relationships: [{ sourceId: "I_both", targetId: "I_blocker", type: "blocker" }],
+            }),
+          ],
+          scope: { itemCount: 5, itemLimit: 200, repositoryCount: 1, repositoryLimit: 50, truncatedReason: null },
+        }));
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+
+        expect(overview.scope.itemCount).toBe(5);
+        expect(overview.issues.map(({ id, readyExclusion }) => ({ id, readyExclusion }))).toEqual([
+          { id: "I_claimed", readyExclusion: "claimed" },
+          { id: "I_unblocked", readyExclusion: null },
+          { id: "I_unavailable", readyExclusion: null },
+          { id: "I_blocked", readyExclusion: "blocked" },
+          { id: "I_both", readyExclusion: "claimed_and_blocked" },
+        ]);
+        expect(overview.queues.find((queue) => queue.name === "agent")?.issues.map((item) => item.id)).toEqual([
+          "I_unblocked",
+          "I_unavailable",
+        ]);
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("does not report a Ready exclusion for claimed or blocked issues assigned elsewhere", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceQueueMapping({
+          defaultQueue: "triage",
+          labels: [
+            { label: "ready-for-agent", queue: "agent" },
+            { label: "ready-for-human", queue: "human" },
+          ],
+        });
+        cache.replaceActiveSnapshot(snapshot({ items: [
+          issue({ id: "I_human", labels: ["ready-for-human", "claimed"] }),
+          issue({
+            id: "I_triage",
+            relationships: [{ sourceId: "I_triage", targetId: "I_blocker", type: "blocker" }],
+          }),
+        ] }));
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+
+        expect(overview.issues.map(({ id, queue, readyExclusion }) => ({ id, queue, readyExclusion }))).toEqual([
+          { id: "I_human", queue: "human", readyExclusion: null },
+          { id: "I_triage", queue: "triage", readyExclusion: null },
+        ]);
       } finally {
         cache.close();
       }
@@ -291,7 +370,7 @@ describe("api read models", () => {
         const [pullRequestRead] = overview.pullRequests;
 
         expect(Object.keys(issueRead!).sort()).toEqual(
-          ["createdAt", "epic", "excerpt", "id", "number", "observedAt", "queue", "readiness", "repositoryId", "subIssues", "title", "type", "updatedAt", "url"].sort(),
+          ["createdAt", "epic", "excerpt", "id", "number", "observedAt", "queue", "readiness", "readyExclusion", "repositoryId", "subIssues", "title", "type", "updatedAt", "url"].sort(),
         );
         expect(Object.keys(pullRequestRead!).sort()).toEqual(
           [
@@ -373,6 +452,27 @@ describe("api read models", () => {
         expect(response).toMatchObject({
           status: "updated",
           item: { id: "I_issue", type: "issue", queue: "agent", readiness: { kind: "unblocked" } },
+        });
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("returns the Ready exclusion on a focused refresh", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceQueueMapping({ defaultQueue: "triage", labels: [{ label: "ready-for-agent", queue: "agent" }] });
+        const outcome: RefreshOutcome = {
+          status: "updated",
+          item: itemRecord({ id: "I_issue", labels: ["ready-for-agent", "claimed"] }),
+          fetchedAt: "2026-08-23T10:00:00.000Z",
+          relationshipStatus: "fresh",
+          rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-08-23T11:00:00.000Z" },
+        };
+
+        expect(toItemRefreshResponse(cache, outcome)).toMatchObject({
+          status: "updated",
+          item: { id: "I_issue", readyExclusion: "claimed" },
         });
       } finally {
         cache.close();
