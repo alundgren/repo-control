@@ -131,11 +131,10 @@ used.
   opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
   72 by 28 pixel Share tab sits at the bottom-right edge. Its neutral treatment
-  uses the raised surface with primary text, a primary-text inner boundary,
-  and a field outer halo. A `light` upload hint changes only the tab fill to
-  field. A `dark` hint uses Share dark ground and Share dark text, with a field
-  inner boundary and primary-text outer halo. The expanded panel always keeps
-  the warm-paper treatment. Hover or keyboard focus opens the panel
+  has no fill or halo. On neutral and `light` uploads, primary text appears at
+  58% opacity and the primary-text boundary at 28%. A `dark` hint uses Share
+  dark text at 58% and a field boundary at 28%. The expanded panel always
+  keeps the warm-paper treatment. Hover or keyboard focus opens the panel
   temporarily. Click or tap pins it. The panel contains a 128 pixel QR code,
   Copy link, Download, copy status, and a selectable link when clipboard
   access fails. Hidden panel controls leave both keyboard order and the
@@ -151,5 +150,9 @@ The public viewer uses the system UI font stack instead of embedding IBM Plex.
 The viewer response must stay self-contained and its CSP permits no font
 request. The QR graphic alone uses pure white and black because scanner
 reliability needs maximum contrast at 128 pixels. The closed Share tab may
-cover a 72 by 28 pixel area of the artifact. The open panel may cover more,
-but it never changes the artifact iframe's viewport or layout.
+cover a 72 by 28 pixel area of the artifact. Its transparent, low-contrast
+treatment deliberately falls below the usual contrast for an interactive
+control so it obscures less of the artifact. The labeled 72 by 28 pixel hit
+area remains in place, keyboard focus adds a high-contrast outline, and the
+opened panel returns to standard contrast. The open panel may cover more, but
+it never changes the artifact iframe's viewport or layout.

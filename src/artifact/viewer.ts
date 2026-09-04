@@ -36,23 +36,14 @@ export function renderArtifactViewer(artifact: StoredArtifact) {
   --viewer-muted: #66574D;
   --viewer-link: #3D5D71;
   --viewer-ok: #3D6034;
-  --viewer-share-dark-ground: #292019;
-  --viewer-share-dark-text: #C1AF9A;
-  --viewer-share-fill: var(--viewer-raised);
-  --viewer-share-text: var(--viewer-text);
-  --viewer-share-inner-boundary: var(--viewer-text);
-  --viewer-share-outer-boundary: var(--viewer-field);
+  --viewer-share-text: rgba(96, 73, 57, 0.58);
+  --viewer-share-inner-boundary: rgba(96, 73, 57, 0.28);
   --viewer-qr-light: #FFFFFF;
   --viewer-qr-dark: #000000;
 }
-body[data-artifact-appearance="light"] {
-  --viewer-share-fill: var(--viewer-field);
-}
 body[data-artifact-appearance="dark"] {
-  --viewer-share-fill: var(--viewer-share-dark-ground);
-  --viewer-share-text: var(--viewer-share-dark-text);
-  --viewer-share-inner-boundary: var(--viewer-field);
-  --viewer-share-outer-boundary: var(--viewer-text);
+  --viewer-share-text: rgba(193, 175, 154, 0.58);
+  --viewer-share-inner-boundary: rgba(249, 246, 240, 0.28);
 }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
@@ -67,8 +58,7 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
   border: 1px solid var(--viewer-share-inner-boundary);
   border-right: 0;
   border-radius: 8px 0 0 8px;
-  box-shadow: 0 0 0 2px var(--viewer-share-outer-boundary);
-  background: var(--viewer-share-fill);
+  background: transparent;
   color: var(--viewer-share-text);
   font: 600 13.5px/1 system-ui, sans-serif;
   cursor: pointer;
