@@ -57,6 +57,7 @@ const assetExtensions = [
 export function groupPullRequestFiles(files: readonly FileForGrouping[]): PullRequestFileGroup[] {
   const categories = new Map<Category, number[]>();
   const directories = new Map<string, number[]>();
+  const useLowercaseGroupNames = files.every((file) => file.path === file.path.toLowerCase());
 
   files.forEach((file, index) => {
     const parts = file.path.split("/");
@@ -67,19 +68,25 @@ export function groupPullRequestFiles(files: readonly FileForGrouping[]): PullRe
       return;
     }
 
-    const parent = parts.length === 1 ? "Repository root" : parts.slice(0, -1).join("/");
+    const parent = parts.length === 1
+      ? formatGroupName("Repository root", useLowercaseGroupNames)
+      : parts.slice(0, -1).join("/");
     addIndex(directories, parent, index);
   });
 
   return [
     ...categoryOrder.flatMap((name) => {
       const fileIndexes = categories.get(name);
-      return fileIndexes ? [{ name, fileIndexes }] : [];
+      return fileIndexes ? [{ name: formatGroupName(name, useLowercaseGroupNames), fileIndexes }] : [];
     }),
     ...[...directories]
       .sort(([left], [right]) => compareStrings(left, right))
       .map(([name, fileIndexes]) => ({ name, fileIndexes })),
   ];
+}
+
+function formatGroupName(name: string, useLowercaseGroupNames: boolean) {
+  return useLowercaseGroupNames ? name.toLowerCase() : name;
 }
 
 function classifyCategory(parts: string[], basename: string): Category | null {

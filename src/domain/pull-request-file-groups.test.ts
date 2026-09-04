@@ -49,6 +49,40 @@ describe("groupPullRequestFiles", () => {
     ]);
   });
 
+  it("uses lowercase generated group names when every changed path is lowercase", () => {
+    const paths = [
+      "tests/widget.test.ts",
+      "docs/guide.md",
+      "package.json",
+      "public/logo.svg",
+      "root.ts",
+      "src/widget.ts",
+    ];
+
+    expect(groupPullRequestFiles(paths.map((path) => ({ path })))).toEqual([
+      { name: "tests", fileIndexes: [0] },
+      { name: "documentation", fileIndexes: [1] },
+      { name: "configuration", fileIndexes: [2] },
+      { name: "assets", fileIndexes: [3] },
+      { name: "repository root", fileIndexes: [4] },
+      { name: "src", fileIndexes: [5] },
+    ]);
+  });
+
+  it("keeps generated group names capitalized when any changed path contains uppercase letters", () => {
+    const paths = [
+      "tests/widget.test.ts",
+      "README.md",
+      "root.ts",
+    ];
+
+    expect(groupPullRequestFiles(paths.map((path) => ({ path })))).toEqual([
+      { name: "Tests", fileIndexes: [0] },
+      { name: "Documentation", fileIndexes: [1] },
+      { name: "Repository root", fileIndexes: [2] },
+    ]);
+  });
+
   it("covers every exact configuration name and asset extension", () => {
     const configurationNames = [
       "package.json", "pnpm-workspace.yaml", "tsconfig.json", "Cargo.toml", "go.mod",
@@ -97,7 +131,7 @@ describe("groupPullRequestFiles", () => {
     ];
 
     expect(groupPullRequestFiles(files)).toEqual([
-      { name: "Tests", fileIndexes: [1] },
+      { name: "tests", fileIndexes: [1] },
       { name: "src", fileIndexes: [0, 2] },
     ]);
   });

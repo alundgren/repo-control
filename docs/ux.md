@@ -72,7 +72,9 @@ used.
   SHA. Grouped and Files controls change how the same changed files are
   arranged, with Grouped selected on open. The server assigns every file to
   one group from its path and filename. Category groups precede directory
-  groups. Each view keeps its own scroll position and per-file fold state. The
+  groups. Generated group labels are lowercase when every changed path is
+  lowercase and otherwise start with an uppercase letter. Each view keeps its
+  own scroll position and per-file fold state. The
   first file with patch text starts unfolded while every other file starts folded.
   The close control and Escape return to the exact queue state and opening
   control. Each comment form belongs to a path, line, old or new side, and the
