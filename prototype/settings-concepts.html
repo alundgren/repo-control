@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Repo Control settings concepts</title>
+    <style>
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Sans"; font-style:normal; font-weight:600; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:400; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
+      @font-face { font-family:"IBM Plex Mono"; font-style:normal; font-weight:500; font-display:swap; src:url("../src/web/assets/fonts/IBMPlexMono-Medium.woff2") format("woff2"); }
+
+      :root {
+        --bg:#f2eade;
+        --surface:#eadfcd;
+        --raised:#e0d2bd;
+        --line:#c1af9a;
+        --field:#f9f6f0;
+        --text:#604939;
+        --muted:#66574d;
+        --accent:#784f26;
+        --link:#3d5d71;
+        --ok:#3d6034;
+        --warn:#7e5220;
+        --danger:#8f3a2d;
+        --sans:"IBM Plex Sans", Aptos, "Segoe UI", sans-serif;
+        --mono:"IBM Plex Mono", Consolas, monospace;
+        font-synthesis:none;
+      }
+
+      * { box-sizing:border-box; }
+      html, body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font:400 16px/1.55 var(--sans); }
+      button, input { font:inherit; }
+      button { color:inherit; }
+      button:focus-visible, input:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+      [hidden] { display:none !important; }
+
+      .deck { min-height:100vh; }
+      .slide {
+        display:none;
+        min-height:100vh;
+        padding:clamp(24px, 4vw, 58px) clamp(22px, 5vw, 76px) 92px;
+      }
+      .slide.active { display:block; }
+      .slide-center.active { display:grid; align-content:center; }
+      .slide-inner { width:min(1420px, 100%); margin:0 auto; }
+      .eyebrow { margin:0 0 10px; color:var(--accent); font:500 11px/1.4 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+      h1, h2, h3, p { margin-top:0; }
+      h1 { max-width:15ch; margin-bottom:24px; font-size:clamp(42px, 7.5vw, 96px); font-weight:600; line-height:.98; letter-spacing:-.035em; }
+      h2 { max-width:22ch; margin-bottom:14px; font-size:clamp(32px, 4.4vw, 62px); font-weight:600; line-height:1.02; letter-spacing:-.025em; }
+      h3 { margin-bottom:8px; font-size:18px; font-weight:600; line-height:1.25; }
+      .lede { max-width:66ch; margin-bottom:34px; color:var(--muted); font-size:clamp(17px, 1.7vw, 22px); }
+      .small { color:var(--muted); font-size:13.5px; }
+      .mono { font-family:var(--mono); }
+      .rule { width:84px; height:5px; margin-bottom:30px; border-radius:99px; background:var(--accent); }
+      .cover-meta { display:flex; flex-wrap:wrap; gap:10px 28px; color:var(--muted); }
+      .cover-meta span { font:500 12px/1.4 var(--mono); letter-spacing:.05em; text-transform:uppercase; }
+
+      .principles { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:16px; background:var(--line); }
+      .principle { min-height:165px; padding:26px; background:var(--field); }
+      .principle .num { display:block; margin-bottom:24px; color:var(--accent); font:500 11px/1 var(--mono); }
+      .principle p { max-width:48ch; margin:0; color:var(--muted); }
+
+      .concept-head { display:grid; grid-template-columns:minmax(0, 1fr) minmax(320px, .75fr); gap:40px; align-items:end; margin-bottom:25px; }
+      .concept-head h2 { margin-bottom:0; }
+      .concept-summary { margin:0; color:var(--muted); font-size:18px; }
+      .concept-number { color:var(--accent); }
+      .mock-pair { display:grid; grid-template-columns:minmax(720px, 1fr) 280px; gap:22px; align-items:start; }
+      .mock-label { display:flex; justify-content:space-between; margin:0 0 8px; color:var(--muted); font:500 11px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+      .frame { overflow:hidden; border:1px solid var(--line); border-radius:16px; background:var(--field); box-shadow:0 24px 60px rgba(96,73,57,.10); }
+      .frame.desktop { aspect-ratio:16 / 9; }
+      .frame.phone { aspect-ratio:9 / 17.4; border-radius:24px; }
+      .screen { width:100%; height:100%; background:var(--bg); }
+
+      .app { display:grid; grid-template-columns:172px minmax(0, 1fr); height:100%; font-size:11px; line-height:1.35; }
+      .app-side { display:flex; min-height:0; flex-direction:column; padding:18px 14px 13px; border-right:1px solid var(--line); }
+      .app-brand { display:flex; align-items:center; gap:7px; margin:0 0 22px; font-size:12px; font-weight:600; }
+      .app-mark { display:grid; width:20px; height:20px; place-items:center; border-radius:6px; background:var(--accent); color:var(--field); font-size:11px; }
+      .app-nav { display:grid; gap:2px; }
+      .app-nav + .app-nav { margin-top:15px; }
+      .app-nav-label { margin:0 0 4px 7px; color:var(--muted); font:500 7px/1.4 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+      .app-nav-row { display:flex; justify-content:space-between; padding:6px 7px; border-radius:6px; }
+      .app-nav-row.current { background:var(--raised); font-weight:600; }
+      .app-side-bottom { margin-top:auto; padding-top:10px; border-top:1px solid var(--line); }
+      .settings-entry { display:flex; align-items:center; gap:7px; width:100%; padding:7px; border:0; border-radius:6px; background:transparent; text-align:left; }
+      .settings-entry.current { background:var(--raised); font-weight:600; }
+      .gear { font-size:13px; line-height:1; }
+      .app-main { min-width:0; padding:26px 30px; overflow:hidden; }
+      .app-top { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+      .app-title { margin:0 0 3px; font-size:25px; font-weight:600; line-height:1.05; letter-spacing:-.02em; }
+      .app-note { margin:0; color:var(--muted); }
+      .app-status { color:var(--muted); font-size:9px; white-space:nowrap; }
+      .app-status::before { content:""; display:inline-block; width:5px; height:5px; margin:0 5px 1px 0; border-radius:50%; background:var(--ok); }
+      .app-status.pending::before { background:var(--warn); }
+      .app-status.error { color:var(--danger); }
+      .app-status.error::before { background:var(--danger); }
+      .settings-wrap { max-width:720px; margin-top:22px; }
+      .settings-section { padding:19px 0; border-top:1px solid var(--line); }
+      .settings-section:first-child { border-top:0; }
+      .section-title { margin:0 0 3px; font-size:14px; font-weight:600; }
+      .section-copy { margin:0 0 12px; color:var(--muted); font-size:10px; }
+      .repo-list { border-top:1px solid var(--line); }
+      .repo-row { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:12px; align-items:center; min-height:46px; border-bottom:1px solid var(--line); }
+      .repo-name { display:block; font:500 10px/1.35 var(--mono); }
+      .repo-meta { display:block; margin-top:2px; color:var(--muted); font-size:9px; }
+      .switch { position:relative; width:30px; height:17px; border:1px solid var(--line); border-radius:99px; background:var(--raised); }
+      .switch::after { content:""; position:absolute; top:2px; left:2px; width:11px; height:11px; border-radius:50%; background:var(--muted); }
+      .switch.on { background:var(--ok); border-color:var(--ok); }
+      .switch.on::after { left:15px; background:var(--field); }
+      .check { display:grid; width:18px; height:18px; place-items:center; border:1px solid var(--line); border-radius:5px; background:var(--field); color:transparent; font-size:11px; }
+      .check.on { border-color:var(--accent); background:var(--accent); color:var(--field); }
+      .button { display:inline-flex; align-items:center; justify-content:center; min-height:29px; padding:5px 10px; border:1px solid var(--line); border-radius:7px; background:var(--field); color:var(--link); font-weight:500; }
+      .button.primary { border-color:var(--accent); background:var(--accent); color:var(--field); }
+      .button.danger { color:var(--danger); }
+      .text-button { padding:0; border:0; background:transparent; color:var(--link); text-decoration:underline; }
+      .save-note { min-height:16px; margin:9px 0 0; color:var(--muted); font-size:9px; }
+      .save-note.error { color:var(--danger); }
+      .inline-alert { margin:12px 0 0; padding:8px 10px; border-left:3px solid var(--warn); background:var(--surface); color:var(--muted); font-size:9px; }
+      .inline-alert.error { border-color:var(--danger); color:var(--danger); }
+      .empty-panel { display:grid; min-height:190px; place-items:center; border-top:1px solid var(--line); text-align:center; }
+      .empty-panel p { max-width:38ch; margin:5px auto 12px; color:var(--muted); }
+
+      .app.scalable { grid-template-columns:158px 145px minmax(0, 1fr); }
+      .settings-nav { padding:26px 13px; border-right:1px solid var(--line); background:var(--surface); }
+      .settings-nav-title { margin:0 0 13px 7px; font-weight:600; }
+      .settings-nav-row { display:block; padding:6px 7px; border-radius:6px; color:var(--muted); }
+      .settings-nav-row.current { background:var(--raised); color:var(--text); font-weight:600; }
+      .settings-nav-rule { height:1px; margin:12px 7px; background:var(--line); }
+      .future-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .soon { color:var(--muted); font:500 7px/1.2 var(--mono); letter-spacing:.05em; text-transform:uppercase; }
+      .change-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:13px; padding:9px 11px; border-radius:9px; background:var(--raised); }
+      .change-bar p { margin:0; font-size:9px; }
+      .change-actions { display:flex; gap:6px; }
+
+      .app.spotlight { grid-template-columns:172px minmax(0, 1fr) 220px; }
+      .spot-main { min-width:0; padding:26px 24px; }
+      .spot-search { display:flex; gap:8px; align-items:center; margin:16px 0 13px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; background:var(--field); color:var(--muted); font-size:11px; }
+      .spot-search b { color:var(--text); font-weight:400; }
+      .result { display:grid; grid-template-columns:28px minmax(0,1fr) auto; gap:10px; align-items:center; padding:10px 3px; border-top:1px solid var(--line); }
+      .result-icon { display:grid; width:26px; height:26px; place-items:center; border-radius:7px; background:var(--raised); }
+      .result p { margin:0; }
+      .result-meta { color:var(--muted); font-size:9px; }
+      .impact { padding:26px 17px; border-left:1px solid var(--line); background:var(--surface); }
+      .impact-title { margin-bottom:13px; font:500 8px/1.4 var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+      .impact-line { display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-top:1px solid var(--line); }
+      .impact-line strong { font:500 10px/1.4 var(--mono); }
+      .impact-line .down { color:var(--warn); }
+      .impact-foot { margin-top:14px; color:var(--muted); font-size:9px; }
+      .command-change { margin-top:12px; padding:12px; border-radius:10px; background:var(--raised); }
+      .command-change p { margin:0; }
+      .command-change .sentence { font-size:11px; }
+      .command-change .sentence b { color:var(--accent); font-weight:600; }
+      .command-change .actions { display:flex; gap:6px; margin-top:10px; }
+
+      .phone .app { display:flex; flex-direction:column; font-size:10px; }
+      .phone .app-side { display:block; padding:13px 13px 10px; border:0; border-bottom:1px solid var(--line); }
+      .phone .app-brand { margin:0; }
+      .phone .app-nav { display:none; }
+      .phone .app-side-bottom { position:absolute; top:11px; right:10px; margin:0; padding:0; border:0; }
+      .phone .settings-entry { width:auto; padding:5px; }
+      .phone .settings-entry span:last-child { display:none; }
+      .phone .app-main, .phone .spot-main { flex:1; padding:18px 15px; overflow:hidden; }
+      .phone .app-title { font-size:21px; }
+      .phone .app-top { display:block; }
+      .phone .app-status { display:block; margin-top:6px; }
+      .phone .settings-wrap { margin-top:16px; }
+      .phone .repo-row { min-height:43px; }
+      .phone .app.scalable, .phone .app.spotlight { display:flex; }
+      .phone .settings-nav, .phone .impact { border:0; border-bottom:1px solid var(--line); padding:10px 15px; background:var(--surface); }
+      .phone .settings-nav-title, .phone .settings-nav-rule, .phone .settings-nav-row:not(.current) { display:none; }
+      .phone .settings-nav-row.current { display:flex; align-items:center; justify-content:space-between; padding:0; background:transparent; }
+      .phone .settings-nav-row.current::after { content:"Change section"; color:var(--link); font-weight:400; text-decoration:underline; }
+      .phone .change-bar { display:block; }
+      .phone .change-actions { margin-top:8px; }
+      .phone .spot-search { margin-top:14px; }
+      .phone .result { grid-template-columns:25px minmax(0,1fr); }
+      .phone .result .button { grid-column:2; justify-self:start; }
+      .phone .impact { order:3; }
+      .phone .impact-line:nth-of-type(n+4), .phone .impact-foot { display:none; }
+      .phone .impact-title { margin-bottom:5px; }
+
+      .state-grid { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:14px; }
+      .state-card { min-height:205px; padding:18px; border:1px solid var(--line); border-radius:13px; background:var(--field); }
+      .state-card.wide { grid-column:span 2; }
+      .state-index { color:var(--accent); font:500 10px/1.4 var(--mono); }
+      .state-card h3 { margin-top:17px; }
+      .state-ui { margin-top:15px; padding-top:12px; border-top:1px solid var(--line); font-size:12px; }
+      .state-ui p { margin:0 0 7px; }
+      .state-ui .notice { padding:8px 9px; border-left:3px solid var(--warn); background:var(--surface); color:var(--muted); }
+      .state-ui .notice.error { border-color:var(--danger); color:var(--danger); }
+      .mini-repo { display:flex; justify-content:space-between; gap:10px; padding:6px 0; border-top:1px solid var(--line); font:400 11px/1.4 var(--mono); }
+      .mini-repo button { padding:0; border:0; background:none; color:var(--link); text-decoration:underline; }
+
+      .effects { display:grid; grid-template-columns:minmax(0, .9fr) 64px minmax(0, 1.1fr); gap:18px; align-items:center; }
+      .effect-screen { overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--field); }
+      .effect-head { display:flex; justify-content:space-between; padding:18px; background:var(--surface); }
+      .queue-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:10px; padding:13px 18px; border-top:1px solid var(--line); }
+      .queue-row .id, .queue-row .age { color:var(--muted); font:400 11px/1.4 var(--mono); }
+      .queue-row strong { display:block; font-size:13px; }
+      .queue-row span { color:var(--muted); font-size:11px; }
+      .effects-arrow { color:var(--accent); font-size:42px; text-align:center; }
+      .effect-list { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+      .effect { padding:14px; background:var(--bg); }
+      .effect dt { color:var(--accent); font:500 9px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+      .effect dd { margin:5px 0 0; font-size:12px; }
+
+      .comparison { width:100%; border-collapse:collapse; border-spacing:0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--field); }
+      .comparison th, .comparison td { padding:15px 17px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+      .comparison th { background:var(--surface); font-weight:600; }
+      .comparison th:first-child { width:22%; }
+      .comparison td { font-size:14px; }
+      .comparison tr:last-child td { border-bottom:0; }
+      .comparison .recommended { background:color-mix(in srgb, var(--raised) 55%, var(--field)); }
+      .pick { display:inline-block; margin-top:4px; padding:2px 7px; border-radius:99px; background:var(--ok); color:var(--field); font:500 9px/1.4 var(--mono); letter-spacing:.05em; text-transform:uppercase; }
+
+      .decision-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:1px; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--line); }
+      .decision { padding:19px 21px; background:var(--field); }
+      .decision dt { font:500 10px/1.4 var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+      .decision dd { margin:6px 0 0; color:var(--muted); }
+
+      .deck-nav { position:fixed; z-index:20; right:20px; bottom:18px; left:20px; display:flex; align-items:center; justify-content:space-between; pointer-events:none; }
+      .nav-group { display:flex; align-items:center; gap:8px; pointer-events:auto; }
+      .nav-button { display:grid; width:40px; height:40px; place-items:center; border:1px solid var(--line); border-radius:10px; background:rgba(249,246,240,.94); cursor:pointer; }
+      .nav-button:disabled { opacity:.38; cursor:default; }
+      .slide-count { min-width:64px; color:var(--muted); font:500 11px/1.4 var(--mono); text-align:center; }
+      .slide-menu { display:flex; gap:5px; padding:7px; border:1px solid var(--line); border-radius:10px; background:rgba(249,246,240,.94); pointer-events:auto; }
+      .slide-dot { width:8px; height:8px; padding:0; border:0; border-radius:50%; background:var(--line); cursor:pointer; }
+      .slide-dot.active { background:var(--accent); }
+      .screen-note { position:fixed; right:20px; top:18px; color:var(--muted); font:400 10px/1.4 var(--mono); }
+
+      @media (max-width:1000px) {
+        .mock-pair { grid-template-columns:1fr; }
+        .mock-pair > div:last-child { display:none; }
+        .frame.desktop { aspect-ratio:auto; min-height:570px; }
+        .state-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        .effects { grid-template-columns:1fr; }
+        .effects-arrow { transform:rotate(90deg); }
+        .concept-head { grid-template-columns:1fr; gap:10px; }
+      }
+      @media (max-width:680px) {
+        .slide { padding:26px 18px 84px; }
+        .principles, .decision-grid, .state-grid { grid-template-columns:1fr; }
+        .state-card.wide { grid-column:auto; }
+        .comparison { display:block; overflow-x:auto; }
+        .slide-menu { display:none; }
+        .screen-note { display:none; }
+        .frame.desktop { min-height:520px; }
+        .app { grid-template-columns:128px minmax(0,1fr); }
+        .app-side { padding:14px 9px; }
+        .app-main { padding:20px 16px; }
+        .app.scalable { grid-template-columns:120px 110px minmax(0,1fr); }
+        .app.spotlight { grid-template-columns:120px minmax(0,1fr); }
+        .app.spotlight .impact { display:none; }
+        .effect-list { grid-template-columns:1fr; }
+      }
+      @media (prefers-reduced-motion:no-preference) {
+        .slide.active .slide-inner { animation:enter .28s ease-out; }
+        @keyframes enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="deck" aria-live="polite">
+      <section class="slide slide-center active" data-title="Cover">
+        <div class="slide-inner">
+          <p class="eyebrow">Repo Control · issue 89</p>
+          <div class="rule"></div>
+          <h1>Where settings should live</h1>
+          <p class="lede">Three directions for ignoring repositories today without boxing in label-to-queue rules tomorrow.</p>
+          <div class="cover-meta"><span>Desktop + narrow</span><span>Complete ignore and restore flow</span><span>September 2026</span></div>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="Design target">
+        <div class="slide-inner">
+          <p class="eyebrow">The design target</p>
+          <h2>This setting changes the work list, not just a preference.</h2>
+          <p class="lede">A repository disappears from queues, counts, search, selection, and sync scope. The person still needs to find it and bring it back.</p>
+          <div class="principles">
+            <article class="principle"><span class="num">01</span><h3>Visible entry point</h3><p>Settings stays at the bottom of the work navigation on laptop and narrow screens.</p></article>
+            <article class="principle"><span class="num">02</span><h3>Consequences before commitment</h3><p>The interface names the rows and counts that will change before it removes anything.</p></article>
+            <article class="principle"><span class="num">03</span><h3>Ignored never means lost</h3><p>Ignored repositories remain in settings, including ones with no currently loaded item.</p></article>
+            <article class="principle"><span class="num">04</span><h3>Failures keep the old queue</h3><p>A failed write leaves the previous configuration in force and gives the person a direct retry.</p></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Minimal">
+        <div class="slide-inner">
+          <div class="concept-head">
+            <div><p class="eyebrow">Option <span class="concept-number">01</span> · Minimal</p><h2>One page. One switch per repository.</h2></div>
+            <p class="concept-summary">Fast to build and easy to understand. Each switch applies immediately, with an inline saving state and an undo notice after success.</p>
+          </div>
+          <div class="mock-pair">
+            <div><p class="mock-label"><span>Laptop</span><span>Immediate apply</span></p><div class="frame desktop"><div class="screen" data-mock="minimal" data-size="desktop"></div></div></div>
+            <div><p class="mock-label"><span>Narrow</span><span>Same page</span></p><div class="frame phone"><div class="screen" data-mock="minimal" data-size="phone"></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Scalable">
+        <div class="slide-inner">
+          <div class="concept-head">
+            <div><p class="eyebrow">Option <span class="concept-number">02</span> · Scalable</p><h2>A settings area with room to grow.</h2></div>
+            <p class="concept-summary">A section navigator separates repository scope from future workflow rules. Changes stay staged until one explicit apply.</p>
+          </div>
+          <div class="mock-pair">
+            <div><p class="mock-label"><span>Laptop</span><span>Section navigation</span></p><div class="frame desktop"><div class="screen" data-mock="scalable" data-size="desktop"></div></div></div>
+            <div><p class="mock-label"><span>Narrow</span><span>Section picker</span></p><div class="frame phone"><div class="screen" data-mock="scalable" data-size="phone"></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide" data-title="Search-first">
+        <div class="slide-inner">
+          <div class="concept-head">
+            <div><p class="eyebrow">Option <span class="concept-number">03</span> · Search-first</p><h2>Ask for a change. Preview its effect.</h2></div>
+            <p class="concept-summary">Borrowing the best part of command-first apps, settings opens as search. A staged sentence and impact preview replace category hunting.</p>
+          </div>
+          <div class="mock-pair">
+            <div><p class="mock-label"><span>Laptop</span><span>Search + staged change</span></p><div class="frame desktop"><div class="screen" data-mock="spotlight" data-size="desktop"></div></div></div>
+            <div><p class="mock-label"><span>Narrow</span><span>Impact below action</span></p><div class="frame phone"><div class="screen" data-mock="spotlight" data-size="phone"></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="All states">
+        <div class="slide-inner">
+          <p class="eyebrow">The awkward states</p>
+          <h2>These belong in the design, not in a later error pass.</h2>
+          <div class="state-grid">
+            <article class="state-card"><span class="state-index">01 · First use</span><h3>Nothing ignored yet</h3><div class="state-ui"><p>All loaded repositories contribute work.</p><button class="button">Choose repositories</button></div></article>
+            <article class="state-card"><span class="state-index">02 · No choices</span><h3>No loaded repositories</h3><div class="state-ui"><p class="notice">Run account sync to load repositories with active work.</p><button class="text-button">Sync account</button></div></article>
+            <article class="state-card"><span class="state-index">03 · All ignored</span><h3>The queue is intentionally empty</h3><div class="state-ui"><p class="notice">All 3 loaded repositories are ignored.</p><button class="button">Restore a repository</button></div></article>
+            <article class="state-card"><span class="state-index">04 · Delayed save</span><h3>Old scope stays active</h3><div class="state-ui"><p><span class="app-status pending">Applying changes…</span></p><p class="small">Keep this page open. Current queues remain unchanged.</p></div></article>
+            <article class="state-card wide"><span class="state-index">05 · Failed save</span><h3>Do not leave the queue in doubt</h3><div class="state-ui"><p class="notice error">Could not save repository settings. No queues changed.</p><button class="button">Try again</button> <button class="text-button">Discard changes</button></div></article>
+            <article class="state-card wide"><span class="state-index">06 · No active item</span><h3>Keep remembered repositories restorable</h3><div class="state-ui"><div class="mini-repo"><span>field-journal</span><button>Restore</button></div><p class="small">No loaded work. Last seen 18 days ago.</p></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="Queue effects">
+        <div class="slide-inner">
+          <p class="eyebrow">After a successful apply</p>
+          <h2>The queue explains what changed.</h2>
+          <div class="effects">
+            <div class="effect-screen">
+              <div class="effect-head"><strong>Ready for agent <span class="mono">5</span></strong><span class="small">All 3 repositories</span></div>
+              <div class="queue-row"><span class="id">#31</span><div><strong>Add a safe cleanup command</strong><span>orbit-tools</span></div><span class="age">9d</span></div>
+              <div class="queue-row"><span class="id">#42</span><div><strong>Build the first import screen</strong><span>trail-notes</span></div><span class="age">1d</span></div>
+              <div class="queue-row"><span class="id">#18</span><div><strong>Record the release checksum</strong><span>orbit-tools</span></div><span class="age">2h</span></div>
+            </div>
+            <div class="effects-arrow" aria-hidden="true">→</div>
+            <div>
+              <div class="effect-screen">
+                <div class="effect-head"><strong>Ready for agent <span class="mono">2</span></strong><span class="small">2 included · 1 ignored</span></div>
+                <div class="inline-alert">orbit-tools is now ignored. 3 rows were removed. <button class="text-button">Undo</button></div>
+                <div class="queue-row"><span class="id">#42</span><div><strong>Build the first import screen</strong><span>trail-notes</span></div><span class="age">1d</span></div>
+                <div class="empty-panel"><div><strong>Selected item was removed</strong><p>Choose another item from the updated queue.</p></div></div>
+              </div>
+              <dl class="effect-list">
+                <div class="effect"><dt>Rows + counts</dt><dd>Excluded immediately after success.</dd></div>
+                <div class="effect"><dt>Search</dt><dd>Ignored work returns no results.</dd></div>
+                <div class="effect"><dt>Selection</dt><dd>Clears with a named notice.</dd></div>
+                <div class="effect"><dt>Sync scope</dt><dd>Sync refreshes every loaded repository. Ignored work stays hidden.</dd></div>
+                <div class="effect"><dt>Focused refresh</dt><dd>Unavailable once its repository is ignored.</dd></div>
+                <div class="effect"><dt>Empty queue</dt><dd>Links back to repository settings.</dd></div>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="Comparison">
+        <div class="slide-inner">
+          <p class="eyebrow">Tradeoffs</p>
+          <h2>The scalable option is the sensible default.</h2>
+          <p class="lede">It gives the next known setting a home, keeps saving behavior predictable, and asks for less invention than the search-first direction.</p>
+          <table class="comparison">
+            <thead><tr><th></th><th>01 · Minimal</th><th class="recommended">02 · Scalable<br><span class="pick">Recommended</span></th><th>03 · Search-first</th></tr></thead>
+            <tbody>
+              <tr><td>First-use clarity</td><td>Excellent</td><td class="recommended">Very good</td><td>Good, with suggested actions</td></tr>
+              <tr><td>Many future settings</td><td>Weak after two sections</td><td class="recommended">Strong and familiar</td><td>Strong when search terms are good</td></tr>
+              <tr><td>Save behavior</td><td>Immediate per switch</td><td class="recommended">One explicit apply</td><td>Apply a staged change</td></tr>
+              <tr><td>Narrow screens</td><td>Excellent</td><td class="recommended">Good section picker</td><td>Good, but more scrolling</td></tr>
+              <tr><td>Implementation cost</td><td>Lowest</td><td class="recommended">Moderate</td><td>Highest</td></tr>
+              <tr><td>Main risk</td><td>Outgrows the page</td><td class="recommended">More navigation than one setting needs</td><td>Search can hide what exists</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="Decision record">
+        <div class="slide-inner">
+          <p class="eyebrow">If option 02 is accepted</p>
+          <h2>The decision comment can be exact.</h2>
+          <dl class="decision-grid">
+            <div class="decision"><dt>Entry point</dt><dd>Settings is the final row in the left navigation and the compact header control on narrow screens.</dd></div>
+            <div class="decision"><dt>Navigation model</dt><dd>A settings section list on laptop becomes a section picker on narrow screens.</dd></div>
+            <div class="decision"><dt>Save behavior</dt><dd>Changes remain local to the form until “Apply changes” succeeds. Discard returns to saved values.</dd></div>
+            <div class="decision"><dt>Persistence owner</dt><dd>The server stores ignored repository identifiers with instance configuration in SQLite.</dd></div>
+            <div class="decision"><dt>Sync + refresh</dt><dd>Account sync keeps ignored work current in the cache. A focused refresh cannot start for ignored work.</dd></div>
+            <div class="decision"><dt>Recovery</dt><dd>A failed save keeps the old queue and staged edits. Retry and discard remain available.</dd></div>
+            <div class="decision"><dt>Queue behavior</dt><dd>Successful apply recomputes rows, counts, search, selection, scope text, and empty states together.</dd></div>
+            <div class="decision"><dt>Next setting</dt><dd>“Queue rules” can hold label-to-queue mapping without changing the settings navigation.</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="slide slide-center" data-title="Next step">
+        <div class="slide-inner">
+          <p class="eyebrow">Next</p>
+          <div class="rule"></div>
+          <h1>Pick the interaction model.</h1>
+          <p class="lede">Then turn the accepted direction into two implementation issues: persistence and sync behavior first, settings UI and queue reconciliation second.</p>
+          <div class="cover-meta"><span>Suggested choice · option 02</span><span>Issue remains needs-refinement until split</span></div>
+        </div>
+      </section>
+    </main>
+
+    <p class="screen-note">← → to navigate · Home / End to jump</p>
+    <nav class="deck-nav" aria-label="Presentation controls">
+      <div class="slide-menu" id="slide-menu" aria-label="Slides"></div>
+      <div class="nav-group">
+        <button class="nav-button" id="previous" aria-label="Previous slide">←</button>
+        <span class="slide-count" id="slide-count"></span>
+        <button class="nav-button" id="next" aria-label="Next slide">→</button>
+      </div>
+    </nav>
+
+    <script>
+      const navRows = `
+        <div class="app-nav"><span class="app-nav-row"><span>Now</span><span>9</span></span><span class="app-nav-row"><span>Pull requests</span><span>2</span></span></div>
+        <div class="app-nav"><p class="app-nav-label">Issues</p><span class="app-nav-row"><span>Ready for agent</span><span>3</span></span><span class="app-nav-row"><span>Needs me</span><span>2</span></span><span class="app-nav-row"><span>Triage</span><span>2</span></span><span class="app-nav-row"><span>Epics</span><span>1</span></span></div>`;
+
+      function side() {
+        return `<aside class="app-side"><p class="app-brand"><span class="app-mark">↗</span> Repo Control</p>${navRows}<div class="app-side-bottom"><button class="settings-entry current"><span class="gear">⚙</span><span>Settings</span></button></div></aside>`;
+      }
+
+      function repos(control = "switch") {
+        const marker = on => control === "switch" ? `<span class="switch ${on ? "on" : ""}" aria-hidden="true"></span>` : `<span class="check ${on ? "on" : ""}" aria-hidden="true">✓</span>`;
+        return `<div class="repo-list">
+          <div class="repo-row"><span><span class="repo-name">orbit-tools</span><span class="repo-meta">6 active items</span></span>${marker(false)}</div>
+          <div class="repo-row"><span><span class="repo-name">trail-notes</span><span class="repo-meta">3 active items</span></span>${marker(true)}</div>
+          <div class="repo-row"><span><span class="repo-name">field-journal</span><span class="repo-meta">No loaded work · last seen 18 days ago</span></span>${marker(true)}</div>
+        </div>`;
+      }
+
+      function minimal() {
+        return `<div class="app minimal">${side()}<main class="app-main"><div class="app-top"><div><h3 class="app-title">Settings</h3><p class="app-note">Choose which repositories contribute work.</p></div><span class="app-status">Saved</span></div><div class="settings-wrap"><section class="settings-section"><h3 class="section-title">Included repositories</h3><p class="section-copy">Changes apply when you use a switch. Ignored work leaves queues and search.</p>${repos("switch")}<p class="save-note">orbit-tools was ignored. 6 items left the work queues. <button class="text-button">Undo</button></p></section><section class="settings-section"><h3 class="section-title">Queue rules</h3><p class="section-copy">Label-to-queue mapping can be added here later.</p><button class="button" disabled>Not available yet</button></section></div></main></div>`;
+      }
+
+      function scalable() {
+        return `<div class="app scalable">${side()}<nav class="settings-nav" aria-label="Settings sections"><p class="settings-nav-title">Settings</p><span class="settings-nav-row current">Repositories</span><span class="settings-nav-row future-row"><span>Queue rules</span><span class="soon">Later</span></span><div class="settings-nav-rule"></div><span class="settings-nav-row">About</span></nav><main class="app-main"><div class="app-top"><div><h3 class="app-title">Repositories</h3><p class="app-note">Choose which repositories contribute work.</p></div><span class="app-status pending">1 unsaved change</span></div><div class="settings-wrap"><section class="settings-section"><h3 class="section-title">Included in work queues</h3><p class="section-copy">Ignored repositories remain here and can be restored at any time.</p>${repos("check")}<div class="change-bar"><p><strong>Ignore orbit-tools</strong><br><span class="small">Removes 6 items and clears its selection.</span></p><div class="change-actions"><button class="button">Discard</button><button class="button primary">Apply changes</button></div></div></section></div></main></div>`;
+      }
+
+      function spotlight() {
+        return `<div class="app spotlight">${side()}<main class="spot-main"><div class="app-top"><div><h3 class="app-title">Settings</h3><p class="app-note">Search settings or choose a suggestion.</p></div></div><div class="spot-search"><span>⌕</span><b>ignore orbit</b><span>_</span></div><div class="result"><span class="result-icon">◎</span><p><strong>Repository visibility</strong><br><span class="result-meta">Show or hide a repository</span></p><button class="button">Open</button></div><div class="result"><span class="result-icon">↗</span><p><strong>orbit-tools</strong><br><span class="result-meta">6 loaded items · currently shown</span></p><button class="button">Hide</button></div><div class="command-change"><p class="eyebrow">Staged change</p><p class="sentence">Hide <b>orbit-tools</b> from queues and search.</p><div class="actions"><button class="button">Cancel</button><button class="button primary">Apply change</button></div></div></main><aside class="impact"><p class="impact-title">Queue impact</p><div class="impact-line"><span>Now</span><strong class="down">9 → 5</strong></div><div class="impact-line"><span>Ready</span><strong class="down">3 → 1</strong></div><div class="impact-line"><span>Needs me</span><strong class="down">2 → 1</strong></div><div class="impact-line"><span>Triage</span><strong class="down">2 → 1</strong></div><div class="impact-line"><span>Epics</span><strong class="down">1 → 0</strong></div><p class="impact-foot">The selected orbit-tools issue will clear. Account sync keeps hidden work current.</p></aside></div>`;
+      }
+
+      document.querySelectorAll("[data-mock]").forEach(target => {
+        target.innerHTML = target.dataset.mock === "minimal" ? minimal() : target.dataset.mock === "scalable" ? scalable() : spotlight();
+      });
+
+      const slides = [...document.querySelectorAll(".slide")];
+      const menu = document.querySelector("#slide-menu");
+      let current = Math.max(0, Math.min(slides.length - 1, Number(location.hash.slice(1)) - 1 || 0));
+
+      slides.forEach((slide, index) => {
+        const dot = document.createElement("button");
+        dot.className = "slide-dot";
+        dot.setAttribute("aria-label", `Slide ${index + 1}: ${slide.dataset.title}`);
+        dot.addEventListener("click", () => show(index));
+        menu.append(dot);
+      });
+
+      function show(index) {
+        current = Math.max(0, Math.min(slides.length - 1, index));
+        slides.forEach((slide, slideIndex) => slide.classList.toggle("active", slideIndex === current));
+        [...menu.children].forEach((dot, dotIndex) => dot.classList.toggle("active", dotIndex === current));
+        document.querySelector("#slide-count").textContent = `${current + 1} / ${slides.length}`;
+        document.querySelector("#previous").disabled = current === 0;
+        document.querySelector("#next").disabled = current === slides.length - 1;
+        history.replaceState(null, "", `#${current + 1}`);
+        document.title = `${slides[current].dataset.title} · Repo Control settings concepts`;
+        window.scrollTo(0, 0);
+      }
+
+      document.querySelector("#previous").addEventListener("click", () => show(current - 1));
+      document.querySelector("#next").addEventListener("click", () => show(current + 1));
+      window.addEventListener("hashchange", () => show(Number(location.hash.slice(1)) - 1 || 0));
+      document.addEventListener("keydown", event => {
+        if (["ArrowRight", "PageDown", " "].includes(event.key)) { event.preventDefault(); show(current + 1); }
+        if (["ArrowLeft", "PageUp"].includes(event.key)) { event.preventDefault(); show(current - 1); }
+        if (event.key === "Home") { event.preventDefault(); show(0); }
+        if (event.key === "End") { event.preventDefault(); show(slides.length - 1); }
+      });
+      show(current);
+    </script>
+  </body>
+</html>
