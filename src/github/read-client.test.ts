@@ -50,7 +50,7 @@ describe("GitHub work reads", () => {
         expect.objectContaining({ path: "src/after-budget.ts", patch: { status: "unavailable", reason: "patch_budget" } }),
       ],
       groups: [
-        { name: "Assets", fileIndexes: [2] },
+        { name: "assets", fileIndexes: [2] },
         { name: "src", fileIndexes: [0, 1, 3, 4, 5] },
       ],
       rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
