@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile } from "../github/read-client.js";
 import type { PullRequestReviewEvent } from "../github/write-client.js";
+import type { MergeReadiness } from "../merge/index.js";
 import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
-import { getOverview, getPullRequestDiff, refreshItem, submitPullRequestReview, syncOverview, type LiveItemEvent, type PullRequestDiffResponse } from "./api.js";
+import { getOverview, getPullRequestDiff, getPullRequestMergeReadiness, mergePullRequest, refreshItem, submitPullRequestReview, syncOverview, type LiveItemEvent, type PullRequestDiffResponse } from "./api.js";
 import { DraftCommentStore, getSessionStorage, maxDraftBodyBytes, type DraftComment, type DraftSide } from "./draft-comments.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
@@ -15,6 +16,10 @@ type DiffState =
   | { status: "loaded"; data: Exclude<PullRequestDiffResponse, { status: "unavailable" }> }
   | { status: "failed" };
 type DiffView = "grouped" | "files";
+type MergePanelState = Exclude<MergeReadiness, { status: "merged" }>
+  | { status: "merged"; refreshFailed?: boolean; mergedHere?: boolean }
+  | { status: "merging"; headSha: string; sourceBranch: string }
+  | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous"; refreshFailed?: boolean };
 
 type ViewDetails = {
   title: string;
@@ -654,6 +659,9 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
   const [reviewSummary, setReviewSummary] = useState("");
   const [reviewEvent, setReviewEvent] = useState<PullRequestReviewEvent>("COMMENT");
   const [submissionState, setSubmissionState] = useState<"idle" | "submitting" | "submitted" | "submitted_refresh_failed" | "submitted_cleanup_failed" | "submitted_cleanup_and_refresh_failed" | "head_changed" | "verification_failed" | "rejected" | "unknown" | "failed">("idle");
+  const [mergeState, setMergeState] = useState<MergePanelState>({ status: "checking" });
+  const [mergeCheckBusy, setMergeCheckBusy] = useState(false);
+  const mergeCheckRequestRef = useRef(0);
   const [newDraft, setNewDraft] = useState<{ path: string; line: number; side: DraftSide } | null>(null);
   const draftIdRef = useRef(0);
   const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
@@ -681,6 +689,26 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
     scrollPositions.current = { grouped: 0, files: 0 };
     setDiffView("grouped");
   }, [state]);
+
+  useEffect(() => {
+    if (state.status !== "loaded" || !state.data.mergeEnabled) return;
+    void checkMergeReadiness();
+    return () => { mergeCheckRequestRef.current += 1; };
+  }, [item.id, state.status === "loaded" ? state.data.headSha : null]);
+
+  async function checkMergeReadiness() {
+    const requestId = mergeCheckRequestRef.current + 1;
+    mergeCheckRequestRef.current = requestId;
+    setMergeCheckBusy(true);
+    setMergeState({ status: "checking" });
+    const reviewedHeadSha = state.status === "loaded" ? state.data.headSha : null;
+    const readiness = await getPullRequestMergeReadiness(item.id);
+    if (mergeCheckRequestRef.current !== requestId) return;
+    setMergeState(readiness.status === "ready" && readiness.headSha !== reviewedHeadSha
+      ? { status: "failed", reason: "validation" }
+      : readiness);
+    setMergeCheckBusy(false);
+  }
 
   useLayoutEffect(() => {
     if (state.status === "loaded" && overlayRef.current) {
@@ -778,6 +806,26 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
     setSubmissionState("failed");
   }
 
+  async function confirmMerge() {
+    if (mergeState.status !== "ready") return;
+    const { sourceBranch } = mergeState;
+    const headSha = state.status === "loaded" ? state.data.headSha : null;
+    if (!headSha || mergeState.headSha !== headSha) {
+      setMergeState({ status: "failed", reason: "validation" });
+      return;
+    }
+    const confirmed = window.confirm(`Squash-merge PR${item.number} "${item.title}" from source branch ${sourceBranch}? This cannot be undone in Repo Control. Version one leaves the source branch in place.`);
+    if (!confirmed) return;
+    setMergeState({ status: "merging", headSha, sourceBranch });
+    const result = await mergePullRequest(item.id, headSha);
+    if (result.status === "merged") {
+      const refreshFailed = result.refresh.status === "failed" || result.refresh.status === "permission_denied";
+      setMergeState({ status: "merged", refreshFailed, mergedHere: !result.alreadyMerged });
+      return;
+    }
+    setMergeState(result);
+  }
+
   function moveToFile(event: ReactMouseEvent<HTMLAnchorElement>, index: number) {
     event.preventDefault();
     const overlay = overlayRef.current;
@@ -871,6 +919,7 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
               <ReviewSubmissionMessage itemUrl={item.url} state={submissionState} />
             </section>
           ) : null}
+          {state.data.mergeEnabled ? <MergePanel checkBusy={mergeCheckBusy} itemUrl={item.url} mergeState={mergeState} onCheck={() => void checkMergeReadiness()} onMerge={confirmMerge} /> : null}
           {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
             <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
             <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
@@ -946,6 +995,49 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
         </>
       ) : null}
     </div>
+  );
+}
+
+function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
+  checkBusy: boolean;
+  itemUrl: string;
+  mergeState: MergePanelState;
+  onCheck: () => void;
+  onMerge: () => void;
+}) {
+  const blockedMessages: Record<import("../merge/index.js").MergeBlockedReason, string> = {
+    draft: "This draft pull request cannot be merged.",
+    conflicts: "Resolve merge conflicts on GitHub before merging.",
+    failed_checks: "Required checks failed.",
+    missing_reviews: "Required reviews are missing.",
+    repository_rules: "Repository rules still block this merge.",
+    base_update_required: "The source branch must be updated with the base branch.",
+    merge_queue: "This repository requires its merge queue. Repo Control does not operate merge queues.",
+    squash_disabled: "This repository does not allow squash merging.",
+  };
+  let message: ReactNode;
+  if (mergeState.status === "checking") message = checkBusy ? "Checking current merge status…" : "GitHub is still calculating mergeability.";
+  else if (mergeState.status === "checks_pending") message = "Required checks are still running.";
+  else if (mergeState.status === "blocked") message = blockedMessages[mergeState.reason];
+  else if (mergeState.status === "not_permitted") message = "Merge is not enabled for this installation or the connected account cannot merge this pull request.";
+  else if (mergeState.status === "unavailable") message = <>GitHub merge status is unavailable. <a href={itemUrl} rel="noreferrer" target="_blank">Check on GitHub.</a></>;
+  else if (mergeState.status === "merging") message = "Merging with the reviewed head commit…";
+  else if (mergeState.status === "merged") message = mergeState.refreshFailed
+    ? "Merged. The queue refresh failed, so close this review and use Refresh this item."
+    : mergeState.mergedHere ? "Merged. The source branch was left in place." : "This pull request is already merged.";
+  else if (mergeState.status === "failed" && mergeState.reason === "permission") message = "GitHub denied permission to merge. Nothing was retried.";
+  else if (mergeState.status === "failed" && mergeState.reason === "policy") message = "GitHub rejected the merge under the repository policy. Nothing was retried.";
+  else if (mergeState.status === "failed" && mergeState.reason === "validation") message = "The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.";
+  else if (mergeState.status === "failed") message = <><strong>Merge outcome unknown.</strong> <a href={itemUrl} rel="noreferrer" target="_blank">Verify on GitHub before trying again.</a></>;
+  else message = "Ready to squash-merge the reviewed head commit.";
+
+  return (
+    <section aria-labelledby="merge-title" className="mergePanel">
+      <h2 id="merge-title">Merge pull request</h2>
+      <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"}>{message}</p>
+      {mergeState.status === "checking" && !checkBusy ? <button className="quietButton" onClick={onCheck} type="button">Check again</button> : null}
+      {mergeState.status === "ready" ? <button className="mergeButton" onClick={() => void onMerge()} type="button">Squash and merge</button> : null}
+    </section>
   );
 }
 

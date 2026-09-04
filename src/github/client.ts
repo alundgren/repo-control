@@ -26,6 +26,7 @@ import {
   type PullRequestDiffFile,
   type PullRequestDiffRead,
   type PullRequestHeadRead,
+  type PullRequestMergeFactsRead,
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
@@ -117,6 +118,14 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
         const base = pullRequestRestUrl(input);
         const pullRequest = await readRestJson(fetch, token, base);
         return { status: "read", headSha: parsePullRequestHead(pullRequest.payload), rateLimit: pullRequest.rateLimit };
+      } catch (error) {
+        return unavailableRead(error);
+      }
+    },
+    async readPullRequestMergeFacts({ pullRequestId }): Promise<PullRequestMergeFactsRead> {
+      try {
+        const data = await readWorkGraphQL(fetch, token, "PullRequestMergeFacts", PULL_REQUEST_MERGE_FACTS_QUERY, { id: pullRequestId });
+        return parsePullRequestMergeFacts(data);
       } catch (error) {
         return unavailableRead(error);
       }
@@ -370,6 +379,110 @@ const FOCUSED_ITEM_QUERY = `query FocusedWorkItem($id: ID!) {
   }
   rateLimit { cost remaining resetAt }
 }`;
+
+const PULL_REQUEST_MERGE_FACTS_QUERY = `query PullRequestMergeFacts($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on PullRequest {
+      headRefName
+      headRefOid
+      isDraft
+      merged
+      mergeable
+      mergeStateStatus
+      reviewDecision
+      isMergeQueueEnabled
+      repository { squashMergeAllowed viewerPermission }
+      baseRef {
+        branchProtectionRule {
+          requiresApprovingReviews
+          requiredApprovingReviewCount
+          requiresStatusChecks
+          requiresStrictStatusChecks
+          requiresConversationResolution
+        }
+      }
+      commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+    }
+  }
+  rateLimit { cost remaining resetAt }
+}`;
+
+function parsePullRequestMergeFacts(data: Record<string, unknown>): Exclude<PullRequestMergeFactsRead, { status: "unavailable" }> {
+  const node = data.node;
+  if (!isObject(node) || node.__typename !== "PullRequest") throw new WorkReadFailure("invalid_response");
+  if (!isString(node.headRefName) || !isString(node.headRefOid) || typeof node.isDraft !== "boolean" || typeof node.merged !== "boolean") {
+    throw new WorkReadFailure("invalid_response");
+  }
+  const mergeable = enumValue(node.mergeable, ["MERGEABLE", "CONFLICTING", "UNKNOWN"] as const);
+  const mergeStateStatus = enumValue(node.mergeStateStatus, ["BEHIND", "BLOCKED", "CLEAN", "DIRTY", "DRAFT", "HAS_HOOKS", "UNKNOWN", "UNSTABLE"] as const);
+  const reviewDecision = node.reviewDecision === null
+    ? null
+    : enumValue(node.reviewDecision, ["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"] as const);
+  if (typeof node.isMergeQueueEnabled !== "boolean" || !isObject(node.repository) || typeof node.repository.squashMergeAllowed !== "boolean") {
+    throw new WorkReadFailure("invalid_response");
+  }
+  const viewerPermission = node.repository.viewerPermission === null
+    ? null
+    : enumValue(node.repository.viewerPermission, ["ADMIN", "MAINTAIN", "READ", "TRIAGE", "WRITE"] as const);
+  const protection = parseMergeProtection(node.baseRef);
+  const checksState = parseLatestChecksState(node.commits);
+  return {
+    status: "read",
+    facts: {
+      headSha: node.headRefOid,
+      headRefName: node.headRefName,
+      isDraft: node.isDraft,
+      merged: node.merged,
+      mergeable,
+      mergeStateStatus,
+      reviewDecision,
+      isMergeQueueEnabled: node.isMergeQueueEnabled,
+      squashMergeAllowed: node.repository.squashMergeAllowed,
+      viewerPermission,
+      checksState,
+      protection,
+    },
+    rateLimit: parseRateLimit(data.rateLimit),
+  };
+}
+
+function parseMergeProtection(baseRef: unknown) {
+  if (!isObject(baseRef)) return null;
+  const rule = baseRef.branchProtectionRule;
+  if (rule === null) return null;
+  if (!isObject(rule)
+    || typeof rule.requiresApprovingReviews !== "boolean"
+    || (rule.requiredApprovingReviewCount !== null && !Number.isInteger(rule.requiredApprovingReviewCount))
+    || typeof rule.requiresStatusChecks !== "boolean"
+    || typeof rule.requiresStrictStatusChecks !== "boolean"
+    || typeof rule.requiresConversationResolution !== "boolean") {
+    throw new WorkReadFailure("invalid_response");
+  }
+  return {
+    requiresApprovingReviews: rule.requiresApprovingReviews,
+    requiredApprovingReviewCount: rule.requiredApprovingReviewCount as number | null,
+    requiresStatusChecks: rule.requiresStatusChecks,
+    requiresStrictStatusChecks: rule.requiresStrictStatusChecks,
+    requiresConversationResolution: rule.requiresConversationResolution,
+  };
+}
+
+function parseLatestChecksState(commits: unknown) {
+  if (!isObject(commits) || !Array.isArray(commits.nodes) || commits.nodes.length > 1) throw new WorkReadFailure("invalid_response");
+  const commitNode = commits.nodes[0];
+  if (commitNode === undefined) return null;
+  if (!isObject(commitNode) || !isObject(commitNode.commit)) throw new WorkReadFailure("invalid_response");
+  const rollup = commitNode.commit.statusCheckRollup;
+  if (rollup === null) return null;
+  if (!isObject(rollup)) throw new WorkReadFailure("invalid_response");
+  return enumValue(rollup.state, ["ERROR", "EXPECTED", "FAILURE", "PENDING", "SUCCESS"] as const);
+}
+
+function enumValue<const Value extends string>(value: unknown, allowed: readonly Value[]): Value {
+  if (!isString(value) || !allowed.includes(value as Value)) throw new WorkReadFailure("invalid_response");
+  return value as Value;
+}
 
 async function readGraphQL(
   fetch: Fetch,

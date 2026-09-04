@@ -1,6 +1,7 @@
 import type { ApiRepository, ApiScope, ItemRefreshResponse, OverviewResponse, SyncResponse } from "../api/read-models.js";
 import type { PullRequestDiffRead } from "../github/read-client.js";
 import type { PullRequestReviewComment, PullRequestReviewEvent } from "../github/write-client.js";
+import type { MergeReadiness } from "../merge/index.js";
 
 export type LiveItemEvent =
   | { type: "updated"; item: import("../api/read-models.js").ApiItem; repositories: ApiRepository[]; scope: ApiScope }
@@ -18,7 +19,7 @@ export async function refreshItem(nodeId: string): Promise<ItemRefreshResponse> 
   return request<ItemRefreshResponse>(`/api/items/${encodeURIComponent(nodeId)}/refresh`, { method: "POST" });
 }
 
-export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean };
+export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean; mergeEnabled: boolean };
 
 export type ReviewSubmissionResponse =
   | { status: "submitted"; reviewUrl: string | null; refresh: ItemRefreshResponse | { status: "failed" } }
@@ -49,6 +50,37 @@ export async function submitPullRequestReview(nodeId: string, input: {
     return await response.json() as ReviewSubmissionResponse;
   } catch {
     return { status: "unknown" };
+  }
+}
+
+export async function getPullRequestMergeReadiness(nodeId: string): Promise<MergeReadiness> {
+  try {
+    return await request<MergeReadiness>(`/api/items/${encodeURIComponent(nodeId)}/merge`);
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export type MergeResponse =
+  | { status: "merged"; alreadyMerged: boolean; refresh: ItemRefreshResponse | { status: "failed" } }
+  | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous"; currentHeadSha?: string }
+  | Exclude<MergeReadiness, { status: "ready" } | { status: "merged" }>;
+
+export async function mergePullRequest(nodeId: string, expectedHeadSha: string): Promise<MergeResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/items/${encodeURIComponent(nodeId)}/merge`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedHeadSha }),
+    });
+  } catch {
+    return { status: "failed", reason: "ambiguous" };
+  }
+  try {
+    return await response.json() as MergeResponse;
+  } catch {
+    return { status: "failed", reason: "ambiguous" };
   }
 }
 

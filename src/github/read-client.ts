@@ -47,12 +47,38 @@ export type GitHubReadClient = {
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
   readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;
   readPullRequestHead(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestHeadRead>;
+  readPullRequestMergeFacts(input: { pullRequestId: string }): Promise<PullRequestMergeFactsRead>;
   readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestDiffRead>;
 };
 
 export type PullRequestHeadRead =
   | { status: "read"; headSha: string; rateLimit: GitHubRateLimit }
   | UnavailableRead;
+
+export type PullRequestMergeFactsRead =
+  | { status: "read"; facts: PullRequestMergeFacts; rateLimit: GitHubRateLimit }
+  | UnavailableRead;
+
+export type PullRequestMergeFacts = {
+  headSha: string;
+  headRefName: string;
+  isDraft: boolean;
+  merged: boolean;
+  mergeable: "MERGEABLE" | "CONFLICTING" | "UNKNOWN";
+  mergeStateStatus: "BEHIND" | "BLOCKED" | "CLEAN" | "DIRTY" | "DRAFT" | "HAS_HOOKS" | "UNKNOWN" | "UNSTABLE";
+  reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
+  isMergeQueueEnabled: boolean;
+  squashMergeAllowed: boolean;
+  viewerPermission: "ADMIN" | "MAINTAIN" | "READ" | "TRIAGE" | "WRITE" | null;
+  checksState: "ERROR" | "EXPECTED" | "FAILURE" | "PENDING" | "SUCCESS" | null;
+  protection: {
+    requiresApprovingReviews: boolean;
+    requiredApprovingReviewCount: number | null;
+    requiresStatusChecks: boolean;
+    requiresStrictStatusChecks: boolean;
+    requiresConversationResolution: boolean;
+  } | null;
+};
 
 export type PullRequestDiffRead =
   | {

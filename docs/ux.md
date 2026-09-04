@@ -99,7 +99,18 @@ used.
   success clears only drafts for the submitted head, runs a focused refresh,
   and keeps the overlay open. If the saved reload copy cannot be confirmed as
   removed, the result warns that the review was submitted and must not be
-  retried. If live
+  retried. Merge is a separate danger-marked area outside review submission.
+  It reads current GitHub state when the overlay opens and shows checking,
+  pending checks, a named block, unavailable, or not-permitted text. If GitHub
+  is still calculating mergeability, Check again repeats the readiness read.
+  Network and mutation failures never retry automatically. Only a
+  configured and currently ready pull request gets a Squash and merge control.
+  Its confirmation names the pull request and source branch and states that
+  version one leaves the branch in place. A moved head, permission denial,
+  policy rejection, or validation failure states that nothing was retried. An
+  ambiguous response sends the person to GitHub before another attempt.
+  Confirmed success remains visible as a terminal merged state while focused
+  refresh and the item event remove the pull request from the queue. If live
   updates removed the opening control, focus
   returns to the queue heading. Added and removed rows use low-saturation tints derived from the
   success and warning roles, plus visible `+` and `−` gutter markers so colour

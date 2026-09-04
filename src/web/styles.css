@@ -140,6 +140,10 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 .reviewSubmission > p { color: var(--color-text-muted); font-size: 0.84375rem; }
 .reviewSubmission .reviewSuccess { color: var(--color-success); }
 .reviewSubmission .reviewWarning { color: var(--color-warning); }
+.mergePanel { display: grid; max-width: 70ch; gap: 0.75rem; margin: 1.5rem 2rem; padding: 1.25rem; border: 1px solid var(--color-divider); border-left: 0.25rem solid var(--color-danger); border-radius: var(--radius-field); background: var(--color-field); }
+.mergePanel h2 { font-size: 1.0625rem; }
+.mergePanel p { color: var(--color-text-muted); font-size: 0.84375rem; }
+.mergeButton { justify-self: start; padding: 0.625rem 0.875rem; border: 0; border-radius: var(--radius-control); background: var(--color-danger); color: var(--color-field); cursor: pointer; font-weight: 600; }
 .staleDrafts { padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
 .staleDrafts > p { margin-top: 0.375rem; }
 .staleDraftGroup { margin-top: 1rem; }
@@ -198,6 +202,7 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
   .diffHeader { padding: 1rem 1.25rem; }
   .diffViewControls { flex-wrap: wrap; padding-inline: 1.25rem; }
   .draftStatus, .reviewSubmission, .staleDrafts { padding-inline: 1.25rem; }
+  .mergePanel { margin-inline: 1.25rem; }
   .diffLayout { display: block; }
   .diffFileList { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--color-divider); }
   .diffFiles { padding: 0.75rem 1.25rem 3rem; }

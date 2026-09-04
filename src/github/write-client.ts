@@ -20,8 +20,19 @@ export type AddPullRequestReviewOutcome =
   | { status: "rejected" }
   | { status: "unknown" };
 
+export type MergePullRequestInput = {
+  repositoryNameWithOwner: string;
+  number: number;
+  expectedHeadSha: string;
+};
+
+export type MergePullRequestOutcome =
+  | { status: "merged" }
+  | { status: "not_permitted" | "rejected" | "head_changed" | "unknown" };
+
 export type GitHubWriteClient = {
   addPullRequestReview(input: AddPullRequestReviewInput): Promise<AddPullRequestReviewOutcome>;
+  mergePullRequest(input: MergePullRequestInput): Promise<MergePullRequestOutcome>;
 };
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -80,7 +91,47 @@ export function createGitHubWriteClient(token: string, fetch: Fetch = globalThis
         ? { status: "rejected" }
         : { status: "unknown" };
     },
+    async mergePullRequest(input) {
+      const url = mergeRestUrl(input);
+      if (!url) return { status: "rejected" };
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "PUT",
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+            "x-github-api-version": "2022-11-28",
+          },
+          body: JSON.stringify({ sha: input.expectedHeadSha, merge_method: "squash" }),
+          signal: controller.signal,
+        });
+      } catch {
+        return { status: "unknown" };
+      } finally {
+        clearTimeout(timeout);
+      }
+      if (response.status === 403) return { status: "not_permitted" };
+      if (response.status === 409) return { status: "head_changed" };
+      if (response.status === 405 || response.status === 422) return { status: "rejected" };
+      if (!response.ok) return response.status >= 500 || response.status === 408 ? { status: "unknown" } : { status: "rejected" };
+      try {
+        const payload = await response.json();
+        return isObject(payload) && payload.merged === true ? { status: "merged" } : { status: "unknown" };
+      } catch {
+        return { status: "unknown" };
+      }
+    },
   };
+}
+
+function mergeRestUrl({ repositoryNameWithOwner, number }: MergePullRequestInput): string | null {
+  const [owner, repository, ...extra] = repositoryNameWithOwner.split("/");
+  if (!owner || !repository || extra.length > 0 || !Number.isInteger(number) || number < 1) return null;
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${number}/merge`;
 }
 
 const ADD_PULL_REQUEST_REVIEW_MUTATION = `mutation AddPullRequestReview($input: AddPullRequestReviewInput!) {

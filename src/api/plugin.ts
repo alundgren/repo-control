@@ -4,6 +4,7 @@ import type { Cache } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
 import type { SyncService } from "../sync/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
+import type { PullRequestMergeService } from "../merge/index.js";
 import type { ReviewSubmissionInput, ReviewSubmissionService } from "../review/index.js";
 import { buildOverview, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
 
@@ -13,11 +14,12 @@ export type ApiPluginOptions = {
   refreshService: ItemRefreshService;
   diffClient: Pick<GitHubReadClient, "readPullRequestDiff">;
   reviewService?: ReviewSubmissionService;
+  mergeService?: PullRequestMergeService;
 };
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, diffClient, reviewService },
+  { cache, syncService, refreshService, diffClient, reviewService, mergeService },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -83,7 +85,7 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
       const repository = cache.getActiveSnapshot()?.repositories.find((entry) => entry.id === item.repositoryId);
       if (!repository) return reply.code(404).send({ status: "error", error: { code: "not_found" } });
       const result = await diffClient.readPullRequestDiff({ repositoryNameWithOwner: repository.nameWithOwner, number: item.number });
-      return { ...result, reviewEnabled: reviewService?.enabled ?? false };
+      return { ...result, reviewEnabled: reviewService?.enabled ?? false, mergeEnabled: mergeService?.enabled ?? false };
     },
   );
 
@@ -140,6 +142,56 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
               : outcome.status === "verification_failed" ? 503
                 : outcome.status === "unknown" ? 502
                   : 400;
+      return reply.code(code).send(outcome);
+    },
+  );
+
+  app.get<{ Params: { nodeId: string } }>(
+    "/items/:nodeId/merge",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["nodeId"],
+          properties: { nodeId: { type: "string", minLength: 1 } },
+        },
+      },
+    },
+    async (request) => mergeService?.read(request.params.nodeId) ?? { status: "not_permitted" },
+  );
+
+  app.post<{ Params: { nodeId: string }; Body: { expectedHeadSha: string } }>(
+    "/items/:nodeId/merge",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["nodeId"],
+          properties: { nodeId: { type: "string", minLength: 1 } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["expectedHeadSha"],
+          properties: { expectedHeadSha: { type: "string", minLength: 1 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!mergeService) return reply.code(403).send({ status: "failed", reason: "permission" });
+      const outcome = await mergeService.merge({ nodeId: request.params.nodeId, expectedHeadSha: request.body.expectedHeadSha });
+      if (outcome.status === "merged") {
+        return {
+          status: "merged",
+          alreadyMerged: outcome.alreadyMerged,
+          refresh: outcome.refresh ? toItemRefreshResponse(cache, outcome.refresh) : { status: "failed" },
+        };
+      }
+      const code = outcome.status === "failed"
+        ? outcome.reason === "permission" ? 403 : outcome.reason === "validation" ? 409 : outcome.reason === "policy" ? 422 : 502
+        : outcome.status === "unavailable" ? 503
+          : outcome.status === "not_permitted" ? 403
+            : 409;
       return reply.code(code).send(outcome);
     },
   );

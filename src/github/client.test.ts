@@ -88,6 +88,66 @@ describe("GitHub read client", () => {
     });
     expect(afterValues).toEqual([null, "next-page"]);
   });
+
+  it("reads the current facts used to decide whether a pull request can merge", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_url, init) => {
+      requests.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return response({
+        data: {
+          node: {
+            __typename: "PullRequest",
+            headRefName: "fictional-branch",
+            headRefOid: "head-one",
+            isDraft: false,
+            merged: false,
+            mergeable: "MERGEABLE",
+            mergeStateStatus: "CLEAN",
+            reviewDecision: "APPROVED",
+            isMergeQueueEnabled: false,
+            repository: { squashMergeAllowed: true, viewerPermission: "WRITE" },
+            baseRef: {
+              branchProtectionRule: {
+                requiresApprovingReviews: true,
+                requiredApprovingReviewCount: 1,
+                requiresStatusChecks: true,
+                requiresStrictStatusChecks: true,
+                requiresConversationResolution: true,
+              },
+            },
+            commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+          },
+          rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-09-04T20:00:00.000Z" },
+        },
+      });
+    });
+
+    await expect(client.readPullRequestMergeFacts({ pullRequestId: "PR_1" })).resolves.toEqual({
+      status: "read",
+      facts: {
+        headSha: "head-one",
+        headRefName: "fictional-branch",
+        isDraft: false,
+        merged: false,
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED",
+        isMergeQueueEnabled: false,
+        squashMergeAllowed: true,
+        viewerPermission: "WRITE",
+        checksState: "SUCCESS",
+        protection: {
+          requiresApprovingReviews: true,
+          requiredApprovingReviewCount: 1,
+          requiresStatusChecks: true,
+          requiresStrictStatusChecks: true,
+          requiresConversationResolution: true,
+        },
+      },
+      rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-09-04T20:00:00.000Z" },
+    });
+    expect(requests[0]).toMatchObject({ operationName: "PullRequestMergeFacts", variables: { id: "PR_1" } });
+  });
 });
 
 function response(body: unknown) {

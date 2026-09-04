@@ -9,6 +9,7 @@ import type { ArtifactService } from "../artifact/index.js";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
 import type { ReviewSubmissionService } from "../review/index.js";
+import type { PullRequestMergeService } from "../merge/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
 import { createOperationalLogger } from "../observability/index.js";
 import type { SyncService } from "../sync/index.js";
@@ -202,6 +203,46 @@ describe("application server", () => {
       });
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ status: "submitted", reviewUrl: null, refresh: { status: "failed" } });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("reads merge readiness and sends a confirmed merge through named private endpoints", async () => {
+    const merges: unknown[] = [];
+    const mergeService: PullRequestMergeService = {
+      enabled: true,
+      async read(nodeId) {
+        expect(nodeId).toBe("PR_1");
+        return { status: "ready", headSha: "head-one", sourceBranch: "fictional-branch" };
+      },
+      async merge(input) {
+        merges.push(input);
+        return { status: "merged", refresh: { status: "not_found" }, alreadyMerged: false };
+      },
+    };
+    const { app } = await buildApp({ mergeService });
+    try {
+      const readiness = await app.inject({ method: "GET", url: "/api/items/PR_1/merge" });
+      expect(readiness.statusCode).toBe(200);
+      expect(readiness.json()).toEqual({ status: "ready", headSha: "head-one", sourceBranch: "fictional-branch" });
+
+      const merged = await app.inject({ method: "POST", url: "/api/items/PR_1/merge", payload: { expectedHeadSha: "head-one" } });
+      expect(merged.statusCode).toBe(200);
+      expect(merged.json()).toEqual({ status: "merged", refresh: { status: "not_found" }, alreadyMerged: false });
+      expect(merges).toEqual([{ nodeId: "PR_1", expectedHeadSha: "head-one" }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("keeps merge unavailable when operator enablement is absent", async () => {
+    const { app } = await buildApp();
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/items/PR_1/merge" })).json()).toEqual({ status: "not_permitted" });
+      const response = await app.inject({ method: "POST", url: "/api/items/PR_1/merge", payload: { expectedHeadSha: "head-one" } });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ status: "failed", reason: "permission" });
     } finally {
       await app.close();
     }
@@ -525,7 +566,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService" | "mergeService">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -544,7 +585,7 @@ describe("application server", () => {
     };
 
     const diffClient = overrides.diffClient ?? { async readPullRequestDiff() { throw new Error("readPullRequestDiff should not be called in this test"); } };
-    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, logger: overrides.logger, artifactService: overrides.artifactService });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, mergeService: overrides.mergeService, logger: overrides.logger, artifactService: overrides.artifactService });
     return { app, cache };
   }
 
