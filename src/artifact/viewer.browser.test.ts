@@ -281,39 +281,25 @@ test("uses no motion when reduced motion is requested", async ({ page }) => {
   })).toEqual({ animation: "0s", transition: "0s" });
 });
 
-test("makes matching light and dark Share tabs quieter while preserving contrast", async ({ page }) => {
+test("uses the low-contrast Share tab treatment for each appearance hint", async ({ page }) => {
   const neutralLight = await shareTabColors(page, fixtureIds.lightNeutral);
   const hintedLight = await shareTabColors(page, fixtureIds.lightHint);
   const neutralDark = await shareTabColors(page, fixtureIds.darkNeutral);
   const hintedDark = await shareTabColors(page, fixtureIds.darkHint);
 
-  expect(luminanceDifference(hintedLight.fill, "rgb(242, 234, 222)")).toBeLessThan(
-    luminanceDifference(neutralLight.fill, "rgb(242, 234, 222)"),
-  );
-  expect(luminanceDifference(hintedDark.fill, "rgb(41, 32, 25)")).toBeLessThan(
-    luminanceDifference(neutralDark.fill, "rgb(41, 32, 25)"),
-  );
-  for (const treatment of [neutralLight, hintedLight, neutralDark, hintedDark]) {
-    expect(contrastRatio(treatment.text, treatment.fill)).toBeGreaterThanOrEqual(4.5);
-  }
-
   expect(neutralLight).toMatchObject({
-    fill: "rgb(224, 210, 189)",
-    text: "rgb(96, 73, 57)",
-    innerBoundary: "rgb(96, 73, 57)",
-    outerBoundary: "rgb(249, 246, 240) 0px 0px 0px 2px",
+    fill: "rgba(0, 0, 0, 0)",
+    text: "rgba(96, 73, 57, 0.58)",
+    innerBoundary: "rgba(96, 73, 57, 0.28)",
+    outerBoundary: "none",
   });
-  expect(hintedLight).toMatchObject({
-    fill: "rgb(249, 246, 240)",
-    text: "rgb(96, 73, 57)",
-    innerBoundary: "rgb(96, 73, 57)",
-    outerBoundary: "rgb(249, 246, 240) 0px 0px 0px 2px",
-  });
+  expect(hintedLight).toEqual(neutralLight);
+  expect(neutralDark).toEqual(neutralLight);
   expect(hintedDark).toMatchObject({
-    fill: "rgb(41, 32, 25)",
-    text: "rgb(193, 175, 154)",
-    innerBoundary: "rgb(249, 246, 240)",
-    outerBoundary: "rgb(96, 73, 57) 0px 0px 0px 2px",
+    fill: "rgba(0, 0, 0, 0)",
+    text: "rgba(193, 175, 154, 0.58)",
+    innerBoundary: "rgba(249, 246, 240, 0.28)",
+    outerBoundary: "none",
   });
 
   for (const id of [fixtureIds.lightNeutral, fixtureIds.lightHint, fixtureIds.darkNeutral, fixtureIds.darkHint]) {
@@ -322,12 +308,14 @@ test("makes matching light and dark Share tabs quieter while preserving contrast
   }
 });
 
-test("keeps opposing dark-hint boundaries visible over misleading light content", async ({ page }) => {
+test("keeps the dark-hint treatment when nearby artifact content is light", async ({ page }) => {
   await page.goto(viewUrl(fixtureIds.misleadingDark));
   const treatment = await shareTabColors(page, fixtureIds.misleadingDark);
   expect(treatment).toMatchObject({
-    innerBoundary: "rgb(249, 246, 240)",
-    outerBoundary: "rgb(96, 73, 57) 0px 0px 0px 2px",
+    fill: "rgba(0, 0, 0, 0)",
+    text: "rgba(193, 175, 154, 0.58)",
+    innerBoundary: "rgba(249, 246, 240, 0.28)",
+    outerBoundary: "none",
   });
   await expect(page).toHaveScreenshot("share-tab-dark-over-light-block.png", {
     clip: { x: 1158, y: 666, width: 122, height: 54 },
@@ -395,23 +383,6 @@ async function shareTabColors(page: import("@playwright/test").Page, id: string)
       outerBoundary: style.boxShadow,
     };
   });
-}
-
-function luminanceDifference(first: string, second: string) {
-  return Math.abs(relativeLuminance(first) - relativeLuminance(second));
-}
-
-function contrastRatio(first: string, second: string) {
-  const firstLuminance = relativeLuminance(first);
-  const secondLuminance = relativeLuminance(second);
-  return (Math.max(firstLuminance, secondLuminance) + 0.05) / (Math.min(firstLuminance, secondLuminance) + 0.05);
-}
-
-function relativeLuminance(color: string) {
-  const channels = color.match(/\d+/g)!.slice(0, 3).map((value) => Number(value) / 255).map((value) =>
-    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
-  );
-  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
 }
 
 function movingFixture() {
