@@ -79,13 +79,17 @@ used.
   the issue becomes claimed or blocked, then announce the reason. The Ready
   count and Now preview update with the row.
 - Pull-request diff overlay: a selected pull request opens a full-viewport
-  modal above the mounted queue. Its header names the pull request and head
-  SHA. Grouped and Files controls change how the same changed files are
-  arranged, with Grouped selected on open. The server assigns every file to
-  one group from its path and filename. Category groups precede directory
-  groups. Generated group labels are lowercase when every changed path is
-  lowercase and otherwise start with an uppercase letter. Each view keeps its
-  own scroll position and per-file fold state. The
+  modal above the mounted queue. Its compact header keeps the repository, pull
+  request, change totals, pending-comment count, and close action together.
+  Grouped and Files controls change how the same changed files are arranged,
+  with Grouped selected on open. A persistent bottom review bar keeps the
+  current-head comment count, commit, review outcome, submit action, merge
+  action, and merge readiness in one place. The optional review summary opens
+  above that bar as the explicit submission confirmation step. The server
+  assigns every file to one group from its path and filename. Category groups
+  precede directory groups. Generated group labels are lowercase when every
+  changed path is lowercase and otherwise start with an uppercase letter. Each
+  view keeps its own scroll position and per-file fold state. The
   first file with patch text starts unfolded while every other file starts folded.
   The close control and Escape return to the exact queue state and opening
   control. Each comment form belongs to a path, line, old or new side, and the
@@ -101,7 +105,7 @@ used.
   discarded. Closing the overlay and switching arrangements never clears,
   moves, or duplicates them. Each draft has its own discard action, and Discard
   all asks for confirmation before removing every current and stale draft for
-  that pull request. When the operator enables review submission, a review area
+  that pull request. When the operator enables review submission, the review bar
   lets the person choose Comment, Approve, or Request changes and add an optional
   summary. The submit control states how many comments belong to the displayed
   head and asks for confirmation before contacting GitHub. Comment and Request
@@ -112,7 +116,7 @@ used.
   success clears only drafts for the submitted head, runs a focused refresh,
   and keeps the overlay open. If the saved reload copy cannot be confirmed as
   removed, the result warns that the review was submitted and must not be
-  retried. Merge is a separate danger-marked area outside review submission.
+  retried. Merge remains a separate danger-marked action within the review bar.
   It reads current GitHub state when the overlay opens and shows checking,
   pending checks, a named block, unavailable, or not-permitted text. If GitHub
   is still calculating mergeability, Check again repeats the readiness read.

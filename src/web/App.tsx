@@ -485,7 +485,7 @@ export function App() {
       </section>
       {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
-    {diffItem && diffState ? <DiffOverlay draftStore={draftStoreRef.current} item={diffItem} onClose={closeDiff} state={diffState} /> : null}
+    {diffItem && diffState && overview ? <DiffOverlay draftStore={draftStoreRef.current} item={diffItem} onClose={closeDiff} repository={repositoryName(overview, diffItem.repositoryId)} state={diffState} /> : null}
     </>
   );
 }
@@ -674,10 +674,11 @@ function QuickRead({ backLabel, headingRef, item, onBack, onOpenDiff, onRefresh,
   );
 }
 
-function DiffOverlay({ draftStore, item, onClose, state }: {
+function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   draftStore: DraftCommentStore;
   item: Extract<ApiItem, { type: "pull_request" }>;
   onClose: () => void;
+  repository: string;
   state: DiffState;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -689,10 +690,14 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
   const [draftMessage, setDraftMessage] = useState("");
   const [reviewSummary, setReviewSummary] = useState("");
   const [reviewEvent, setReviewEvent] = useState<PullRequestReviewEvent>("COMMENT");
+  const [reviewComposerOpen, setReviewComposerOpen] = useState(false);
+  const [reviewValidationMessage, setReviewValidationMessage] = useState("");
   const [submissionState, setSubmissionState] = useState<"idle" | "submitting" | "submitted" | "submitted_refresh_failed" | "submitted_cleanup_failed" | "submitted_cleanup_and_refresh_failed" | "head_changed" | "verification_failed" | "rejected" | "unknown" | "failed">("idle");
   const [mergeState, setMergeState] = useState<MergePanelState>({ status: "checking" });
   const [mergeCheckBusy, setMergeCheckBusy] = useState(false);
   const mergeCheckRequestRef = useRef(0);
+  const reviewOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const reviewSummaryRef = useRef<HTMLTextAreaElement>(null);
   const [newDraft, setNewDraft] = useState<{ path: string; line: number; side: DraftSide } | null>(null);
   const draftIdRef = useRef(0);
   const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
@@ -726,6 +731,10 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
     void checkMergeReadiness();
     return () => { mergeCheckRequestRef.current += 1; };
   }, [item.id, state.status === "loaded" ? state.data.headSha : null]);
+
+  useEffect(() => {
+    if (reviewComposerOpen) reviewSummaryRef.current?.focus();
+  }, [reviewComposerOpen]);
 
   async function checkMergeReadiness() {
     const requestId = mergeCheckRequestRef.current + 1;
@@ -808,11 +817,12 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
     if (state.status !== "loaded" || !state.data.reviewEnabled || submissionState === "submitting") return;
     const summary = reviewSummary.trim();
     if (reviewEvent !== "APPROVE" && summary.length === 0 && currentDrafts.length === 0) {
-      setDraftMessage("Add a summary or line comment before submitting this review.");
+      setReviewValidationMessage("Add a summary or line comment before submitting this review.");
       return;
     }
-    const description = reviewEvent === "APPROVE" ? "approve" : reviewEvent === "REQUEST_CHANGES" ? "request changes on" : "comment on";
-    if (!window.confirm(`Submit this review to GitHub and ${description} PR${item.number}?`)) return;
+    setReviewValidationMessage("");
+    setReviewComposerOpen(false);
+    window.requestAnimationFrame(() => reviewOpenButtonRef.current?.focus());
     setSubmissionState("submitting");
     const result = await submitPullRequestReview(item.id, {
       expectedHeadSha: state.data.headSha,
@@ -870,6 +880,12 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
+      if (reviewComposerOpen) {
+        setReviewComposerOpen(false);
+        setReviewValidationMessage("");
+        window.requestAnimationFrame(() => reviewOpenButtonRef.current?.focus());
+        return;
+      }
       onClose();
       return;
     }
@@ -893,26 +909,28 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
   const currentDrafts = collections.find((collection) => collection.headSha === currentHeadSha)?.drafts ?? [];
   const staleCollections = collections.filter((collection) => collection.headSha !== currentHeadSha);
   const pendingCount = collections.reduce((total, collection) => total + collection.drafts.length, 0);
+  const changedFileCount = state.status === "loaded" ? state.data.fileCount : null;
+  const changeTotals = item.additions === null || item.deletions === null ? null : `+${item.additions.toLocaleString()} −${item.deletions.toLocaleString()}`;
 
   return (
     <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
       <div className="diffTop" ref={topRef}>
         <header className="diffHeader">
-          <div>
-            <p className="eyebrow">Changed files</p>
+          <div className="diffHeaderSummary">
+            <p className="diffIdentity">{repository} · PR {item.number}</p>
             <h1 id="diff-title">{item.title}</h1>
-            <p className="diffIdentity">PR{item.number}{state.status === "loaded" ? <> · <span>{state.data.headSha}</span></> : null}</p>
           </div>
-          <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">Close</button>
+          {changedFileCount === null ? null : <p className="diffMeta">{changedFileCount.toLocaleString()} {changedFileCount === 1 ? "file" : "files"}{changeTotals ? ` · ${changeTotals}` : ""}</p>}
+          <span className="diffHeaderGrow" />
+          {state.status === "loaded" && pendingCount > 0 ? <p className="pendingChip">{pendingCount} pending {pendingCount === 1 ? "comment" : "comments"}</p> : null}
+          <button aria-label="Close changed files" className="diffClose" onClick={onClose} ref={closeRef} type="button">×</button>
         </header>
         {state.status === "loaded" ? (
           <div aria-label="Changed file arrangement" className="diffViewControls">
             <div className="diffViewButtons">
-              <button aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
-              <button aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+              <button aria-label="Grouped" aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button"><span>Grouped</span><span aria-hidden="true">by area</span></button>
+              <button aria-label="Files" aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button"><span>Files</span><span aria-hidden="true">{state.data.fileCount.toLocaleString()} changed</span></button>
             </div>
-            <p aria-live="polite" className="pendingCount">{pendingCount} pending</p>
-            {pendingCount > 0 ? <button className="discardAll" onClick={discardAll} type="button">Discard all</button> : null}
           </div>
         ) : null}
       </div>
@@ -930,27 +948,6 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
             {!draftStore.recoveryAvailable ? <p className="storageWarning">Reload recovery is unavailable. Drafts remain in memory while this page stays open.</p> : null}
             <p aria-live="polite">{draftMessage}</p>
           </div>
-          {state.data.reviewEnabled ? (
-            <section aria-labelledby="submit-review-title" className="reviewSubmission">
-              <h2 id="submit-review-title">Submit review</h2>
-              <label>Review outcome
-                <select onChange={(event) => setReviewEvent(event.target.value as PullRequestReviewEvent)} value={reviewEvent}>
-                  <option value="COMMENT">Comment</option>
-                  <option value="APPROVE">Approve</option>
-                  <option value="REQUEST_CHANGES">Request changes</option>
-                </select>
-              </label>
-              <label>Summary, optional
-                <textarea onChange={(event) => setReviewSummary(event.target.value)} rows={4} value={reviewSummary} />
-              </label>
-              <p>{currentDrafts.length} line {currentDrafts.length === 1 ? "comment" : "comments"} on this head commit will be submitted together.</p>
-              <button disabled={submissionState === "submitting"} onClick={() => void submitReview()} type="button">
-                {submissionState === "submitting" ? "Submitting review…" : "Submit review"}
-              </button>
-              <ReviewSubmissionMessage itemUrl={item.url} state={submissionState} />
-            </section>
-          ) : null}
-          {state.data.mergeEnabled ? <MergePanel checkBusy={mergeCheckBusy} itemUrl={item.url} mergeState={mergeState} onCheck={() => void checkMergeReadiness()} onMerge={confirmMerge} /> : null}
           {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
             <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
             <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
@@ -1023,6 +1020,41 @@ function DiffOverlay({ draftStore, item, onClose, state }: {
               ))}
             </section>
           </div>
+          <div className="reviewDock">
+            <ReviewSubmissionMessage itemUrl={item.url} state={submissionState} />
+            {reviewComposerOpen ? (
+              <section aria-labelledby="submit-review-title" className="reviewComposer">
+                <div>
+                  <h2 id="submit-review-title">Submit review</h2>
+                  <p>{reviewEvent === "APPROVE" ? "Approve" : reviewEvent === "REQUEST_CHANGES" ? "Request changes on" : "Comment on"} PR {item.number} with {currentDrafts.length} line {currentDrafts.length === 1 ? "comment" : "comments"} against <span className="mono">{state.data.headSha}</span>.</p>
+                </div>
+                <label>Summary, optional
+                  <textarea onChange={(event) => setReviewSummary(event.target.value)} ref={reviewSummaryRef} rows={3} value={reviewSummary} />
+                </label>
+                {reviewValidationMessage ? <p aria-live="polite" className="reviewWarning">{reviewValidationMessage}</p> : null}
+                <div className="reviewComposerActions">
+                  <button className="primaryButton" disabled={submissionState === "submitting"} onClick={() => void submitReview()} type="button">Submit review</button>
+                  <button className="quietButton" onClick={() => { setReviewComposerOpen(false); setReviewValidationMessage(""); window.requestAnimationFrame(() => reviewOpenButtonRef.current?.focus()); }} type="button">Cancel</button>
+                </div>
+              </section>
+            ) : null}
+            <div aria-label="Review and merge" className="reviewBar">
+              <span className="reviewCount">{currentDrafts.length} {currentDrafts.length === 1 ? "comment" : "comments"} pending</span>
+              <span className="reviewCommit">against commit <span className="mono">{state.data.headSha}</span></span>
+              {pendingCount > 0 ? <button className="discardAll" onClick={discardAll} type="button">Discard all</button> : null}
+              <span className="reviewBarGrow" />
+              {state.data.reviewEnabled ? <>
+                <label className="visuallyHidden" htmlFor="review-outcome">Review outcome</label>
+                <select id="review-outcome" onChange={(event) => setReviewEvent(event.target.value as PullRequestReviewEvent)} value={reviewEvent}>
+                  <option value="COMMENT">Comment</option>
+                  <option value="APPROVE">Approve</option>
+                  <option value="REQUEST_CHANGES">Request changes</option>
+                </select>
+                <button className="primaryButton" disabled={submissionState === "submitting"} onClick={() => { setReviewValidationMessage(""); setReviewComposerOpen(true); }} ref={reviewOpenButtonRef} type="button">{submissionState === "submitting" ? "Submitting review…" : "Submit review…"}</button>
+              </> : null}
+              {state.data.mergeEnabled ? <MergePanel checkBusy={mergeCheckBusy} itemUrl={item.url} mergeState={mergeState} onCheck={() => void checkMergeReadiness()} onMerge={confirmMerge} /> : null}
+            </div>
+          </div>
         </>
       ) : null}
     </div>
@@ -1064,10 +1096,10 @@ function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
 
   return (
     <section aria-labelledby="merge-title" className="mergePanel">
-      <h2 id="merge-title">Merge pull request</h2>
-      <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"}>{message}</p>
+      <h2 className="visuallyHidden" id="merge-title">Merge pull request</h2>
       {mergeState.status === "checking" && !checkBusy ? <button className="quietButton" onClick={onCheck} type="button">Check again</button> : null}
       {mergeState.status === "ready" ? <button className="mergeButton" onClick={() => void onMerge()} type="button">Squash and merge</button> : null}
+      <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"}>{message}</p>
     </section>
   );
 }

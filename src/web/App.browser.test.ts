@@ -77,7 +77,7 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   await lineComment.click();
   await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Keep this fictional name.");
   await dialog.getByRole("button", { name: "Save draft" }).click();
-  await expect(dialog.getByText("1 pending")).toBeVisible();
+  await expect(dialog.getByText("1 comment pending")).toBeVisible();
   await dialog.getByRole("button", { name: "Files", exact: true }).click();
   const savedDraft = dialog.getByRole("textbox", { name: "Edit draft comment on src/example-1.ts, new line 1" });
   await expect(savedDraft).toHaveValue("Keep this fictional name.");
@@ -90,6 +90,30 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   const stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
   const fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
   expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
+});
+
+test("keeps the review header compact and the review bar at the viewport bottom", async ({ page }) => {
+  await page.route("**/events", (route) => route.abort());
+  await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
+  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: { ...diff(), reviewEnabled: true, mergeEnabled: true } }));
+  await page.route("**/api/items/PR_1/merge", (route) => route.fulfill({ json: { status: "ready", headSha: "abc123def456", sourceBranch: "fictional-branch" } }));
+  await page.goto(origin);
+
+  await page.getByRole("button", { name: "Pull requests 40" }).click();
+  await page.getByRole("button", { name: "Select Fictional pull request 1", exact: true }).click();
+  await page.getByRole("button", { name: "Review changed files" }).click();
+  const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
+  const header = dialog.locator(".diffHeader");
+  const bar = dialog.getByLabel("Review and merge");
+
+  await expect(header).toContainText("fictional-tools/garden · PR 1");
+  await expect(header).toContainText("30 files · +1 −1");
+  await expect(dialog.getByRole("button", { name: "Submit review…" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Squash and merge" })).toBeVisible();
+  expect((await header.boundingBox())!.height).toBeLessThanOrEqual(72);
+  const barBox = (await bar.boundingBox())!;
+  expect(barBox.height).toBeLessThanOrEqual(80);
+  expect(Math.round(barBox.y + barBox.height)).toBe(720);
 });
 
 test("filters Ready work, discovers hidden issues, and clears a selection after focused refresh", async ({ page }) => {
