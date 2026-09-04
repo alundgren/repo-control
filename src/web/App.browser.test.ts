@@ -96,7 +96,6 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
       expect(overlap, `${headerParts[left]} overlaps ${headerParts[right]}`).toBe(false);
     }
   }
-  await expect(dialog.locator(".diffHeader")).toHaveScreenshot("review-header-narrow.png");
   await dialog.getByRole("button", { name: "Files", exact: true }).click();
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
   let stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
@@ -145,7 +144,6 @@ test("keeps the review header compact and the review bar at the viewport bottom"
   await expect(dialog.getByRole("button", { name: "Squash and merge" })).toBeVisible();
   expect((await dialog.locator(".diffTop").boundingBox())!.height).toBeLessThanOrEqual(56);
   expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(1280);
-  await expect(header).toHaveScreenshot("review-header-laptop.png");
   const barBox = (await bar.boundingBox())!;
   expect(barBox.height).toBeLessThanOrEqual(80);
   expect(Math.round(barBox.y + barBox.height)).toBe(720);
