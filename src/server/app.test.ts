@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ArtifactService } from "../artifact/index.js";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
+import type { ReviewSubmissionService } from "../review/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
 import { createOperationalLogger } from "../observability/index.js";
 import type { SyncService } from "../sync/index.js";
@@ -99,6 +100,108 @@ describe("application server", () => {
         expect(response.json()).toMatchObject({ status: expectedStatus });
       }
       expect(requests).toEqual(Array.from({ length: 4 }, () => ({ repositoryNameWithOwner: "octo-user/fictional", number: 4 })));
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("exposes review availability with the diff and submits through the named private endpoint", async () => {
+    const submissions: unknown[] = [];
+    const reviewService: ReviewSubmissionService = {
+      enabled: true,
+      async submit(input) {
+        submissions.push(input);
+        return { status: "submitted", reviewUrl: "https://github.test/fictional/review/1", refresh: { status: "not_found" } };
+      },
+    };
+    const { app, cache } = await buildApp({
+      diffClient: { async readPullRequestDiff() { return { status: "unavailable", error: { code: "unavailable", message: "Unavailable." } }; } },
+      reviewService,
+    });
+
+    try {
+      cache.replaceActiveSnapshot(snapshot());
+      expect((await app.inject({ method: "GET", url: "/api/items/PR_1/diff" })).json()).toMatchObject({ reviewEnabled: true });
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/items/PR_1/review",
+        payload: {
+          expectedHeadSha: "head-one",
+          summary: "A fictional summary.",
+          event: "COMMENT",
+          comments: [{ path: "src/example.ts", line: 4, side: "RIGHT", body: "Use the helper." }],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toMatchObject({ status: "submitted", refresh: { status: "not_found" } });
+      expect(submissions).toEqual([{
+        nodeId: "PR_1",
+        expectedHeadSha: "head-one",
+        summary: "A fictional summary.",
+        event: "COMMENT",
+        comments: [{ path: "src/example.ts", line: 4, side: "RIGHT", body: "Use the helper." }],
+      }]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects review submission when operator enablement is absent", async () => {
+    const { app } = await buildApp();
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/items/PR_1/review",
+        payload: { expectedHeadSha: "head-one", event: "APPROVE", comments: [] },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json()).toEqual({ status: "disabled" });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("rejects an unsupported review event before calling the submission service", async () => {
+    let called = false;
+    const { app } = await buildApp({
+      reviewService: {
+        enabled: true,
+        async submit() {
+          called = true;
+          return { status: "invalid" };
+        },
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/items/PR_1/review",
+        payload: { expectedHeadSha: "head-one", event: "MERGE", comments: [] },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(called).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("reports confirmed review submission when its follow-up refresh fails", async () => {
+    const { app } = await buildApp({
+      reviewService: {
+        enabled: true,
+        async submit() { return { status: "submitted", reviewUrl: null, refresh: null }; },
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/items/PR_1/review",
+        payload: { expectedHeadSha: "head-one", event: "APPROVE", comments: [] },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ status: "submitted", reviewUrl: null, refresh: { status: "failed" } });
     } finally {
       await app.close();
     }
@@ -422,7 +525,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -441,7 +544,7 @@ describe("application server", () => {
     };
 
     const diffClient = overrides.diffClient ?? { async readPullRequestDiff() { throw new Error("readPullRequestDiff should not be called in this test"); } };
-    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, logger: overrides.logger, artifactService: overrides.artifactService });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, logger: overrides.logger, artifactService: overrides.artifactService });
     return { app, cache };
   }
 

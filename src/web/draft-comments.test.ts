@@ -84,6 +84,27 @@ describe("DraftCommentStore", () => {
     expect(store.collectionsFor("PR_1")[0]?.drafts).toEqual([draft()]);
   });
 
+  it("removes an older persisted copy after a later storage write fails", () => {
+    const storage = new MemoryStorage();
+    const store = new DraftCommentStore(storage);
+    store.save("PR_1", "head-one", draft({ body: "Persisted body." }));
+    storage.setItem = () => { throw new DOMException("Quota exceeded", "QuotaExceededError"); };
+    store.save("PR_1", "head-one", draft({ body: "Submitted in-memory body." }));
+
+    expect(store.discardCollection("PR_1", "head-one")).toEqual({ persistenceCleared: true });
+    expect(new DraftCommentStore(storage).collectionsFor("PR_1")).toEqual([]);
+  });
+
+  it("reports when a persisted draft cannot be removed", () => {
+    const storage = new MemoryStorage();
+    const store = new DraftCommentStore(storage);
+    store.save("PR_1", "head-one", draft());
+    storage.removeItem = () => { throw new DOMException("Blocked", "SecurityError"); };
+
+    expect(store.discardCollection("PR_1", "head-one")).toEqual({ persistenceCleared: false });
+    expect(store.collectionsFor("PR_1")).toEqual([]);
+  });
+
   it("keeps drafts in memory when storage is unavailable", () => {
     const store = new DraftCommentStore(null);
 
@@ -101,6 +122,22 @@ describe("DraftCommentStore", () => {
     expect(store.recoveryAvailable).toBe(false);
     expect(store.save("PR_1", "head-one", draft())).toEqual({ status: "saved" });
     expect(store.collectionsFor("PR_1")[0]?.drafts).toEqual([draft()]);
+  });
+
+  it("does not claim persistent cleanup after storage access was lost", () => {
+    const storage = new MemoryStorage();
+    new DraftCommentStore(storage).save("PR_1", "head-one", draft({ body: "Older saved copy." }));
+    Object.defineProperty(storage, "length", {
+      configurable: true,
+      get: () => { throw new DOMException("Blocked", "SecurityError"); },
+    });
+    const store = new DraftCommentStore(storage);
+    expect(store.save("PR_1", "head-one", draft({ body: "Submitted in-memory copy." }))).toEqual({ status: "saved" });
+
+    expect(store.discardCollection("PR_1", "head-one")).toEqual({ persistenceCleared: false });
+
+    delete (storage as unknown as { length?: number }).length;
+    expect(new DraftCommentStore(storage).collectionsFor("PR_1")[0]?.drafts[0]?.body).toBe("Older saved copy.");
   });
 
   it("keeps individual and bulk discards in memory when storage removal fails", () => {

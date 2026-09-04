@@ -46,8 +46,13 @@ export type GitHubReadClient = {
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
   readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;
+  readPullRequestHead(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestHeadRead>;
   readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestDiffRead>;
 };
+
+export type PullRequestHeadRead =
+  | { status: "read"; headSha: string; rateLimit: GitHubRateLimit }
+  | UnavailableRead;
 
 export type PullRequestDiffRead =
   | {

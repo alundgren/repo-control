@@ -24,6 +24,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Module | Responsibility |
 | --- | --- |
 | GitHub read client | Paginates account-scoped GraphQL searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. On demand, its separate REST path reads one pull request's head SHA and changed files within the 3,000-file and 5 MiB patch limits. |
+| GitHub write client | Performs the named `addPullRequestReview` mutation. It sends the expected commit ID, summary, event, and all line comments in one operation and never retries automatically. |
 | GitHub webhook client | Pages repository hooks, creates one configured receiver hook, and updates that matching hook when the required specification version advances. It never changes unrelated hooks. |
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
@@ -105,6 +106,12 @@ GitHub response body.
    callback hook and records the new version. A list, create, or update failure
    leaves the earlier result in place so a later explicit sync retries.
    Unrelated hooks are never changed.
+9. A confirmed review submission re-reads the pull request head through the read
+   client. A changed head blocks the write. A matching head is sent as the
+   expected commit ID with one write-client operation. GitHub does not offer an
+   atomic compare-and-submit guarantee, so the re-read reduces but does not
+   remove the race. After confirmed success, the item refresh service updates
+   the cache and publishes the normal item change event.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
@@ -170,8 +177,9 @@ longer qualifies.
 ## Credential and hosting contract
 
 Production uses a fine-grained personal access token for **All repositories**
-under the personal account, with **Metadata**, **Issues**, and **Pull requests**
-read-only permissions plus **Webhooks: Read and write**. Piploy's host-managed environment injects
+under the personal account, with **Metadata** and **Issues** read-only,
+**Pull requests: Read and write** when review submission is enabled, plus
+**Webhooks: Read and write**. Piploy's host-managed environment injects
 `REPO_CONTROL_GITHUB_TOKEN`, `REPO_CONTROL_GITHUB_OWNER`, and
 `REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` when starting the application. Startup
 validates the PAT format and future expiry locally, then reads the authenticated
@@ -194,6 +202,12 @@ prove access to repositories GitHub did not return. Only server-side code reads
 the token; it is never returned to the browser or stored in SQLite, and startup
 logs use fixed safe messages rather than raw GitHub responses.
 
+`REPO_CONTROL_GITHUB_WRITE_ACTIONS` is a comma-separated allow-list containing
+`review`, `merge`, or both. It defaults to empty. Startup rejects unknown
+values. The setting controls which mutation interfaces Repo Control exposes,
+but it does not prove a fine-grained token's permissions. GitHub permission and
+repository-policy rejections remain authoritative.
+
 SQLite runs on a private persistent host volume, and the deployment is
 Tailnet-restricted. The [Piploy operator runbook](piploy-operator-runbook.md)
 defines the deployment payload, finite token expiry, revocation, and rotation.
@@ -201,10 +215,11 @@ Artifact publishing remains disabled unless the operator supplies
 `REPO_CONTROL_ARTIFACT_PUBLIC_ORIGIN`. The [artifact operator guide](artifacts.md)
 defines its private upload and dedicated public-read boundary.
 
-## Future mutations
+## Mutations
 
 Read and write calls stay separate. A mutation endpoint must re-read the
 target's current state, perform one named action, and return the result that
 GitHub reports. The UI must ask for confirmation when an action has an
-irreversible or externally visible effect. A successful mutation should use the
-focused refresh path, not an account-wide sync.
+irreversible or externally visible effect. A successful mutation uses the
+focused refresh path, not an account-wide sync. Review submission follows this
+contract today. Other mutations must do the same.

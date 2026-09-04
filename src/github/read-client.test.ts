@@ -4,6 +4,21 @@ import { createGitHubReadClient } from "./client.js";
 import { RELATIONSHIP_SUBJECT_LIMIT } from "./read-client.js";
 
 describe("GitHub work reads", () => {
+  it("reads the current pull-request head without fetching changed files", async () => {
+    const urls: string[] = [];
+    const client = createGitHubReadClient("github_pat_example_token_for_tests", async (url) => {
+      urls.push(url);
+      return response({ head: { sha: "fresh-head" } }, restRateLimitHeaders());
+    });
+
+    await expect(client.readPullRequestHead({ repositoryNameWithOwner: "fictional-tools/garden", number: 17 })).resolves.toEqual({
+      status: "read",
+      headSha: "fresh-head",
+      rateLimit: { cost: 1, remaining: 4999, resetAt: "2026-08-24T12:00:00.000Z" },
+    });
+    expect(urls).toEqual(["https://api.github.com/repos/fictional-tools/garden/pulls/17"]);
+  });
+
   it("reads pull-request files through bounded REST pages and reports patch fidelity", async () => {
     const urls: string[] = [];
     const oversizedPatch = `@@ -0,0 +1,1 @@\n+${"x".repeat(5 * 1024 * 1024)}`;

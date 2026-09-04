@@ -36,7 +36,8 @@ update the matching receiver when the required event specification advances.
 
 ## Not in version one
 
-- Merge, edit, assign, comment, approve, or any user-directed GitHub mutation.
+- Merge, edit, assign, or user-directed GitHub mutations other than enabled
+  pull-request review submission.
 - AI summaries, agent dispatch, or a local model integration.
 - Project-management features beyond the read-only epic view described below.
 - Notifications, background polling, or multi-user collaboration.
@@ -83,9 +84,10 @@ provisioning result may update the one matching receiver when the required
 event set changes. Repo Control never changes unrelated hooks; callback and
 secret rotation remain manual operator work.
 
-## Later direction
+## Mutation boundary
 
-Mutating actions must be separate from the read-only work queue. Each action
+Mutating actions stay separate from the read-only work queue. Each action
 needs a clear target, the state GitHub will change, and an outcome visible in
-the item detail. Version one should preserve this separation in its data and
-UI boundaries, without building actions early.
+the item detail. Pull-request review submission is the first such action. It is
+operator-enabled, requires confirmation, and sends the summary and line comments
+as one review.

@@ -4,6 +4,7 @@ import type { Cache } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";
 import type { SyncService } from "../sync/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
+import type { ReviewSubmissionInput, ReviewSubmissionService } from "../review/index.js";
 import { buildOverview, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
 
 export type ApiPluginOptions = {
@@ -11,11 +12,12 @@ export type ApiPluginOptions = {
   syncService: SyncService;
   refreshService: ItemRefreshService;
   diffClient: Pick<GitHubReadClient, "readPullRequestDiff">;
+  reviewService?: ReviewSubmissionService;
 };
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, diffClient },
+  { cache, syncService, refreshService, diffClient, reviewService },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -80,7 +82,65 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
       if (item.type !== "pull_request") return reply.code(400).send({ status: "error", error: { code: "not_pull_request" } });
       const repository = cache.getActiveSnapshot()?.repositories.find((entry) => entry.id === item.repositoryId);
       if (!repository) return reply.code(404).send({ status: "error", error: { code: "not_found" } });
-      return diffClient.readPullRequestDiff({ repositoryNameWithOwner: repository.nameWithOwner, number: item.number });
+      const result = await diffClient.readPullRequestDiff({ repositoryNameWithOwner: repository.nameWithOwner, number: item.number });
+      return { ...result, reviewEnabled: reviewService?.enabled ?? false };
+    },
+  );
+
+  app.post<{ Params: { nodeId: string }; Body: Omit<ReviewSubmissionInput, "nodeId"> }>(
+    "/items/:nodeId/review",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["nodeId"],
+          properties: { nodeId: { type: "string", minLength: 1 } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["expectedHeadSha", "event", "comments"],
+          properties: {
+            expectedHeadSha: { type: "string", minLength: 1 },
+            summary: { type: "string" },
+            event: { type: "string", enum: ["COMMENT", "APPROVE", "REQUEST_CHANGES"] },
+            comments: {
+              type: "array",
+              maxItems: 100,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["path", "line", "side", "body"],
+                properties: {
+                  path: { type: "string", minLength: 1 },
+                  line: { type: "integer", minimum: 1 },
+                  side: { type: "string", enum: ["LEFT", "RIGHT"] },
+                  body: { type: "string", minLength: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!reviewService) return reply.code(403).send({ status: "disabled" });
+      const outcome = await reviewService.submit({ nodeId: request.params.nodeId, ...request.body });
+      if (outcome.status === "submitted") {
+        return {
+          status: "submitted",
+          reviewUrl: outcome.reviewUrl,
+          refresh: outcome.refresh ? toItemRefreshResponse(cache, outcome.refresh) : { status: "failed" },
+        };
+      }
+      const code = outcome.status === "disabled" ? 403
+        : outcome.status === "not_found" ? 404
+          : outcome.status === "head_changed" ? 409
+            : outcome.status === "rejected" ? 422
+              : outcome.status === "verification_failed" ? 503
+                : outcome.status === "unknown" ? 502
+                  : 400;
+      return reply.code(code).send(outcome);
     },
   );
 };

@@ -25,6 +25,7 @@ import {
   type OwnedRepositoryInventoryRead,
   type PullRequestDiffFile,
   type PullRequestDiffRead,
+  type PullRequestHeadRead,
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
@@ -111,6 +112,15 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
         return unavailableRead(error);
       }
     },
+    async readPullRequestHead(input): Promise<PullRequestHeadRead> {
+      try {
+        const base = pullRequestRestUrl(input);
+        const pullRequest = await readRestJson(fetch, token, base);
+        return { status: "read", headSha: parsePullRequestHead(pullRequest.payload), rateLimit: pullRequest.rateLimit };
+      } catch (error) {
+        return unavailableRead(error);
+      }
+    },
   };
 }
 
@@ -121,15 +131,9 @@ async function readPullRequestDiff(
   token: string,
   { repositoryNameWithOwner, number }: { repositoryNameWithOwner: string; number: number },
 ): Promise<Exclude<PullRequestDiffRead, { status: "unavailable" }>> {
-  const [owner, repository, ...extra] = repositoryNameWithOwner.split("/");
-  if (!owner || !repository || extra.length > 0 || !Number.isInteger(number) || number < 1) {
-    throw new WorkReadFailure("invalid_response");
-  }
-  const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${number}`;
+  const base = pullRequestRestUrl({ repositoryNameWithOwner, number });
   const pullRequest = await readRestJson(fetch, token, base);
-  if (!isObject(pullRequest.payload) || !isObject(pullRequest.payload.head) || !isString(pullRequest.payload.head.sha)) {
-    throw new WorkReadFailure("invalid_response");
-  }
+  const headSha = parsePullRequestHead(pullRequest.payload);
 
   const files: PullRequestDiffFile[] = [];
   let patchBytes = 0;
@@ -149,7 +153,7 @@ async function readPullRequestDiff(
     if (result.payload.length < PULL_REQUEST_FILE_PAGE_SIZE) {
       return {
         status: "complete",
-        headSha: pullRequest.payload.head.sha,
+        headSha,
         fileCount: files.length,
         files,
         groups: groupPullRequestFiles(files),
@@ -159,13 +163,28 @@ async function readPullRequestDiff(
   }
   return {
     status: "partial",
-    headSha: pullRequest.payload.head.sha,
+    headSha,
     fileCount: files.length,
     files,
     groups: groupPullRequestFiles(files),
     partialReason: "file_limit",
     rateLimit: { cost: maximumPages + 1, remaining: latestRateLimit.remaining, resetAt: latestRateLimit.resetAt },
   };
+}
+
+function pullRequestRestUrl({ repositoryNameWithOwner, number }: { repositoryNameWithOwner: string; number: number }): string {
+  const [owner, repository, ...extra] = repositoryNameWithOwner.split("/");
+  if (!owner || !repository || extra.length > 0 || !Number.isInteger(number) || number < 1) {
+    throw new WorkReadFailure("invalid_response");
+  }
+  return `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls/${number}`;
+}
+
+function parsePullRequestHead(payload: unknown): string {
+  if (!isObject(payload) || !isObject(payload.head) || !isString(payload.head.sha)) {
+    throw new WorkReadFailure("invalid_response");
+  }
+  return payload.head.sha;
 }
 
 async function readRestJson(fetch: Fetch, token: string, url: string): Promise<{ payload: unknown; rateLimit: GitHubRateLimit }> {

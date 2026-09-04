@@ -144,6 +144,35 @@ describe("server startup", () => {
     })]);
   });
 
+  it("rejects an unknown GitHub write action before connection validation", async () => {
+    const webRoot = await createWebRoot();
+    const dataDirectory = await createDataDirectory();
+    const messages: string[] = [];
+    const events: Array<Record<string, unknown>> = [];
+    let connectionAttempted = false;
+
+    const started = await startApplication({
+      environment: { ...environment(), REPO_CONTROL_GITHUB_WRITE_ACTIONS: "review,publish" },
+      host: "127.0.0.1",
+      port: 0,
+      webRoot,
+      dataDirectory,
+      createGitHubClient: () => {
+        connectionAttempted = true;
+        return client();
+      },
+      logEvent: (event) => events.push(event),
+    }, (message) => messages.push(message));
+
+    expect(started).toBe(false);
+    expect(connectionAttempted).toBe(false);
+    expect(messages).toEqual(["Repo Control could not start because REPO_CONTROL_GITHUB_WRITE_ACTIONS contains an unknown value."]);
+    expect(events).toEqual([expect.objectContaining({
+      event: "startup.failed",
+      errorCode: "github_write_actions_invalid",
+    })]);
+  });
+
   it("starts enabled artifact routes after cleanup and closes them with the application", async () => {
     const webRoot = await createWebRoot();
     const dataDirectory = await createDataDirectory();

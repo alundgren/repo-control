@@ -88,8 +88,19 @@ used.
   discarded. Closing the overlay and switching arrangements never clears,
   moves, or duplicates them. Each draft has its own discard action, and Discard
   all asks for confirmation before removing every current and stale draft for
-  that pull request. A later confirmed GitHub submission may clear only the
-  drafts it submitted. If live updates removed the opening control, focus
+  that pull request. When the operator enables review submission, a review area
+  lets the person choose Comment, Approve, or Request changes and add an optional
+  summary. The submit control states how many comments belong to the displayed
+  head and asks for confirmation before contacting GitHub. Comment and Request
+  changes require a summary or line comment. Approve may be empty. A changed
+  head, failed verification, or GitHub rejection keeps the drafts and explains
+  what stopped. An ambiguous response says `Submission outcome unknown`, keeps
+  the drafts, and links to GitHub for verification before any retry. Confirmed
+  success clears only drafts for the submitted head, runs a focused refresh,
+  and keeps the overlay open. If the saved reload copy cannot be confirmed as
+  removed, the result warns that the review was submitted and must not be
+  retried. If live
+  updates removed the opening control, focus
   returns to the queue heading. Added and removed rows use low-saturation tints derived from the
   success and warning roles, plus visible `+` and `−` gutter markers so colour
   is never the only distinction. Omitted, incomplete, and size-limited patches,

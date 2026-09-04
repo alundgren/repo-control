@@ -89,6 +89,12 @@ export class DraftCommentStore {
     }
   }
 
+  discardCollection(pullRequestId: string, headSha: string): { persistenceCleared: boolean } {
+    const key = collectionKey(pullRequestId, headSha);
+    this.collections.delete(key);
+    return { persistenceCleared: this.removeCollection(key) };
+  }
+
   private serializedBytes(): number {
     return [...this.collections.values()].reduce(
       (total, collection) => total + encoder.encode(JSON.stringify(collection)).byteLength,
@@ -118,18 +124,19 @@ export class DraftCommentStore {
     try {
       this.storage.setItem(key, JSON.stringify(collection));
     } catch {
-      this.storage = null;
       this.recoveryAvailable = false;
     }
   }
 
-  private removeCollection(key: string): void {
-    if (!this.storage) return;
+  private removeCollection(key: string): boolean {
+    if (!this.storage) return false;
     try {
       this.storage.removeItem(key);
+      return true;
     } catch {
       this.storage = null;
       this.recoveryAvailable = false;
+      return false;
     }
   }
 }
