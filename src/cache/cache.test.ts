@@ -33,7 +33,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 5,
+        schemaVersion: 6,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -44,7 +44,7 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(5);
+      expect(reopened.getStatus().schemaVersion).toBe(6);
     } finally {
       reopened.close();
     }
@@ -59,7 +59,7 @@ describe("local cache", () => {
 
     const versionOne = new Database(path);
     versionOne.exec(`
-      DELETE FROM cache_migrations WHERE version IN (2, 3, 4, 5);
+      DELETE FROM cache_migrations WHERE version IN (2, 3, 4, 5, 6);
       DROP TABLE related_item_summaries;
       ALTER TABLE items DROP COLUMN github_created_at;
       ALTER TABLE items DROP COLUMN sub_issues_total;
@@ -69,12 +69,13 @@ describe("local cache", () => {
       ALTER TABLE snapshot_generations DROP COLUMN inventory_complete;
       ALTER TABLE snapshot_generations DROP COLUMN search_page_size;
       ALTER TABLE snapshot_generations DROP COLUMN search_result_limit;
+      ALTER TABLE instance_configuration DROP COLUMN claimed_label;
     `);
     versionOne.close();
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(5);
+      expect(migrated.getStatus().schemaVersion).toBe(6);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained generation" }],
@@ -93,14 +94,15 @@ describe("local cache", () => {
 
     const versionTwo = new Database(path);
     versionTwo.exec(`
-      DELETE FROM cache_migrations WHERE version IN (3, 4, 5);
+      DELETE FROM cache_migrations WHERE version IN (3, 4, 5, 6);
       DROP TABLE related_item_summaries;
+      ALTER TABLE instance_configuration DROP COLUMN claimed_label;
     `);
     versionTwo.close();
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(5);
+      expect(migrated.getStatus().schemaVersion).toBe(6);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained reconciliation generation" }],
@@ -464,6 +466,25 @@ describe("local cache", () => {
       expect(cache.getEpicLabel()).toBe("epic");
     } finally {
       cache.close();
+    }
+  });
+
+  it("migrates and exposes the default claimed label without changing queue configuration", async () => {
+    const path = await createCachePath();
+    const cache = openCache({ path });
+    cache.replaceQueueMapping({ defaultQueue: "triage", labels: [{ label: "start-here", queue: "agent" }] });
+    cache.close();
+
+    const oldDatabase = new Database(path);
+    oldDatabase.exec("DELETE FROM cache_migrations WHERE version = 6; ALTER TABLE instance_configuration DROP COLUMN claimed_label;");
+    oldDatabase.close();
+
+    const migrated = openCache({ path });
+    try {
+      expect(migrated.getClaimedLabel()).toBe("claimed");
+      expect(migrated.getQueueMapping()).toEqual({ defaultQueue: "triage", labels: [{ label: "start-here", queue: "agent" }] });
+    } finally {
+      migrated.close();
     }
   });
 
