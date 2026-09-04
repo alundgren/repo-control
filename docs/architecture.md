@@ -24,7 +24,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Module | Responsibility |
 | --- | --- |
 | GitHub read client | Paginates account-scoped GraphQL searches for open issues and pull requests, then fetches relationship batches. It retains only results whose repository owner is the authenticated personal account. On demand, its separate REST path reads one pull request's head SHA and changed files within the 3,000-file and 5 MiB patch limits. |
-| GitHub write client | Performs the named `addPullRequestReview` mutation. It sends the expected commit ID, summary, event, and all line comments in one operation and never retries automatically. |
+| GitHub write client | Performs the named `addPullRequestReview` mutation and squash-merge request. Each operation sends its expected head commit and never retries automatically. The merge operation does not delete refs. |
 | GitHub webhook client | Pages repository hooks, creates one configured receiver hook, and updates that matching hook when the required specification version advances. It never changes unrelated hooks. |
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
@@ -112,6 +112,14 @@ GitHub response body.
    atomic compare-and-submit guarantee, so the re-read reduces but does not
    remove the race. After confirmed success, the item refresh service updates
    the cache and publishes the normal item change event.
+10. Merge readiness reads the current head, draft and merge computation,
+    latest check rollup, review decision, base-branch protection, merge-queue
+    requirement, squash setting, and viewer permission. Unknown mergeability
+    never becomes ready. A confirmed merge repeats this read, compares the head
+    with the reviewed SHA, and makes one squash-merge request with that SHA.
+    Success starts a focused refresh, which deletes the now-merged pull request
+    from the open cache and publishes the existing removal event. The merge
+    path neither retries a failed request nor deletes the source ref.
 
 After a complete inventory reconciliation, a user-triggered sync uses
 `updated:>=` from that reconciliation with a five-minute overlap. Node IDs make
@@ -179,7 +187,10 @@ longer qualifies.
 Production uses a fine-grained personal access token for **All repositories**
 under the personal account, with **Metadata** and **Issues** read-only,
 **Pull requests: Read and write** when review submission is enabled, plus
-**Webhooks: Read and write**. Piploy's host-managed environment injects
+**Contents: Read and write** when merge is enabled, plus **Webhooks: Read and
+write**. Contents write permission also permits broader content and ref changes;
+the merge client uses it only for the named squash-merge request. Piploy's
+host-managed environment injects
 `REPO_CONTROL_GITHUB_TOKEN`, `REPO_CONTROL_GITHUB_OWNER`, and
 `REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT` when starting the application. Startup
 validates the PAT format and future expiry locally, then reads the authenticated
@@ -221,5 +232,7 @@ Read and write calls stay separate. A mutation endpoint must re-read the
 target's current state, perform one named action, and return the result that
 GitHub reports. The UI must ask for confirmation when an action has an
 irreversible or externally visible effect. A successful mutation uses the
-focused refresh path, not an account-wide sync. Review submission follows this
-contract today. Other mutations must do the same.
+focused refresh path, not an account-wide sync. Review submission and squash
+merge follow this contract. Merge has its own readiness read and confirmation,
+sends the reviewed SHA as GitHub's merge precondition, and leaves the source
+branch in place.

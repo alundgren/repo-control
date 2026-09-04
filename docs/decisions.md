@@ -27,6 +27,18 @@ head SHA, and one `addPullRequestReview` operation sends the summary and every
 line comment. Read and write clients remain separate so private read routes do
 not acquire mutation behavior. Repo Control never retries an ambiguous result.
 
+Squash merge is a separate user-directed action. It remains disabled unless
+the operator includes `merge` in `REPO_CONTROL_GITHUB_WRITE_ACTIONS` after
+granting Contents read-and-write permission. Before showing the control, Repo
+Control reads the current head, merge computation, checks, reviews, branch
+protection, merge-queue requirement, squash setting, and viewer permission.
+The confirmation names the pull request and source branch. Immediately before
+the write, the server reads those facts again and sends the reviewed head SHA
+with one squash-merge request. GitHub rejects a head that moved. A successful
+merge runs one focused refresh so the normal item event removes it from open
+work. Repo Control does not retry an ambiguous result and does not delete the
+source branch. Branch cleanup remains a later, separately authorized action.
+
 ## Full lists come from reconciled cache generations
 
 The initial account sync paginates separate searches for every open issue and

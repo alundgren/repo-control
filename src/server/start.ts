@@ -16,6 +16,7 @@ import {
   type GitHubConnectionClient,
 } from "../github/connection.js";
 import { createItemRefreshService } from "../refresh/index.js";
+import { createPullRequestMergeService } from "../merge/index.js";
 import {
   createReviewSubmissionService,
   GitHubWriteActionsConfigurationError,
@@ -89,6 +90,14 @@ export async function startServer({
     enabled: writeActions.has("review"),
     logEvent,
   });
+  const mergeService = createPullRequestMergeService({
+    cache,
+    readClient: client,
+    writeClient: createGitHubWriteClient(configuration.token),
+    refreshService,
+    enabled: writeActions.has("merge"),
+    logEvent,
+  });
   const webhookService = environment.REPO_CONTROL_GITHUB_WEBHOOK_SECRET
     ? createWebhookService({
         cache,
@@ -116,6 +125,7 @@ export async function startServer({
       refreshService,
       diffClient: client,
       reviewService,
+      mergeService,
       eventHub,
       webhookService: webhookService ?? undefined,
       artifactService: artifactService ?? undefined,

@@ -62,7 +62,7 @@ export function createReviewSubmissionService({
 }: {
   cache: Cache;
   readClient: Pick<GitHubReadClient, "readPullRequestHead">;
-  writeClient: GitHubWriteClient;
+  writeClient: Pick<GitHubWriteClient, "addPullRequestReview">;
   refreshService: ItemRefreshService;
   enabled: boolean;
   logEvent?: LogEventSink;

@@ -37,7 +37,7 @@ must be the whole value. Keep every non-secret key visible during review.
     "REPO_CONTROL_GITHUB_TOKEN": "${hostEnv:REPO_CONTROL_GITHUB_TOKEN}",
     "REPO_CONTROL_GITHUB_OWNER": "account-login",
     "REPO_CONTROL_GITHUB_TOKEN_EXPIRES_AT": "2030-01-01T00:00:00.000Z",
-    "REPO_CONTROL_GITHUB_WRITE_ACTIONS": "review",
+    "REPO_CONTROL_GITHUB_WRITE_ACTIONS": "review,merge",
     "REPO_CONTROL_GITHUB_WEBHOOK_SECRET": "${hostEnv:REPO_CONTROL_GITHUB_WEBHOOK_SECRET}",
     "REPO_CONTROL_GITHUB_WEBHOOK_CALLBACK_URL": "https://hooks.example.com/webhooks/github"
   }
@@ -56,15 +56,17 @@ Reviewing this payload does not approve `register` or `poll`.
 Create a fine-grained personal access token for the personal account. Select
 all repositories under that account and grant read-only Metadata and Issues,
 Pull requests: Read and write when `review` is enabled, plus Webhooks: Read and
-write. Put its value in the Piploy daemon environment as
+write. Grant Contents: Read and write when `merge` is enabled. That permission
+also permits content and ref changes beyond merging. Put its value in the Piploy daemon environment as
 `REPO_CONTROL_GITHUB_TOKEN`. Set the owner and the token's actual GitHub
 expiry as a future UTC ISO 8601 value in the other two variables shown above.
 
-`REPO_CONTROL_GITHUB_WRITE_ACTIONS` defaults to empty. Set it to `review` only
-after granting Pull requests read-and-write permission. The setting enables the
+`REPO_CONTROL_GITHUB_WRITE_ACTIONS` defaults to empty. Add `review` only after
+granting Pull requests read-and-write permission. Add `merge` only after
+granting Contents read-and-write permission. The setting enables each
 interface; GitHub remains the authority on token permission and repository
-policy. Allowed values are `review`, `merge`, or both as a comma-separated list.
-Unknown values stop startup.
+policy. Allowed values are `review`, `merge`, or both as a comma-separated
+list. Unknown values stop startup.
 
 Do not put the token in JSON, CLI arguments, shell history, build arguments,
 image layers, source, documentation, or diagnostics. The container gets the
