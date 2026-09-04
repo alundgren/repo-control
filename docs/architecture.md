@@ -27,7 +27,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | GitHub write client | Performs the named `addPullRequestReview` mutation and squash-merge request. Each operation sends its expected head commit and never retries automatically. The merge operation does not delete refs. |
 | GitHub webhook client | Pages repository hooks, creates one configured receiver hook, and updates that matching hook when the required specification version advances. It never changes unrelated hooks. |
 | Snapshot service (`src/sync`) | Reconciles the open account inventory, refreshes every cached epic's child counts, records the last complete reconciliation, uses an overlapping update-time read between full reconciliations, and coordinates opted-in webhook provisioning. |
-| Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. |
+| Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. Direct requests stop for hidden repositories, while webhook reconciliation can update their cached work. |
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Pull-request file classifier | Assigns each on-demand changed file to an ordered category or its immediate parent directory from the new path alone. The browser receives the ordered groups and does not repeat the classification rules. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
@@ -35,7 +35,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves an isolated public viewer and exact download, and deletes expired rows on its cleanup schedule. |
 | Webhook delivery | Verifies bounded signed deliveries, records a small SQLite ledger, resumes pending work, and starts focused refresh or upsert. |
 | Webhook provisioning | Atomically replaces the complete owned-repository inventory, then records only `created` or `already_present` terminal outcomes per account and repository. |
-| Change event stream | Publishes post-commit item changes to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. |
+| Change event stream | Publishes post-commit item changes and repository-visibility revisions to private SSE subscribers. Browser reconnects reconcile the authoritative overview before applying buffered events. Visibility events contain counts and revision only. |
 | Web UI | Renders queues and item detail. It does not derive readiness from issue text. |
 
 ## Data model
@@ -60,9 +60,12 @@ workflow classifier applies this configuration on the server, so the browser
 receives a queue rather than inventing one.
 
 The cache also stores the connected account, the personal-account-owned
-repositories in scope, and refresh outcome. Do not persist a GitHub token in
-this model. Organization-owned repositories are excluded even when the token
-could see them.
+repositories in scope, refresh outcome, and the complete hidden-repository set.
+Hidden repositories are keyed by GitHub node ID and retain their last-known
+display name so they remain restorable after leaving the active snapshot. A
+monotonic revision guards atomic replacement of that set. Do not persist a
+GitHub token in this model. Organization-owned repositories are excluded even
+when the token could see them.
 
 The provisioning inventory is separate from the view-serving snapshot: it holds
 each owned repository's node ID, current name, fork state, archived state, and
@@ -95,7 +98,12 @@ GitHub response body.
 7. A successful item write or removal publishes one item-scoped change. The SSE
    route sends it to connected browsers without making cache reads or manual
    sync depend on stream delivery.
-8. When the operator has supplied both a receiver secret and a validated exact
+8. A repository-visibility replacement validates every repository ID against
+   the active snapshot or remembered hidden repositories, compares the saved
+   revision, and atomically writes the complete set. Overview queries apply the
+   set after account-wide reads, and a post-commit event prompts browsers to
+   reload the authoritative overview without exposing repository identity.
+9. When the operator has supplied both a receiver secret and a validated exact
    HTTPS callback URL, the same explicit sync fully pages the owned repository
    inventory and commits it atomically. Only then it serially checks each
    eligible repository without a terminal ledger outcome. An exact existing
@@ -106,13 +114,13 @@ GitHub response body.
    callback hook and records the new version. A list, create, or update failure
    leaves the earlier result in place so a later explicit sync retries.
    Unrelated hooks are never changed.
-9. A confirmed review submission re-reads the pull request head through the read
+10. A confirmed review submission re-reads the pull request head through the read
    client. A changed head blocks the write. A matching head is sent as the
    expected commit ID with one write-client operation. GitHub does not offer an
    atomic compare-and-submit guarantee, so the re-read reduces but does not
    remove the race. After confirmed success, the item refresh service updates
    the cache and publishes the normal item change event.
-10. Merge readiness reads the current head, draft and merge computation,
+11. Merge readiness reads the current head, draft and merge computation,
     latest check rollup, review decision, base-branch protection, merge-queue
     requirement, squash setting, and viewer permission. Unknown mergeability
     never becomes ready. A confirmed merge repeats this read, compares the head

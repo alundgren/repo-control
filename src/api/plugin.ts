@@ -6,7 +6,9 @@ import type { SyncService } from "../sync/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
 import type { PullRequestMergeService } from "../merge/index.js";
 import type { ReviewSubmissionInput, ReviewSubmissionService } from "../review/index.js";
-import { buildOverview, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
+import type { ChangeEventHub } from "../events/index.js";
+import { emitLogEvent, type LogEventSink } from "../observability/index.js";
+import { buildOverview, buildRepositoryVisibility, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
 
 export type ApiPluginOptions = {
   cache: Cache;
@@ -15,11 +17,13 @@ export type ApiPluginOptions = {
   diffClient: Pick<GitHubReadClient, "readPullRequestDiff">;
   reviewService?: ReviewSubmissionService;
   mergeService?: PullRequestMergeService;
+  eventHub?: ChangeEventHub;
+  logEvent?: LogEventSink;
 };
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, diffClient, reviewService, mergeService },
+  { cache, syncService, refreshService, diffClient, reviewService, mergeService, eventHub, logEvent },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -28,6 +32,14 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
     const statusCode = typeof error.statusCode === "number" ? error.statusCode : 500;
+    if (request.method === "PUT" && request.routeOptions.url?.endsWith("/settings/repository-visibility")) {
+      emitLogEvent(logEvent, {
+        event: "settings.repository_visibility.finished",
+        level: "warn",
+        status: "failed",
+        errorCode: statusCode >= 400 && statusCode < 500 ? "invalid_request" : "unavailable",
+      });
+    }
     try {
       request.log.error({
         event: "api.request.failed",
@@ -47,6 +59,57 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   });
 
   app.get("/overview", async () => buildOverview(cache));
+
+  app.get("/settings/repository-visibility", async () => ({ status: "ready", ...buildRepositoryVisibility(cache) }));
+
+  app.put<{ Body: { revision: number; ignoredRepositoryIds: string[] } }>(
+    "/settings/repository-visibility",
+    {
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["revision", "ignoredRepositoryIds"],
+          properties: {
+            revision: { type: "integer", minimum: 0 },
+            ignoredRepositoryIds: {
+              type: "array",
+              maxItems: 10_000,
+              items: { type: "string", minLength: 1, maxLength: 256 },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const { revision, ignoredRepositoryIds } = request.body;
+      if (new Set(ignoredRepositoryIds).size !== ignoredRepositoryIds.length) {
+        emitLogEvent(logEvent, { event: "settings.repository_visibility.finished", level: "warn", status: "failed", errorCode: "duplicate_repository" });
+        return reply.code(400).send({ status: "invalid", error: { code: "duplicate_repository" } });
+      }
+      const result = cache.replaceIgnoredRepositories(ignoredRepositoryIds, revision);
+      if (result.status === "conflict") {
+        emitLogEvent(logEvent, { event: "settings.repository_visibility.finished", level: "warn", status: "conflict", revision: result.settings.revision, ignoredRepositoryCount: result.settings.repositories.filter((entry) => entry.ignored).length });
+        return reply.code(409).send({ status: "conflict", ...buildRepositoryVisibility(cache) });
+      }
+      if (result.status === "unknown_repository") {
+        emitLogEvent(logEvent, { event: "settings.repository_visibility.finished", level: "warn", status: "failed", errorCode: "unknown_repository" });
+        return reply.code(400).send({ status: "invalid", error: { code: "unknown_repository" } });
+      }
+      const overview = buildOverview(cache);
+      if (overview.status === "ready") {
+        eventHub?.publish({
+          status: "settings",
+          revision: result.settings.revision,
+          visibleItemCount: overview.scope.visibleItemCount ?? 0,
+          visibleRepositoryCount: overview.scope.visibleRepositoryCount ?? 0,
+          ignoredRepositoryCount: overview.scope.ignoredRepositoryCount ?? 0,
+        });
+      }
+      emitLogEvent(logEvent, { event: "settings.repository_visibility.finished", level: "info", status: "complete", revision: result.settings.revision, ignoredRepositoryCount: result.settings.repositories.filter((entry) => entry.ignored).length });
+      return { status: "updated", ...buildRepositoryVisibility(cache) };
+    },
+  );
 
   app.post("/sync", async () => toSyncResponse(await syncService.sync()));
 
@@ -81,6 +144,7 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
     async (request, reply) => {
       const item = cache.getItem(request.params.nodeId);
       if (!item) return reply.code(404).send({ status: "error", error: { code: "not_found" } });
+      if (cache.isRepositoryIgnored(item.repositoryId)) return reply.code(409).send({ status: "ignored" });
       if (item.type !== "pull_request") return reply.code(400).send({ status: "error", error: { code: "not_pull_request" } });
       const repository = cache.getActiveSnapshot()?.repositories.find((entry) => entry.id === item.repositoryId);
       if (!repository) return reply.code(404).send({ status: "error", error: { code: "not_found" } });
@@ -127,6 +191,8 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
     },
     async (request, reply) => {
       if (!reviewService) return reply.code(403).send({ status: "disabled" });
+      const item = cache.getItem(request.params.nodeId);
+      if (item && cache.isRepositoryIgnored(item.repositoryId)) return reply.code(409).send({ status: "ignored" });
       const outcome = await reviewService.submit({ nodeId: request.params.nodeId, ...request.body });
       if (outcome.status === "submitted") {
         return {
@@ -157,7 +223,11 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
         },
       },
     },
-    async (request) => mergeService?.read(request.params.nodeId) ?? { status: "not_permitted" },
+    async (request, reply) => {
+      const item = cache.getItem(request.params.nodeId);
+      if (item && cache.isRepositoryIgnored(item.repositoryId)) return reply.code(409).send({ status: "ignored" });
+      return mergeService?.read(request.params.nodeId) ?? { status: "not_permitted" };
+    },
   );
 
   app.post<{ Params: { nodeId: string }; Body: { expectedHeadSha: string } }>(
@@ -179,6 +249,8 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
     },
     async (request, reply) => {
       if (!mergeService) return reply.code(403).send({ status: "failed", reason: "permission" });
+      const item = cache.getItem(request.params.nodeId);
+      if (item && cache.isRepositoryIgnored(item.repositoryId)) return reply.code(409).send({ status: "ignored" });
       const outcome = await mergeService.merge({ nodeId: request.params.nodeId, expectedHeadSha: request.body.expectedHeadSha });
       if (outcome.status === "merged") {
         return {

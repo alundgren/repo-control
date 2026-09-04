@@ -103,12 +103,12 @@ export function createWebhookService({
       }
 
       if (eventName === "sub_issues" && isSubIssueTarget(target)) {
-        const parentOutcome = await refreshService.refreshItem({ nodeId: target.parentNodeId });
+        const parentOutcome = await refreshFromWebhook(target.parentNodeId);
         if (!isSuccessfulRefresh(parentOutcome)) {
           finishRefresh(delivery, parentOutcome, timestamp);
           return;
         }
-        const childOutcome = await refreshService.refreshItem({ nodeId: target.childNodeId });
+        const childOutcome = await refreshFromWebhook(target.childNodeId);
         finishRefresh(delivery, childOutcome, timestamp);
         return;
       }
@@ -120,16 +120,16 @@ export function createWebhookService({
       }
 
       const cached = cache.getItem(target.nodeId);
-      if (cached) {
+      if (cached && (cache.isItemInActiveSnapshot?.(target.nodeId) ?? true)) {
         const parentNodeId = cached.type === "issue" && changesChildProgress(target.action) ? parentId(cached) : null;
         if (parentNodeId) {
-          const parentOutcome = await refreshService.refreshItem({ nodeId: parentNodeId });
+          const parentOutcome = await refreshFromWebhook(parentNodeId);
           if (!isSuccessfulRefresh(parentOutcome)) {
             finishRefresh(delivery, parentOutcome, timestamp);
             return;
           }
         }
-        const outcome = await refreshService.refreshItem({ nodeId: target.nodeId });
+        const outcome = await refreshFromWebhook(target.nodeId);
         finishRefresh(delivery, outcome, timestamp);
         return;
       }
@@ -141,7 +141,7 @@ export function createWebhookService({
           ? parentId(outcome.item)
           : null;
         if (parentNodeId) {
-          const parentOutcome = await refreshService.refreshItem({ nodeId: parentNodeId });
+          const parentOutcome = await refreshFromWebhook(parentNodeId);
           if (!isSuccessfulRefresh(parentOutcome)) {
             finishRefresh(delivery, parentOutcome, timestamp);
             return;
@@ -158,8 +158,12 @@ export function createWebhookService({
     }
   }
 
+  function refreshFromWebhook(nodeId: string) {
+    return (refreshService.refreshFromWebhook ?? refreshService.refreshItem)({ nodeId });
+  }
+
   function finishRefresh(delivery: Awaited<ReturnType<DeliveryStore["takePending"]>>[number], outcome: Awaited<ReturnType<ItemRefreshService["refreshItem"]>>, timestamp: Date) {
-    if (outcome.status === "updated" || outcome.status === "removed" || outcome.status === "not_found") {
+    if (outcome.status === "updated" || outcome.status === "removed" || outcome.status === "not_found" || outcome.status === "ignored") {
       store.finish(delivery.deliveryId, "succeeded", outcome.status, timestamp.toISOString());
       logDelivery(delivery, "succeeded", outcome.status, logEvent);
     } else {
@@ -169,7 +173,7 @@ export function createWebhookService({
   }
 
   function isSuccessfulRefresh(outcome: Awaited<ReturnType<ItemRefreshService["refreshItem"]>>) {
-    return outcome.status === "updated" || outcome.status === "removed" || outcome.status === "not_found";
+    return outcome.status === "updated" || outcome.status === "removed" || outcome.status === "not_found" || outcome.status === "ignored";
   }
 
   function finishUpsert(delivery: Awaited<ReturnType<DeliveryStore["takePending"]>>[number], outcome: UpsertOutcome, timestamp: Date) {

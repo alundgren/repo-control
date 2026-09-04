@@ -9,6 +9,7 @@ export type LogEvent = {
     | "sync.finished"
     | "webhook.provisioning.finished"
     | "refresh.finished"
+    | "settings.repository_visibility.finished"
     | "review.submission.finished"
     | "pull_request.merge.finished"
     | "artifact.publication.finished"
@@ -77,6 +78,7 @@ const EVENT_FIELDS: Record<LogEvent["event"], readonly string[]> = {
     "status", "mode", "durationMs", "itemType", "relationshipStatus", "removalReason", "errorCode",
     "rateLimitCost", "rateLimitRemaining", "rateLimitResetAt",
   ],
+  "settings.repository_visibility.finished": ["status", "revision", "ignoredRepositoryCount", "errorCode"],
   "review.submission.finished": ["status", "durationMs", "reviewEvent", "commentCount", "refreshStatus"],
   "pull_request.merge.finished": ["status", "reason", "durationMs", "refreshStatus"],
   "artifact.publication.finished": [

@@ -115,11 +115,28 @@ export type CacheStatus = {
   storedAccountCount: number;
 };
 
+export type RepositoryVisibilityEntry = CacheRepository & {
+  ignored: boolean;
+  inActiveSnapshot: boolean;
+  activeItemCount: number;
+};
+
+export type RepositoryVisibility = {
+  revision: number;
+  repositories: RepositoryVisibilityEntry[];
+};
+
+export type ReplaceIgnoredRepositoriesResult =
+  | { status: "updated"; settings: RepositoryVisibility }
+  | { status: "conflict"; settings: RepositoryVisibility }
+  | { status: "unknown_repository"; repositoryId: string };
+
 export type Cache = {
   replaceActiveSnapshot(snapshot: SuccessfulSnapshot): number;
   clearActiveGenerationLastFullReconciledAt(): void;
   getActiveSnapshot(): ActiveSnapshot | null;
   getItem(nodeId: string): CacheItem | null;
+  isItemInActiveSnapshot(nodeId: string): boolean;
   getRelatedItem(nodeId: string): RelatedItemSummary | null;
   replaceItem(item: CacheItem, observedAt: string): void;
   upsertItem(item: CacheItem, repository: CacheRepository, repositoryOwnerId: string, observedAt: string): void;
@@ -128,6 +145,9 @@ export type Cache = {
   getQueueMapping(): QueueMapping;
   getEpicLabel(): string;
   getClaimedLabel(): string;
+  getRepositoryVisibility(): RepositoryVisibility;
+  replaceIgnoredRepositories(repositoryIds: string[], expectedRevision: number): ReplaceIgnoredRepositoriesResult;
+  isRepositoryIgnored(repositoryId: string): boolean;
   getStatus(): CacheStatus;
   close(): void;
 };
@@ -263,6 +283,15 @@ class SqliteCache implements Cache {
     ).get(nodeId) as RelatedItemSummary | undefined ?? null;
   }
 
+  isItemInActiveSnapshot(nodeId: string): boolean {
+    return Boolean(this.database.prepare(
+      `SELECT 1
+       FROM cache_state
+       JOIN snapshot_items ON snapshot_items.generation_id = cache_state.active_generation_id
+       WHERE cache_state.singleton = 1 AND snapshot_items.item_node_id = ?`,
+    ).get(nodeId));
+  }
+
   replaceItem(item: CacheItem, observedAt: string): void {
     this.database.transaction(() => {
       this.writeItem(item, observedAt);
@@ -373,6 +402,75 @@ class SqliteCache implements Cache {
       .prepare("SELECT claimed_label FROM instance_configuration WHERE singleton = 1")
       .get() as { claimed_label: string } | undefined;
     return configuration?.claimed_label ?? DEFAULT_CLAIMED_LABEL;
+  }
+
+  getRepositoryVisibility(): RepositoryVisibility {
+    const revision = this.database
+      .prepare("SELECT revision FROM repository_visibility_state WHERE singleton = 1")
+      .get() as { revision: number };
+    const rows = this.database.prepare(
+      `WITH active AS (
+         SELECT repositories.node_id AS id, repositories.name_with_owner AS nameWithOwner,
+                COUNT(snapshot_items.item_node_id) AS activeItemCount
+         FROM cache_state
+         JOIN snapshot_repositories ON snapshot_repositories.generation_id = cache_state.active_generation_id
+         JOIN repositories ON repositories.node_id = snapshot_repositories.repository_node_id
+         LEFT JOIN items ON items.repository_node_id = repositories.node_id
+         LEFT JOIN snapshot_items ON snapshot_items.generation_id = cache_state.active_generation_id
+           AND snapshot_items.item_node_id = items.node_id
+         WHERE cache_state.singleton = 1
+         GROUP BY repositories.node_id, repositories.name_with_owner
+       )
+       SELECT active.id, active.nameWithOwner, active.activeItemCount,
+              1 AS inActiveSnapshot,
+              CASE WHEN ignored.repository_node_id IS NULL THEN 0 ELSE 1 END AS ignored
+       FROM active
+       LEFT JOIN ignored_repositories AS ignored ON ignored.repository_node_id = active.id
+       UNION ALL
+       SELECT ignored.repository_node_id AS id, ignored.name_with_owner AS nameWithOwner,
+              0 AS activeItemCount, 0 AS inActiveSnapshot, 1 AS ignored
+       FROM ignored_repositories AS ignored
+       WHERE ignored.repository_node_id NOT IN (SELECT id FROM active)
+       ORDER BY nameWithOwner`,
+    ).all() as Array<CacheRepository & { ignored: number; inActiveSnapshot: number; activeItemCount: number }>;
+    return {
+      revision: revision.revision,
+      repositories: rows.map((row) => ({
+        id: row.id,
+        nameWithOwner: row.nameWithOwner,
+        ignored: Boolean(row.ignored),
+        inActiveSnapshot: Boolean(row.inActiveSnapshot),
+        activeItemCount: row.activeItemCount,
+      })),
+    };
+  }
+
+  replaceIgnoredRepositories(repositoryIds: string[], expectedRevision: number): ReplaceIgnoredRepositoriesResult {
+    return this.database.transaction((): ReplaceIgnoredRepositoriesResult => {
+      const current = this.getRepositoryVisibility();
+      if (current.revision !== expectedRevision) return { status: "conflict", settings: current };
+      const known = new Map(current.repositories.map((repository) => [repository.id, repository]));
+      for (const repositoryId of repositoryIds) {
+        if (!known.has(repositoryId)) return { status: "unknown_repository", repositoryId };
+      }
+      this.database.prepare("DELETE FROM ignored_repositories").run();
+      const insert = this.database.prepare(
+        "INSERT INTO ignored_repositories (repository_node_id, name_with_owner, ignored_at) VALUES (?, ?, ?)",
+      );
+      const ignoredAt = new Date().toISOString();
+      for (const repositoryId of repositoryIds) {
+        const repository = known.get(repositoryId)!;
+        insert.run(repository.id, repository.nameWithOwner, ignoredAt);
+      }
+      this.database.prepare("UPDATE repository_visibility_state SET revision = revision + 1 WHERE singleton = 1").run();
+      return { status: "updated", settings: this.getRepositoryVisibility() };
+    })();
+  }
+
+  isRepositoryIgnored(repositoryId: string): boolean {
+    return Boolean(this.database.prepare(
+      "SELECT 1 FROM ignored_repositories WHERE repository_node_id = ?",
+    ).get(repositoryId));
   }
 
   getStatus(): CacheStatus {
@@ -717,9 +815,10 @@ class SqliteCache implements Cache {
       .run(staleBefore);
     this.database
       .prepare(
-        `DELETE FROM repositories
-         WHERE observed_at < ?
-           AND node_id NOT IN (SELECT repository_node_id FROM snapshot_repositories)`,
+      `DELETE FROM repositories
+       WHERE observed_at < ?
+           AND node_id NOT IN (SELECT repository_node_id FROM snapshot_repositories)
+           AND node_id NOT IN (SELECT repository_node_id FROM ignored_repositories)`,
       )
       .run(staleBefore);
     this.database
@@ -977,5 +1076,20 @@ function migrate(database: Database.Database) {
       database.exec(`ALTER TABLE instance_configuration ADD COLUMN claimed_label TEXT NOT NULL DEFAULT '${DEFAULT_CLAIMED_LABEL}'`);
     }
     database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (6, ?)").run(new Date().toISOString());
+  })();
+  if ((applied.version ?? 0) < 7) database.transaction(() => {
+    database.exec(`
+      CREATE TABLE ignored_repositories (
+        repository_node_id TEXT PRIMARY KEY,
+        name_with_owner TEXT NOT NULL,
+        ignored_at TEXT NOT NULL
+      );
+      CREATE TABLE repository_visibility_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        revision INTEGER NOT NULL CHECK (revision >= 0)
+      );
+      INSERT INTO repository_visibility_state (singleton, revision) VALUES (1, 0);
+    `);
+    database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (7, ?)").run(new Date().toISOString());
   })();
 }

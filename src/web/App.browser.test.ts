@@ -14,6 +14,45 @@ test.afterAll(async () => {
   await server.close();
 });
 
+for (const viewport of [{ name: "laptop", width: 1280, height: 720 }, { name: "narrow", width: 390, height: 844 }]) {
+  test(`matches the staged repository settings view at ${viewport.name} width`, async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "One committed rendering baseline keeps the settings comparison stable.");
+    let revision = 4;
+    let ignoredRepositoryIds = ["R_field"];
+    const replacements: string[][] = [];
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.route("**/events", (route) => route.abort());
+    await page.route("**/api/overview", (route) => route.fulfill({ json: settingsOverview() }));
+    await page.route("**/api/settings/repository-visibility", async (route) => {
+      if (route.request().method() === "PUT") {
+        const payload = route.request().postDataJSON() as { ignoredRepositoryIds: string[] };
+        ignoredRepositoryIds = payload.ignoredRepositoryIds;
+        replacements.push([...ignoredRepositoryIds]);
+        revision += 1;
+        await route.fulfill({ json: { status: "updated", ...visibilitySettings(revision, new Set(ignoredRepositoryIds)) } });
+        return;
+      }
+      await route.fulfill({ json: { status: "ready", ...visibilitySettings(revision, new Set(ignoredRepositoryIds)) } });
+    });
+    await page.goto(origin);
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.getByRole("searchbox", { name: "Search settings and repositories" }).fill("repository");
+    await page.getByRole("button", { name: "Hide" }).first().click();
+
+    await expect(page.locator(".appShell")).toHaveScreenshot(`repository-settings-${viewport.name}.png`, { animations: "disabled" });
+    expect(await page.locator(".appShell").evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+
+    await page.getByRole("button", { name: "Apply changes" }).click();
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeFocused();
+    await page.getByRole("searchbox", { name: "Search settings and repositories" }).fill("orbit");
+    await page.getByRole("button", { name: "Restore" }).click();
+    await page.getByRole("button", { name: "Apply changes" }).click();
+    await expect(page.getByText("Repository visibility saved.")).toBeVisible();
+    expect(replacements).toEqual([["R_field", "R_orbit"], ["R_field"]]);
+  });
+}
+
 test("restores queue view, selection, filter, and browser scroll after closing changed files", async ({ page }) => {
   await page.route("**/events", (route) => route.abort());
   await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
@@ -217,6 +256,31 @@ function overview(firstTitle = "Fictional pull request 1") {
       { name: "triage", issues: [] },
     ],
     epics: [],
+  };
+}
+
+function settingsOverview() {
+  return {
+    status: "ready",
+    fetchedAt: "2026-08-23T10:00:00.000Z",
+    repositories: [
+      { id: "R_orbit", nameWithOwner: "fictional-labs/orbit-tools" },
+      { id: "R_trail", nameWithOwner: "fictional-labs/trail-notes" },
+    ],
+    scope: { repositoryCount: 2, itemCount: 9, visibleRepositoryCount: 2, visibleItemCount: 9, ignoredRepositoryCount: 1, truncatedReason: null },
+    pullRequests: [], issues: [], epics: [],
+    queues: [{ name: "agent", issues: [] }, { name: "human", issues: [] }, { name: "triage", issues: [] }],
+  };
+}
+
+function visibilitySettings(revision = 4, ignored = new Set(["R_field"])) {
+  return {
+    revision,
+    repositories: [
+      { id: "R_orbit", nameWithOwner: "fictional-labs/orbit-tools", ignored: ignored.has("R_orbit"), inActiveSnapshot: true, activeItemCount: 6, counts: { now: 6, pullRequests: 1, agent: 3, human: 1, triage: 1, epics: 0 } },
+      { id: "R_trail", nameWithOwner: "fictional-labs/trail-notes", ignored: ignored.has("R_trail"), inActiveSnapshot: true, activeItemCount: 3, counts: { now: 3, pullRequests: 1, agent: 0, human: 1, triage: 0, epics: 1 } },
+      { id: "R_field", nameWithOwner: "fictional-labs/field-journal", ignored: ignored.has("R_field"), inActiveSnapshot: false, activeItemCount: 0, counts: { now: 0, pullRequests: 0, agent: 0, human: 0, triage: 0, epics: 0 } },
+    ],
   };
 }
 

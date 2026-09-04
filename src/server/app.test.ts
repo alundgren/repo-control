@@ -12,6 +12,8 @@ import type { ReviewSubmissionService } from "../review/index.js";
 import type { PullRequestMergeService } from "../merge/index.js";
 import type { GitHubReadClient } from "../github/read-client.js";
 import { createOperationalLogger } from "../observability/index.js";
+import type { LogEvent } from "../observability/index.js";
+import { createChangeEventHub } from "../events/index.js";
 import type { SyncService } from "../sync/index.js";
 import { createApp, type AppOptions } from "./app.js";
 
@@ -564,9 +566,64 @@ describe("application server", () => {
         await app.close();
       }
     });
+
+    it("reads and atomically replaces repository visibility with a revision", async () => {
+      const events: unknown[] = [];
+      const logs: LogEvent[] = [];
+      const eventHub = createChangeEventHub();
+      eventHub.subscribe((event) => events.push(event));
+      const { app, cache } = await buildApp({ eventHub, logEvent: (event) => logs.push(event) });
+      try {
+        cache.replaceActiveSnapshot(snapshot());
+        const read = await app.inject({ method: "GET", url: "/api/settings/repository-visibility" });
+        expect(read.statusCode).toBe(200);
+        expect(read.headers["cache-control"]).toBe("no-store");
+        expect(read.json()).toMatchObject({ status: "ready", revision: 0, repositories: [{ id: "R_repo_1", ignored: false, counts: { now: 2, pullRequests: 1, agent: 1 } }] });
+
+        const update = await app.inject({ method: "PUT", url: "/api/settings/repository-visibility", payload: { revision: 0, ignoredRepositoryIds: ["R_repo_1"] } });
+        expect(update.statusCode).toBe(200);
+        expect(update.json()).toMatchObject({ status: "updated", revision: 1, repositories: [{ ignored: true }] });
+        expect((await app.inject({ method: "GET", url: "/api/overview" })).json()).toMatchObject({ repositories: [], issues: [], pullRequests: [], scope: { itemCount: 2, repositoryCount: 1, visibleItemCount: 0, visibleRepositoryCount: 0, ignoredRepositoryCount: 1 } });
+        expect(events).toEqual([{ status: "settings", revision: 1, visibleItemCount: 0, visibleRepositoryCount: 0, ignoredRepositoryCount: 1 }]);
+        expect(logs.at(-1)).toMatchObject({ event: "settings.repository_visibility.finished", status: "complete", revision: 1, ignoredRepositoryCount: 1 });
+
+        const conflict = await app.inject({ method: "PUT", url: "/api/settings/repository-visibility", payload: { revision: 0, ignoredRepositoryIds: [] } });
+        expect(conflict.statusCode).toBe(409);
+        expect(conflict.json()).toMatchObject({ status: "conflict", revision: 1, repositories: [{ ignored: true }] });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it("rejects duplicate, unknown, empty, long, and oversized repository visibility requests", async () => {
+      const logs: Array<Record<string, unknown>> = [];
+      const { app, cache } = await buildApp({ logEvent: (event) => logs.push(event) });
+      try {
+        cache.replaceActiveSnapshot(snapshot());
+        const cases = [
+          { revision: 0, ignoredRepositoryIds: ["R_repo_1", "R_repo_1"] },
+          { revision: 0, ignoredRepositoryIds: ["R_unknown"] },
+          { revision: 0, ignoredRepositoryIds: [""] },
+          { revision: 0, ignoredRepositoryIds: ["x".repeat(257)] },
+          { revision: 0, ignoredRepositoryIds: Array.from({ length: 10_001 }, (_, index) => `R_${index}`) },
+        ];
+        for (const payload of cases) {
+          const response = await app.inject({ method: "PUT", url: "/api/settings/repository-visibility", payload });
+          expect(response.statusCode).toBe(400);
+        }
+        expect(cache.getRepositoryVisibility().revision).toBe(0);
+        expect(logs.filter((event) => event.event === "settings.repository_visibility.finished")).toEqual(
+          Array.from({ length: cases.length }, () => expect.objectContaining({ status: "failed" })),
+        );
+        expect(JSON.stringify(logs)).not.toContain("R_repo_1");
+        expect(JSON.stringify(logs)).not.toContain("R_unknown");
+      } finally {
+        await app.close();
+      }
+    });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService" | "mergeService">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService" | "mergeService" | "eventHub" | "logEvent">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -585,7 +642,7 @@ describe("application server", () => {
     };
 
     const diffClient = overrides.diffClient ?? { async readPullRequestDiff() { throw new Error("readPullRequestDiff should not be called in this test"); } };
-    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, mergeService: overrides.mergeService, logger: overrides.logger, artifactService: overrides.artifactService });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, mergeService: overrides.mergeService, logger: overrides.logger, artifactService: overrides.artifactService, eventHub: overrides.eventHub, logEvent: overrides.logEvent });
     return { app, cache };
   }
 
