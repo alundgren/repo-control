@@ -60,10 +60,15 @@ test("restores queue view, selection, filter, and browser scroll after closing c
 
 test("keeps a linked file below the sticky review controls at a narrow width", async ({ page }) => {
   const title = "A fictional pull request with a long title that wraps across several lines on a narrow screen";
+  const headSha = "abc123def4567890abc123def4567890abc123de";
   await page.setViewportSize({ width: 375, height: 700 });
+  await page.addInitScript(({ sha }) => {
+    const drafts = Array.from({ length: 100 }, (_, index) => ({ id: `draft-${index}`, path: `src/pending-${index}.ts`, line: 1, side: "RIGHT", body: `Draft ${index}` }));
+    window.sessionStorage.setItem(`repo-control:pull-request-drafts:PR_1:${sha}`, JSON.stringify({ pullRequestId: "PR_1", headSha: sha, drafts }));
+  }, { sha: headSha });
   await page.route("**/events", (route) => route.abort());
   await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
-  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff() }));
+  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff(headSha) }));
   await page.goto(origin);
 
   await page.getByRole("button", { name: "Pull requests 40" }).click();
@@ -74,43 +79,73 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   const lineCommentBox = await lineComment.boundingBox();
   expect(lineCommentBox).not.toBeNull();
   expect(lineCommentBox!.x + lineCommentBox!.width).toBeLessThanOrEqual(375);
-  await lineComment.click();
-  await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Keep this fictional name.");
-  await dialog.getByRole("button", { name: "Save draft" }).click();
-  await expect(dialog.getByText("1 comment pending")).toBeVisible();
+  await expect(dialog.getByText("100 comments pending")).toBeVisible();
+  await expect(dialog.locator(".pendingChip")).toContainText("100 pending");
+  await expect(dialog.getByRole("button", { name: "Discard all" })).toBeVisible();
+  const headerParts = [".diffIdentity", ".diffHeadSha", ".diffTitleDisclosure > button", ".diffClose", ".diffViewControls", ".pendingChip", ".diffDiscardAll"];
+  const boxes = await Promise.all(headerParts.map((selector) => dialog.locator(selector).boundingBox()));
+  for (const box of boxes) {
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(0);
+  }
+  for (let left = 0; left < boxes.length; left += 1) {
+    for (let right = left + 1; right < boxes.length; right += 1) {
+      const a = boxes[left]!;
+      const b = boxes[right]!;
+      const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+      expect(overlap, `${headerParts[left]} overlaps ${headerParts[right]}`).toBe(false);
+    }
+  }
+  await expect(dialog.locator(".diffHeader")).toHaveScreenshot("review-header-narrow.png");
   await dialog.getByRole("button", { name: "Files", exact: true }).click();
-  const savedDraft = dialog.getByRole("textbox", { name: "Edit draft comment on src/example-1.ts, new line 1" });
-  await expect(savedDraft).toHaveValue("Keep this fictional name.");
-  await savedDraft.fill("Use this clearer fictional name.");
-  await dialog.getByRole("button", { name: "Save draft" }).click();
-  await expect(savedDraft).toHaveValue("Use this clearer fictional name.");
+  await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
+  let stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
+  let fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
+  expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
   await dialog.getByRole("button", { name: "Grouped" }).click();
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
 
-  const stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
-  const fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
+  stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
+  fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
   expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
+  expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
 test("keeps the review header compact and the review bar at the viewport bottom", async ({ page }) => {
+  const title = "A fictional pull request title long enough to prove the compact laptop header truncates without hiding its controls";
   await page.route("**/events", (route) => route.abort());
-  await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
+  await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
   await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: { ...diff(), reviewEnabled: true, mergeEnabled: true } }));
   await page.route("**/api/items/PR_1/merge", (route) => route.fulfill({ json: { status: "ready", headSha: "abc123def456", sourceBranch: "fictional-branch" } }));
   await page.goto(origin);
 
   await page.getByRole("button", { name: "Pull requests 40" }).click();
-  await page.getByRole("button", { name: "Select Fictional pull request 1", exact: true }).click();
+  await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
   await page.getByRole("button", { name: "Review changed files" }).click();
-  const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
+  const dialog = page.getByRole("dialog", { name: title });
+  await dialog.getByRole("button", { name: "Draft comment on new line 1" }).first().click();
+  await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Keep this fictional name.");
+  await dialog.getByRole("button", { name: "Save draft" }).click();
   const header = dialog.locator(".diffHeader");
   const bar = dialog.getByLabel("Review and merge");
 
   await expect(header).toContainText("fictional-tools/garden · PR 1");
+  await expect(header).toContainText("abc123def456");
   await expect(header).toContainText("30 files · +1 −1");
+  await expect(dialog.getByRole("button", { name: "Grouped" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Files", exact: true })).toBeVisible();
+  await expect(dialog.getByText("1 pending comment")).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Discard all" })).toBeVisible();
+  const disclosure = dialog.getByRole("button", { name: "Show full pull request title" });
+  await disclosure.focus();
+  await disclosure.press("Enter");
+  await expect(dialog.locator(".diffTitleDisclosure > p")).toBeVisible();
+  await disclosure.press("Enter");
   await expect(dialog.getByRole("button", { name: "Submit review…" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Squash and merge" })).toBeVisible();
-  expect((await header.boundingBox())!.height).toBeLessThanOrEqual(72);
+  expect((await dialog.locator(".diffTop").boundingBox())!.height).toBeLessThanOrEqual(56);
+  expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(1280);
+  await expect(header).toHaveScreenshot("review-header-laptop.png");
   const barBox = (await bar.boundingBox())!;
   expect(barBox.height).toBeLessThanOrEqual(80);
   expect(Math.round(barBox.y + barBox.height)).toBe(720);
@@ -223,7 +258,7 @@ function readyFilteringOverview() {
   };
 }
 
-function diff() {
+function diff(headSha = "abc123def456") {
   const files = Array.from({ length: 30 }, (_, index) => ({
     path: `src/example-${index + 1}.ts`,
     previousPath: null,
@@ -234,7 +269,7 @@ function diff() {
   }));
   return {
     status: "complete",
-    headSha: "abc123def456",
+    headSha,
     fileCount: files.length,
     files,
     groups: [{ name: "src", fileIndexes: files.map((_, index) => index) }],

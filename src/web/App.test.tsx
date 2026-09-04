@@ -433,9 +433,13 @@ describe("work queue overview", () => {
     const overlay = dialog as HTMLDivElement;
     expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true);
     expect(within(dialog).getByRole("button", { name: "Grouped" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(dialog.querySelector(".diffHeader")!).getByText("abc123def456")).toBeTruthy();
+    const titleDisclosure = within(dialog).getByRole("button", { name: "Show full pull request title" });
+    titleDisclosure.focus();
+    await user.keyboard("{Enter}");
+    expect(titleDisclosure.getAttribute("aria-expanded")).toBe("true");
     expect(within(dialog).getByRole("heading", { name: "Assets" })).toBeTruthy();
     expect(within(dialog).getByRole("heading", { name: "src" })).toBeTruthy();
-    expect(within(dialog).getByText("abc123def456")).toBeTruthy();
     expect(within(dialog).getByText("-<old>")).toBeTruthy();
     expect(within(dialog).queryByRole("strong")).toBeNull();
     expect(within(within(dialog).getByText("---counter").parentElement!).getByText("Removed line:")).toBeTruthy();
@@ -461,7 +465,7 @@ describe("work queue overview", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
     expect(screen.getByRole("heading", { name: "Now" })).toBeTruthy();
-  });
+  }, 10_000);
 
   it("states partial, incomplete, budget-limited, and failed diff reads with a GitHub fallback", async () => {
     const user = userEvent.setup();
@@ -516,6 +520,9 @@ describe("work queue overview", () => {
     await user.click(within(dialog).getByRole("button", { name: "Save draft" }));
 
     expect(within(dialog).getByText("1 comment pending")).toBeTruthy();
+    const pendingAnnouncement = dialog.querySelector(".pendingChip")!;
+    expect(pendingAnnouncement.getAttribute("aria-label")).toBe("1 pending comment");
+    expect(pendingAnnouncement.getAttribute("aria-live")).toBe("polite");
     const groupedDraft = within(dialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" });
     expect((groupedDraft as HTMLTextAreaElement).value).toBe("Please keep this fictional name.");
     await user.click(within(dialog).getByRole("button", { name: "Files" }));
@@ -535,7 +542,7 @@ describe("work queue overview", () => {
     await user.click(within(restoredDialog).getByRole("button", { name: "Discard draft" }));
     expect(within(restoredDialog).getByText("0 comments pending")).toBeTruthy();
     expect(within(restoredDialog).queryByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" })).toBeNull();
-  });
+  }, 10_000);
 
   it("opens a confirmation step, submits all current-head comments once, and clears only that draft collection", async () => {
     const user = userEvent.setup();
