@@ -60,10 +60,19 @@ configures its label-to-queue mapping. A new installation may offer
 `ready-for-agent` and `ready-for-human` as defaults, but the app does not
 treat those strings as universal.
 
-An issue with an open blocker stays visible in its labelled queue, but it is
-not eligible for a next-item recommendation. An unlabelled open issue belongs
-in Triage. If dependency data is unavailable, Repo Control says so and does
-not guess.
+Ready for agent omits issues with a confirmed open blocker and issues carrying
+the installation's claimed label. The claimed label is instance configuration
+and defaults to `claimed`. Its navigation count and Now preview use the same
+filtered queue. The cache and API retain every loaded issue, so Ready and Now
+searches can still find hidden work and say whether a claim, an open blocker,
+or both kept it out of Ready. `scope.itemCount` counts the complete loaded
+collection.
+
+Incomplete dependency data never hides an issue from Ready. Repo Control keeps
+the issue visible with a dependency-status warning instead of guessing that it
+is blocked or unblocked. Other dedicated-view searches remain within their
+complete queue or pull-request collection. An unlabelled open issue belongs in
+Triage.
 
 ## Refresh rules
 

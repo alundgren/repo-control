@@ -92,6 +92,47 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
 });
 
+test("filters Ready work, discovers hidden issues, and clears a selection after focused refresh", async ({ page }) => {
+  const loaded = readyFilteringOverview();
+  await page.route("**/events", (route) => route.abort());
+  await page.route("**/api/overview", (route) => route.fulfill({ json: loaded }));
+  await page.route("**/api/items/I_ready/refresh", (route) => route.fulfill({
+    json: {
+      status: "updated",
+      item: {
+        ...loaded.issues[0],
+        readiness: { kind: "blocked", blockers: [{ status: "unknown", id: "I_blocker" }] },
+        readyExclusion: "blocked",
+      },
+      fetchedAt: "2026-08-23T11:00:00.000Z",
+      relationshipStatus: "fresh",
+    },
+  }));
+  await page.goto(origin);
+
+  const readyPreview = page.getByRole("region", { name: "Ready for agent" });
+  await expect(readyPreview.getByText("Start fictional irrigation")).toBeVisible();
+  await expect(readyPreview.getByText("Check fictional weather")).toBeVisible();
+  await expect(readyPreview.getByText("Plant claimed bulbs")).toHaveCount(0);
+  await expect(readyPreview.getByText("Repair blocked trellis")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Ready for agent 2" })).toBeVisible();
+  await expect(page.getByText("Dependency status unavailable")).toBeVisible();
+  await expect(page.getByText("Unblocked")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Ready for agent 2" }).click();
+  const search = page.getByRole("searchbox", { name: "Filter pull requests and issues" });
+  await search.fill("claimed bulbs");
+  await expect(page.getByText("Plant claimed bulbs")).toBeVisible();
+  await expect(page.getByText("Hidden from Ready: claimed")).toBeVisible();
+  await search.fill("");
+  await page.getByRole("button", { name: "Select Start fictional irrigation" }).click();
+  await page.getByRole("button", { name: "Refresh this item" }).click();
+
+  await expect(page.getByText("This issue left Ready for agent because it has an open blocker.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose an item" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ready for agent 1" })).toBeVisible();
+});
+
 function overview(firstTitle = "Fictional pull request 1") {
   return {
     status: "ready",
@@ -112,8 +153,45 @@ function overview(firstTitle = "Fictional pull request 1") {
       deletions: 1,
       closingIssues: { status: "complete", items: [] },
     })),
+    issues: [],
     queues: [
       { name: "agent", issues: [] },
+      { name: "human", issues: [] },
+      { name: "triage", issues: [] },
+    ],
+    epics: [],
+  };
+}
+
+function readyFilteringOverview() {
+  const issue = (id: string, number: number, title: string, readiness: object, readyExclusion: string | null) => ({
+    id,
+    type: "issue",
+    repositoryId: "R_1",
+    number,
+    title,
+    excerpt: null,
+    url: `https://github.test/fictional-tools/garden/issues/${number}`,
+    updatedAt: "2026-08-20T10:00:00.000Z",
+    queue: "agent",
+    readiness,
+    readyExclusion,
+    epic: null,
+    subIssues: null,
+  });
+  const ready = issue("I_ready", 30, "Start fictional irrigation", { kind: "unblocked" }, null);
+  const unavailable = issue("I_unknown", 31, "Check fictional weather", { kind: "unavailable" }, null);
+  const claimed = issue("I_claimed", 32, "Plant claimed bulbs", { kind: "unblocked" }, "claimed");
+  const blocked = issue("I_blocked", 33, "Repair blocked trellis", { kind: "blocked", blockers: [{ status: "unknown", id: "I_blocker" }] }, "blocked");
+  return {
+    status: "ready",
+    fetchedAt: "2026-08-23T10:00:00.000Z",
+    repositories: [{ id: "R_1", nameWithOwner: "fictional-tools/garden" }],
+    scope: { repositoryCount: 1, itemCount: 4, truncatedReason: null },
+    pullRequests: [],
+    issues: [ready, unavailable, claimed, blocked],
+    queues: [
+      { name: "agent", issues: [ready, unavailable] },
       { name: "human", issues: [] },
       { name: "triage", issues: [] },
     ],

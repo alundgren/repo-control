@@ -51,7 +51,9 @@ used.
 - Brand: product name with one accent mark.
 - Connection state: the title, explanation, and availability note shown before
   an account connects.
-- Work navigation: the five queue views with loaded-item counts. It becomes a
+- Work navigation: the five queue views with displayed-item counts. Ready for
+  agent counts only issues without a configured claim or confirmed open
+  blocker. It becomes a
   two-column document-flow navigation on narrow screens.
 - Work queue: on desktop, a three-column scan-and-read layout keeps navigation,
   the page header and loaded-work search, and the quick read in separate
@@ -66,7 +68,16 @@ used.
   or change-size facts. The whole row is the selection control. The quick-read
   area carries the bounded excerpt, relationship links or their unavailable
   state, item freshness, and the focused refresh control. Status facts use
-  the success, warning, and secondary text roles.
+  the success, warning, and secondary text roles. Ready rows do not repeat an
+  `Unblocked` fact. Issues with unavailable dependency coverage stay visible
+  and keep their warning.
+- Loaded-work search: Ready for agent search includes claimed and
+  confirmed-blocked issues hidden from its normal list. Now search includes the
+  complete loaded collection. Hidden Ready results name the claim, blocker, or
+  combined reason. Searches in other dedicated views stay within that view.
+  Account sync, focused refresh, and live updates clear a Ready selection when
+  the issue becomes claimed or blocked, then announce the reason. The Ready
+  count and Now preview update with the row.
 - Pull-request diff overlay: a selected pull request opens a full-viewport
   modal above the mounted queue. Its header names the pull request and head
   SHA. Grouped and Files controls change how the same changed files are

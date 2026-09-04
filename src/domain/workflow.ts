@@ -22,10 +22,14 @@ export type ClassifiedIssue<T extends IssueForClassification = IssueForClassific
   queue: string | null;
   readiness: IssueReadiness;
   eligibleForRecommendation: boolean;
+  readyExclusion: ReadyExclusion;
 };
+
+export type ReadyExclusion = "claimed" | "blocked" | "claimed_and_blocked" | null;
 
 export type ClassificationOptions = {
   epicLabel: string;
+  claimedLabel: string;
 };
 
 export function classifyIssues<T extends IssueForClassification>(
@@ -43,12 +47,25 @@ export function classifyIssues<T extends IssueForClassification>(
           .filter((queue): queue is string => queue !== undefined),
       );
       const readiness = getReadiness(issue);
+      const claimed = issue.labels.some(({ name }) => name === options.claimedLabel);
+      const blocked = readiness.kind === "blocked";
+      const queue = isEpic(issue, options.epicLabel) ? null : matchingQueues.size === 1 ? [...matchingQueues][0]! : mapping.defaultQueue;
+      const readyExclusion: ReadyExclusion = queue !== "agent"
+        ? null
+        : claimed && blocked
+          ? "claimed_and_blocked"
+          : claimed
+            ? "claimed"
+            : blocked
+              ? "blocked"
+              : null;
 
       return {
         ...issue,
-        queue: isEpic(issue, options.epicLabel) ? null : matchingQueues.size === 1 ? [...matchingQueues][0]! : mapping.defaultQueue,
+        queue,
         readiness,
-        eligibleForRecommendation: readiness.kind === "unblocked",
+        eligibleForRecommendation: readiness.kind === "unblocked" && !claimed,
+        readyExclusion,
       };
     })
     .sort(compareIssues);

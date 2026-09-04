@@ -127,6 +127,7 @@ export type Cache = {
   replaceQueueMapping(mapping: QueueMapping): void;
   getQueueMapping(): QueueMapping;
   getEpicLabel(): string;
+  getClaimedLabel(): string;
   getStatus(): CacheStatus;
   close(): void;
 };
@@ -365,6 +366,13 @@ class SqliteCache implements Cache {
       .prepare("SELECT epic_label FROM instance_configuration WHERE singleton = 1")
       .get() as { epic_label: string } | undefined;
     return configuration?.epic_label ?? DEFAULT_EPIC_LABEL;
+  }
+
+  getClaimedLabel(): string {
+    const configuration = this.database
+      .prepare("SELECT claimed_label FROM instance_configuration WHERE singleton = 1")
+      .get() as { claimed_label: string } | undefined;
+    return configuration?.claimed_label ?? DEFAULT_CLAIMED_LABEL;
   }
 
   getStatus(): CacheStatus {
@@ -783,6 +791,7 @@ const DEFAULT_QUEUE_MAPPING: QueueMapping = {
 };
 
 const DEFAULT_EPIC_LABEL = "epic";
+const DEFAULT_CLAIMED_LABEL = "claimed";
 
 function migrate(database: Database.Database) {
   database.exec(`
@@ -961,5 +970,12 @@ function migrate(database: Database.Database) {
       database.exec(`ALTER TABLE instance_configuration ADD COLUMN epic_label TEXT NOT NULL DEFAULT '${DEFAULT_EPIC_LABEL}'`);
     }
     database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (5, ?)").run(new Date().toISOString());
+  })();
+  if ((applied.version ?? 0) < 6) database.transaction(() => {
+    const configurationColumns = database.prepare("PRAGMA table_info(instance_configuration)").all() as Array<{ name: string }>;
+    if (!configurationColumns.some((column) => column.name === "claimed_label")) {
+      database.exec(`ALTER TABLE instance_configuration ADD COLUMN claimed_label TEXT NOT NULL DEFAULT '${DEFAULT_CLAIMED_LABEL}'`);
+    }
+    database.prepare("INSERT INTO cache_migrations (version, applied_at) VALUES (6, ?)").run(new Date().toISOString());
   })();
 }
