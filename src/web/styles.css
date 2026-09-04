@@ -115,43 +115,57 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 
 .diffOverlay { position: fixed; z-index: 10; inset: 0; overflow: auto; background: var(--color-background); color: var(--color-text); }
 .diffTop { position: sticky; z-index: 2; top: 0; }
-.diffHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem; padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-raised-surface); }
-.diffHeader h1 { font-size: clamp(1.5rem, 3vw, 2rem); }
-.diffIdentity { margin-top: 0.375rem; color: var(--color-text-muted); }
+.diffHeader { display: flex; align-items: center; gap: 1rem; padding: 0.8125rem 1.125rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
+.diffHeaderSummary { min-width: 0; }
+.diffHeader h1 { font-size: 1.0625rem; line-height: 1.3; }
+.diffIdentity { color: var(--color-text-muted); font-size: 0.75rem; line-height: 1.4; }
 .diffIdentity span, .diffPath, .diffFileList { font-family: var(--font-mono); }
-.diffClose { padding: 0.5625rem 0.75rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); background: var(--color-field); cursor: pointer; }
+.diffMeta { color: var(--color-text-muted); font-size: 0.84375rem; white-space: nowrap; }
+.diffHeaderGrow, .reviewBarGrow { flex: 1; }
+.pendingChip { padding: 0.1875rem 0.6875rem; border-radius: 999px; background: var(--color-accent); color: var(--color-field); font-size: 0.78125rem; font-weight: 500; line-height: 1.5; white-space: nowrap; }
+.diffClose { display: grid; width: 1.875rem; height: 1.875rem; padding: 0; place-items: center; border: 0; border-radius: var(--radius-control); background: transparent; cursor: pointer; font-size: 1.25rem; line-height: 1; }
+.diffClose:hover { background: var(--color-raised-surface); }
 .diffMessage { max-width: 70ch; padding: 2rem; }
 .diffMessage a { display: inline-block; margin-top: 0.75rem; }
-.diffViewControls { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
+.diffViewControls { display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 1.125rem; border-bottom: 1px solid var(--color-divider); background: var(--color-background); }
 .diffViewButtons { display: flex; gap: 0.25rem; }
-.diffViewControls button { padding: 0.375rem 0.75rem; border: 0; border-radius: var(--radius-control); background: transparent; cursor: pointer; }
+.diffViewControls button { display: grid; gap: 0; padding: 0.4375rem 0.875rem; border: 0; border-radius: var(--radius-control); background: transparent; cursor: pointer; text-align: left; }
+.diffViewControls button span + span { color: var(--color-text-muted); font-size: 0.84375rem; font-weight: 400; }
 .diffViewControls button[aria-pressed="true"] { background: var(--color-raised-surface); font-weight: 600; }
-.pendingCount { margin-left: auto; font-family: var(--font-mono); font-size: 0.84375rem; font-variant-numeric: tabular-nums; }
 .diffViewControls .discardAll, .discardDraft { color: var(--color-danger); text-decoration: underline; }
 .draftStatus { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; padding: 0.5rem 2rem; border-bottom: 1px solid var(--color-divider); color: var(--color-text-muted); font-size: 0.84375rem; }
 .draftStatus .storageWarning { color: var(--color-warning); }
-.reviewSubmission { display: grid; max-width: 70ch; gap: 0.75rem; padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
-.reviewSubmission h2 { font-size: 1.0625rem; }
-.reviewSubmission label { display: grid; gap: 0.375rem; color: var(--color-text-muted); font-size: 0.84375rem; }
-.reviewSubmission select, .reviewSubmission textarea { width: 100%; padding: 0.625rem; border: 1px solid var(--color-divider); border-radius: var(--radius-field); background: var(--color-field); color: var(--color-text); }
-.reviewSubmission textarea { resize: vertical; line-height: 1.5; }
-.reviewSubmission > button { justify-self: start; padding: 0.625rem 0.875rem; border: 0; border-radius: var(--radius-control); background: var(--color-accent); color: var(--color-field); cursor: pointer; font-weight: 600; }
-.reviewSubmission > button:disabled { cursor: wait; opacity: 0.7; }
-.reviewSubmission > p { color: var(--color-text-muted); font-size: 0.84375rem; }
-.reviewSubmission .reviewSuccess { color: var(--color-success); }
-.reviewSubmission .reviewWarning { color: var(--color-warning); }
-.mergePanel { display: grid; max-width: 70ch; gap: 0.75rem; margin: 1.5rem 2rem; padding: 1.25rem; border: 1px solid var(--color-divider); border-left: 0.25rem solid var(--color-danger); border-radius: var(--radius-field); background: var(--color-field); }
-.mergePanel h2 { font-size: 1.0625rem; }
-.mergePanel p { color: var(--color-text-muted); font-size: 0.84375rem; }
-.mergeButton { justify-self: start; padding: 0.625rem 0.875rem; border: 0; border-radius: var(--radius-control); background: var(--color-danger); color: var(--color-field); cursor: pointer; font-weight: 600; }
+.reviewDock { position: fixed; z-index: 3; right: 0; bottom: 0; left: 0; border-top: 1px solid var(--color-divider); background: var(--color-surface); }
+.reviewBar { display: flex; align-items: center; gap: 0.875rem; min-height: 3.75rem; padding: 0.75rem 1.125rem; flex-wrap: wrap; }
+.reviewCount { font-weight: 600; }
+.reviewCommit, .mergePanel p { color: var(--color-text-muted); font-size: 0.84375rem; }
+.reviewCommit .mono { font-size: 0.8125rem; }
+.reviewBar select { padding: 0.375rem 0.625rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); background: var(--color-field); color: var(--color-text); font-size: 0.875rem; }
+.primaryButton, .mergeButton { padding: 0.5rem 0.75rem; border: 0; border-radius: var(--radius-control); color: var(--color-field); cursor: pointer; font-weight: 600; }
+.primaryButton { background: var(--color-accent); }
+.mergeButton { background: var(--color-danger); }
+.primaryButton:disabled { cursor: wait; opacity: 0.7; }
+.reviewBar .discardAll { padding: 0; border: 0; background: transparent; color: var(--color-danger); cursor: pointer; font-size: 0.84375rem; text-decoration: underline; }
+.mergePanel { display: contents; }
+.mergePanel::before { content: ""; align-self: stretch; width: 1px; background: var(--color-divider); }
+.reviewComposer { display: grid; grid-template-columns: minmax(12rem, 0.7fr) minmax(20rem, 1.3fr) auto; align-items: end; gap: 0.75rem 1rem; padding: 1rem 1.125rem; border-bottom: 1px solid var(--color-divider); background: var(--color-field); }
+.reviewComposer h2 { font-size: 1.0625rem; }
+.reviewComposer p, .reviewComposer label { color: var(--color-text-muted); font-size: 0.84375rem; }
+.reviewComposer label { display: grid; gap: 0.25rem; }
+.reviewComposer textarea { width: 100%; padding: 0.5rem 0.625rem; resize: vertical; border: 1px solid var(--color-divider); border-radius: var(--radius-field); background: var(--color-background); color: var(--color-text); line-height: 1.45; }
+.reviewComposerActions { display: flex; align-items: center; gap: 0.75rem; padding-bottom: 0.0625rem; }
+.reviewComposer .reviewWarning { grid-column: 2; color: var(--color-warning); }
+.reviewDock > .reviewSuccess, .reviewDock > .reviewWarning { padding: 0.5rem 1.125rem; border-bottom: 1px solid var(--color-divider); font-size: 0.84375rem; }
+.reviewDock > .reviewSuccess { color: var(--color-success); }
+.reviewDock > .reviewWarning { color: var(--color-warning); }
 .staleDrafts { padding: 1.25rem 2rem; border-bottom: 1px solid var(--color-divider); background: var(--color-surface); }
 .staleDrafts > p { margin-top: 0.375rem; }
 .staleDraftGroup { margin-top: 1rem; }
 .staleDraftGroup h3 { margin: 0; font-family: var(--font-mono); font-size: 0.84375rem; font-weight: 500; }
 .staleDraftCard { max-width: 70ch; margin-top: 0.75rem; padding: 0.75rem; border-left: 0.1875rem solid var(--color-warning); background: var(--color-field); }
 .staleDraftCard label { display: grid; margin-top: 0.5rem; color: var(--color-text-muted); font-size: 0.84375rem; }
-.diffLayout { display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); }
-.diffFileList { position: sticky; top: 10.5rem; align-self: start; max-height: calc(100vh - 10.5rem); padding: 1.25rem; overflow: auto; border-right: 1px solid var(--color-divider); font-size: 0.84375rem; }
+.diffLayout { display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); padding-bottom: 4.75rem; }
+.diffFileList { position: sticky; top: 7.5rem; align-self: start; max-height: calc(100vh - 12.25rem); padding: 1.25rem; overflow: auto; border-right: 1px solid var(--color-divider); font-size: 0.84375rem; }
 .diffFileList ul { margin: 0.75rem 0 0; padding-left: 1.25rem; overflow-wrap: anywhere; }
 .diffFileList li + li { margin-top: 0.375rem; }
 .diffGroupedFileList { list-style: none; }
@@ -201,9 +215,20 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
   .sectionHeading { align-items: flex-start; flex-direction: column; gap: 0.25rem; }
   .diffHeader { padding: 1rem 1.25rem; }
   .diffViewControls { flex-wrap: wrap; padding-inline: 1.25rem; }
-  .draftStatus, .reviewSubmission, .staleDrafts { padding-inline: 1.25rem; }
-  .mergePanel { margin-inline: 1.25rem; }
+  .draftStatus, .staleDrafts { padding-inline: 1.25rem; }
   .diffLayout { display: block; }
   .diffFileList { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--color-divider); }
   .diffFiles { padding: 0.75rem 1.25rem 3rem; }
+  .diffHeader { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem 0.75rem; }
+  .diffHeaderSummary { grid-column: 1; }
+  .diffMeta { grid-column: 1; }
+  .diffHeaderGrow { display: none; }
+  .pendingChip { grid-column: 1; justify-self: start; }
+  .diffClose { grid-column: 2; grid-row: 1; }
+  .reviewComposer { grid-template-columns: 1fr; align-items: stretch; }
+  .reviewComposer .reviewWarning { grid-column: 1; }
+  .reviewBar { align-items: flex-start; }
+  .reviewBarGrow { display: none; }
+  .mergePanel::before { display: none; }
+  .diffLayout { padding-bottom: 9rem; }
 }

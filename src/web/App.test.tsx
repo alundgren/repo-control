@@ -364,11 +364,11 @@ describe("work queue overview", () => {
     fireEvent.change(within(dialog).getByRole("textbox", { name: "New draft comment" }), { target: { value: "Please keep this fictional name." } });
     await user.click(within(dialog).getByRole("button", { name: "Save draft" }));
 
-    expect(within(dialog).getByText("1 pending")).toBeTruthy();
+    expect(within(dialog).getByText("1 comment pending")).toBeTruthy();
     const groupedDraft = within(dialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" });
     expect((groupedDraft as HTMLTextAreaElement).value).toBe("Please keep this fictional name.");
     await user.click(within(dialog).getByRole("button", { name: "Files" }));
-    expect(within(dialog).getByText("1 pending")).toBeTruthy();
+    expect(within(dialog).getByText("1 comment pending")).toBeTruthy();
     expect(within(dialog).getAllByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" })).toHaveLength(1);
     const filesDraft = within(dialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" });
     fireEvent.change(filesDraft, { target: { value: "Use the clearer fictional name." } });
@@ -382,13 +382,12 @@ describe("work queue overview", () => {
     const restoredDialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
     expect((within(restoredDialog).getByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" }) as HTMLTextAreaElement).value).toBe("Use the clearer fictional name.");
     await user.click(within(restoredDialog).getByRole("button", { name: "Discard draft" }));
-    expect(within(restoredDialog).getByText("0 pending")).toBeTruthy();
+    expect(within(restoredDialog).getByText("0 comments pending")).toBeTruthy();
     expect(within(restoredDialog).queryByRole("textbox", { name: "Edit draft comment on src/first.ts, new line 1" })).toBeNull();
   });
 
-  it("waits for confirmation, submits all current-head comments once, and clears only that draft collection", async () => {
+  it("opens a confirmation step, submits all current-head comments once, and clears only that draft collection", async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     const store = new DraftCommentStore(window.sessionStorage);
     store.save("PR_1", "older-head", { id: "stale", path: "src/old.ts", line: 2, side: "LEFT", body: "Keep this stale draft." });
     const fetchMock = vi.fn()
@@ -404,15 +403,14 @@ describe("work queue overview", () => {
     await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
     fireEvent.change(screen.getByRole("textbox", { name: "New draft comment" }), { target: { value: "Use the fictional helper." } });
     await user.click(screen.getByRole("button", { name: "Save draft" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review…" }));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("heading", { name: "Submit review" })).toBeTruthy();
+    expect(screen.getByText("1 comment pending")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Summary, optional" }), { target: { value: "A short review summary." } });
 
-    await user.click(screen.getByRole("button", { name: "Submit review" }));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("2 pending")).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Submit review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
     expect(await screen.findByText("Review submitted. Drafts for this head commit were cleared.")).toBeTruthy();
-    expect(confirm).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const [, request] = fetchMock.mock.calls[2]!;
     expect(request).toMatchObject({ method: "POST", headers: { "content-type": "application/json" } });
@@ -422,13 +420,12 @@ describe("work queue overview", () => {
       event: "COMMENT",
       comments: [{ path: "src/first.ts", line: 1, side: "RIGHT", body: "Use the fictional helper." }],
     });
-    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Draft body" }) as HTMLTextAreaElement).value).toBe("Keep this stale draft.");
   });
 
   it("preserves drafts and directs an ambiguous submission to GitHub without retrying", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response({ ...draftDiff(), reviewEnabled: true }))
@@ -442,17 +439,17 @@ describe("work queue overview", () => {
     await user.click(await screen.findByRole("button", { name: "Draft comment on new line 1" }));
     fireEvent.change(screen.getByRole("textbox", { name: "New draft comment" }), { target: { value: "Keep this until the outcome is known." } });
     await user.click(screen.getByRole("button", { name: "Save draft" }));
-    await user.click(screen.getByRole("button", { name: "Submit review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
 
     expect(await screen.findByText("Submission outcome unknown.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Verify on GitHub before retrying." })).toBeTruthy();
-    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("1 comment pending")).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("clears submitted drafts while stating that the follow-up queue refresh failed", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     new DraftCommentStore(window.sessionStorage).save("PR_1", "abc123def456", {
       id: "draft-1",
       path: "src/first.ts",
@@ -469,16 +466,16 @@ describe("work queue overview", () => {
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    await user.click(await screen.findByRole("button", { name: "Submit review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Submit review…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
 
     expect(await screen.findByText("Review submitted and drafts were cleared, but the queue could not refresh. Close the review and use Refresh this item.")).toBeTruthy();
-    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
     expect(screen.queryByText("The review was not submitted. Drafts were kept.")).toBeNull();
   });
 
   it("treats post-submission refresh permission denial as a queue refresh failure", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     new DraftCommentStore(window.sessionStorage).save("PR_1", "abc123def456", {
       id: "draft-1",
       path: "src/first.ts",
@@ -500,16 +497,16 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
     const dialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
-    await user.click(within(dialog).getByRole("button", { name: "Submit review" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Submit review…" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Submit review" }));
 
     expect(await within(dialog).findByText("Review submitted and drafts were cleared, but the queue could not refresh. Close the review and use Refresh this item.")).toBeTruthy();
-    expect(within(dialog).getByText("0 pending")).toBeTruthy();
+    expect(within(dialog).getByText("0 comments pending")).toBeTruthy();
     expect(screen.getByRole("dialog", { name: "Keep fictional paths tidy" })).toBeTruthy();
   });
 
   it("warns against retry when a submitted draft's saved copy cannot be removed", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     new DraftCommentStore(window.sessionStorage).save("PR_1", "abc123def456", {
       id: "draft-1",
       path: "src/first.ts",
@@ -527,10 +524,11 @@ describe("work queue overview", () => {
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    await user.click(await screen.findByRole("button", { name: "Submit review" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Submit review…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
 
     expect(await screen.findByText("Review submitted, but Repo Control could not confirm that its saved reload copy was cleared. Do not submit it again. If it returns after reload, discard it.")).toBeTruthy();
-    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
   });
 
   it("does not show review submission controls when the operator action is disabled", async () => {
@@ -689,13 +687,13 @@ describe("work queue overview", () => {
       "A second stale draft.",
     ]);
     await user.click(screen.getAllByRole("button", { name: "Discard draft" })[0]!);
-    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("1 pending comment")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Discard all" }));
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("1 pending comment")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Discard all" }));
     expect(confirm).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Drafts from an earlier head commit" })).toBeNull();
   }, 15_000);
 
@@ -733,7 +731,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Draft comment on new line 1" }));
     await user.type(screen.getByRole("textbox", { name: "New draft comment" }), "Keep this without storage.");
     await user.click(screen.getByRole("button", { name: "Save draft" }));
-    expect(screen.getByText("1 pending")).toBeTruthy();
+    expect(screen.getByText("1 comment pending")).toBeTruthy();
   });
 
   it("states the UTF-8 body limit without saving the rejected draft", async () => {
@@ -751,7 +749,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
 
     expect(screen.getByText("This comment is larger than the 16 KiB UTF-8 limit. The existing draft was kept.")).toBeTruthy();
-    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
   });
 
   it("states the 100-comment limit without losing saved drafts", async () => {
@@ -768,13 +766,13 @@ describe("work queue overview", () => {
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    expect(await screen.findByText("100 pending")).toBeTruthy();
+    expect(await screen.findByText("100 comments pending")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Draft comment on new line 1" }));
     fireEvent.change(screen.getByRole("textbox", { name: "New draft comment" }), { target: { value: "One draft too many." } });
     await user.click(screen.getAllByRole("button", { name: "Save draft" }).at(-1)!);
 
     expect(screen.getByText("This head commit already has 100 draft comments. Existing drafts were kept.")).toBeTruthy();
-    expect(screen.getByText("100 pending")).toBeTruthy();
+    expect(screen.getByText("100 comments pending")).toBeTruthy();
   }, 15_000);
 
   it("states the aggregate tab limit without saving the rejected draft", async () => {
@@ -796,7 +794,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Save draft" }));
 
     expect(screen.getByText("Saved drafts in this tab would exceed 1 MiB. Existing drafts were kept.")).toBeTruthy();
-    expect(screen.getByText("0 pending")).toBeTruthy();
+    expect(screen.getByText("0 comments pending")).toBeTruthy();
   });
 
   it("moves a refreshed issue to its returned queue in queue order", async () => {
