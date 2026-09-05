@@ -466,9 +466,13 @@ export function App() {
         reconciled = true;
       }
     } catch {
-      if (requestId === overviewRequestRef.current) setLiveState("unavailable");
+      if (requestId === overviewRequestRef.current) {
+        setLiveState("unavailable");
+        if (!overviewRef.current) setLoadMessage("The work queue is unavailable. Try again.");
+      }
     } finally {
       if (requestId === overviewRequestRef.current) {
+        setLoading(false);
         reconcilingLiveRef.current = false;
         if (reconciled || overviewRef.current) {
           const buffered = eventBufferRef.current.splice(0);

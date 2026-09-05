@@ -74,6 +74,42 @@ describe("work queue overview", () => {
     ]);
   });
 
+  it("finishes the initial loading state when the live connection reconciles first", async () => {
+    const initialOverview = deferred<ReturnType<typeof response>>();
+    vi.stubGlobal("EventSource", TestEventSource);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(() => initialOverview.promise)
+      .mockResolvedValueOnce(response(readyOverview())));
+
+    render(<App />);
+    act(() => TestEventSource.last?.open());
+
+    expect(await screen.findByText("Add a fictional seed")).toBeTruthy();
+    expect(screen.queryByText("Loading the work queue…")).toBeNull();
+    expect(screen.getByRole("region", { name: "Work queues" }).getAttribute("aria-busy")).toBe("false");
+
+    initialOverview.resolve(response(readyOverview()));
+    await act(async () => Promise.resolve());
+  });
+
+  it("offers an initial-load retry when the live reconciliation fails first", async () => {
+    const initialOverview = deferred<ReturnType<typeof response>>();
+    vi.stubGlobal("EventSource", TestEventSource);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(() => initialOverview.promise)
+      .mockRejectedValueOnce(new Error("overview unavailable")));
+
+    render(<App />);
+    act(() => TestEventSource.last?.open());
+
+    expect(await screen.findByText("The work queue is unavailable. Try again.")).toBeTruthy();
+    expect(screen.queryByText("Loading the work queue…")).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+
+    initialOverview.resolve(response(readyOverview()));
+    await act(async () => Promise.resolve());
+  });
+
   it("searches repository settings, stages multiple changes, previews impact, and applies once", async () => {
     const user = userEvent.setup();
     const updatedSettings = repositorySettings(1, new Set(["R_1"]));
