@@ -141,7 +141,7 @@ test("keeps the review header compact and the review bar at the viewport bottom"
   await expect(dialog.locator(".diffTitleDisclosure > p")).toBeVisible();
   await disclosure.press("Enter");
   await expect(dialog.getByRole("button", { name: "Submit review…" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Squash and merge" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Unlock merge" })).toHaveText("Merge");
   expect((await dialog.locator(".diffTop").boundingBox())!.height).toBeLessThanOrEqual(56);
   expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(1280);
   const barBox = (await bar.boundingBox())!;

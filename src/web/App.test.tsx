@@ -703,14 +703,18 @@ describe("work queue overview", () => {
     expect(screen.queryByRole("heading", { name: "Submit review" })).toBeNull();
   });
 
-  it("shows merge only when currently ready and confirms the pull request and source branch", async () => {
+  it("requires two presses within the armed window before merging, then closes the review", async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const drafts = new DraftCommentStore(window.sessionStorage);
+    drafts.save("PR_1", "abc123def456", { id: "current", path: "src/first.ts", line: 1, side: "RIGHT", body: "A current draft." });
+    drafts.save("PR_1", "older-head", { id: "stale", path: "src/first.ts", line: 1, side: "RIGHT", body: "A stale draft." });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response({ ...draftDiff(), reviewEnabled: true, mergeEnabled: true }))
       .mockResolvedValueOnce(response({ status: "ready", headSha: "abc123def456", sourceBranch: "fictional-branch" }))
-      .mockResolvedValueOnce(response({ status: "merged", alreadyMerged: false, refresh: { status: "removed", reason: "pull_request_merged" } }));
+      .mockResolvedValueOnce(response({ status: "merged", alreadyMerged: false, refresh: { status: "removed", reason: "pull_request_merged" } }))
+      .mockResolvedValueOnce(response({ ...draftDiff(), reviewEnabled: true, mergeEnabled: true }))
+      .mockResolvedValueOnce(response({ status: "ready", headSha: "abc123def456", sourceBranch: "fictional-branch" }));
     vi.stubGlobal("fetch", fetchMock);
     vi.stubGlobal("EventSource", TestEventSource);
 
@@ -718,7 +722,7 @@ describe("work queue overview", () => {
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    const mergeButton = await screen.findByRole("button", { name: "Squash and merge" });
+    const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
     const mergeSection = mergeButton.closest("section");
     expect(mergeSection).not.toBeNull();
     expect(within(mergeSection!).getByRole("heading", { name: "Merge pull request" })).toBeTruthy();
@@ -726,18 +730,46 @@ describe("work queue overview", () => {
 
     await user.click(mergeButton);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    await user.click(mergeButton);
+    const armedButton = screen.getByRole("button", { name: "Confirm merge" });
+    expect(armedButton.textContent).toBe("Merge");
+    expect(mergeSection!.textContent).toContain("Press Merge again within 3 seconds.");
+    await user.click(armedButton);
 
-    expect(confirm).toHaveBeenLastCalledWith('Squash-merge PR41 "Keep fictional paths tidy" from source branch fictional-branch? This cannot be undone in Repo Control. Version one leaves the source branch in place.');
-    expect(await screen.findByText("Merged. The source branch was left in place.")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keep fictional paths tidy" })).toBeNull());
     expect(fetchMock).toHaveBeenCalledTimes(4);
     const [url, request] = fetchMock.mock.calls[3]!;
     expect(url).toBe("/api/items/PR_1/merge");
     expect(request).toMatchObject({ method: "POST" });
     expect(JSON.parse(String(request.body))).toEqual({ expectedHeadSha: "abc123def456" });
+    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    expect(await screen.findByText("0 comments pending")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Drafts from an earlier head commit" })).toBeNull();
     TestEventSource.last?.emit({ type: "removed", nodeId: "PR_1", itemType: "pull_request", number: 41, reason: "pull_request_merged", scope: readyOverview().scope });
     await waitFor(() => expect(document.querySelector('[aria-label="Select Keep fictional paths tidy"]')).toBeNull());
-    expect(screen.getByText("Merged. The source branch was left in place.")).toBeTruthy();
+  });
+
+  it("locks merge again after three seconds", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ ...draftDiff(), reviewEnabled: true, mergeEnabled: true }))
+      .mockResolvedValueOnce(response({ status: "ready", headSha: "abc123def456", sourceBranch: "fictional-branch" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Keep fictional paths tidy");
+    fireEvent.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    fireEvent.click(screen.getByRole("button", { name: "Review changed files" }));
+    const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
+
+    vi.useFakeTimers();
+    fireEvent.click(mergeButton);
+    expect(screen.getByRole("button", { name: "Confirm merge" })).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+
+    expect(screen.getByRole("button", { name: "Unlock merge" })).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not offer or request merge when readiness belongs to a newer head", async () => {
@@ -754,7 +786,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
 
     expect(await screen.findByText("The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Squash and merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -771,7 +803,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
     expect(await screen.findByText("Required checks are still running.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Squash and merge" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -790,13 +822,14 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
     await user.click(await screen.findByRole("button", { name: "Check again" }));
 
-    expect(await screen.findByRole("button", { name: "Squash and merge" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Unlock merge" })).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("sends an ambiguous merge result to GitHub and does not retry", async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const drafts = new DraftCommentStore(window.sessionStorage);
+    drafts.save("PR_1", "abc123def456", { id: "keep", path: "src/first.ts", line: 1, side: "RIGHT", body: "Keep until the merge is verified." });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response({ ...draftDiff(), mergeEnabled: true }))
@@ -808,17 +841,18 @@ describe("work queue overview", () => {
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    await user.click(await screen.findByRole("button", { name: "Squash and merge" }));
+    await user.click(await screen.findByRole("button", { name: "Unlock merge" }));
+    await user.click(screen.getByRole("button", { name: "Confirm merge" }));
 
     expect(await screen.findByText("Merge outcome unknown.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Verify on GitHub before trying again." })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Squash and merge" })).toBeNull();
+    expect(screen.getByLabelText("1 pending comment")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
-  it("keeps a moved-head draft visible until confirmed discard", async () => {
+  it("keeps a moved-head draft visible until it is discarded", async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response(draftDiff("old-head")))
@@ -845,12 +879,8 @@ describe("work queue overview", () => {
       "A second stale draft.",
     ]);
     await user.click(screen.getAllByRole("button", { name: "Discard draft" })[0]!);
-    expect(screen.getByText("1 pending comment")).toBeTruthy();
+    expect(screen.getByLabelText("1 pending comment")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Discard all" }));
-    expect(confirm).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("1 pending comment")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Discard all" }));
-    expect(confirm).toHaveBeenCalledTimes(2);
     expect(screen.getByText("0 comments pending")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Drafts from an earlier head commit" })).toBeNull();
   }, 15_000);

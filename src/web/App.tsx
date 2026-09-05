@@ -16,10 +16,9 @@ type DiffState =
   | { status: "loaded"; data: Exclude<PullRequestDiffResponse, { status: "unavailable" }> }
   | { status: "failed" };
 type DiffView = "grouped" | "files";
-type MergePanelState = Exclude<MergeReadiness, { status: "merged" }>
-  | { status: "merged"; refreshFailed?: boolean; mergedHere?: boolean }
+type MergePanelState = MergeReadiness
   | { status: "merging"; headSha: string; sourceBranch: string }
-  | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous"; refreshFailed?: boolean };
+  | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous" };
 
 type ViewDetails = {
   title: string;
@@ -807,7 +806,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
 
   function discardAll() {
     const count = draftStore.collectionsFor(item.id).reduce((total, collection) => total + collection.drafts.length, 0);
-    if (count === 0 || !window.confirm(`Discard all ${count} draft ${count === 1 ? "comment" : "comments"} for this pull request?`)) return;
+    if (count === 0) return;
     draftStore.discardPullRequest(item.id);
     setNewDraft(null);
     setDraftRevision((revision) => revision + 1);
@@ -856,13 +855,11 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
       setMergeState({ status: "failed", reason: "validation" });
       return;
     }
-    const confirmed = window.confirm(`Squash-merge PR${item.number} "${item.title}" from source branch ${sourceBranch}? This cannot be undone in Repo Control. Version one leaves the source branch in place.`);
-    if (!confirmed) return;
     setMergeState({ status: "merging", headSha, sourceBranch });
     const result = await mergePullRequest(item.id, headSha);
     if (result.status === "merged") {
-      const refreshFailed = result.refresh.status === "failed" || result.refresh.status === "permission_denied";
-      setMergeState({ status: "merged", refreshFailed, mergedHere: !result.alreadyMerged });
+      draftStore.discardPullRequest(item.id);
+      onClose();
       return;
     }
     setMergeState(result);
@@ -1070,6 +1067,28 @@ function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
   onCheck: () => void;
   onMerge: () => void;
 }) {
+  const [mergeArmed, setMergeArmed] = useState(false);
+  const readyHeadSha = mergeState.status === "ready" ? mergeState.headSha : null;
+
+  useEffect(() => {
+    setMergeArmed(false);
+  }, [mergeState.status, readyHeadSha]);
+
+  useEffect(() => {
+    if (!mergeArmed) return;
+    const timeout = window.setTimeout(() => setMergeArmed(false), 3_000);
+    return () => window.clearTimeout(timeout);
+  }, [mergeArmed]);
+
+  function handleMerge() {
+    if (!mergeArmed) {
+      setMergeArmed(true);
+      return;
+    }
+    setMergeArmed(false);
+    onMerge();
+  }
+
   const blockedMessages: Record<import("../merge/index.js").MergeBlockedReason, string> = {
     draft: "This draft pull request cannot be merged.",
     conflicts: "Resolve merge conflicts on GitHub before merging.",
@@ -1087,21 +1106,47 @@ function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
   else if (mergeState.status === "not_permitted") message = "Merge is not enabled for this installation or the connected account cannot merge this pull request.";
   else if (mergeState.status === "unavailable") message = <>GitHub merge status is unavailable. <a href={itemUrl} rel="noreferrer" target="_blank">Check on GitHub.</a></>;
   else if (mergeState.status === "merging") message = "Merging with the reviewed head commit…";
-  else if (mergeState.status === "merged") message = mergeState.refreshFailed
-    ? "Merged. The queue refresh failed, so close this review and use Refresh this item."
-    : mergeState.mergedHere ? "Merged. The source branch was left in place." : "This pull request is already merged.";
+  else if (mergeState.status === "merged") message = "This pull request is already merged.";
   else if (mergeState.status === "failed" && mergeState.reason === "permission") message = "GitHub denied permission to merge. Nothing was retried.";
   else if (mergeState.status === "failed" && mergeState.reason === "policy") message = "GitHub rejected the merge under the repository policy. Nothing was retried.";
   else if (mergeState.status === "failed" && mergeState.reason === "validation") message = "The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.";
   else if (mergeState.status === "failed") message = <><strong>Merge outcome unknown.</strong> <a href={itemUrl} rel="noreferrer" target="_blank">Verify on GitHub before trying again.</a></>;
-  else message = "Ready to squash-merge the reviewed head commit.";
+  else if (mergeArmed) message = "Press Merge again within 3 seconds.";
+  else message = <>Ready. Branch <span className="mono">{mergeState.sourceBranch}</span> won't be deleted.</>;
 
   return (
     <section aria-labelledby="merge-title" className="mergePanel">
       <h2 className="visuallyHidden" id="merge-title">Merge pull request</h2>
       {mergeState.status === "checking" && !checkBusy ? <button className="quietButton" onClick={onCheck} type="button">Check again</button> : null}
-      {mergeState.status === "ready" ? <button className="mergeButton" onClick={() => void onMerge()} type="button">Squash and merge</button> : null}
-      <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"}>{message}</p>
+      {mergeState.status === "ready" ? (
+        <button
+          aria-describedby="merge-status"
+          aria-label={mergeArmed ? "Confirm merge" : "Unlock merge"}
+          className={`mergeButton${mergeArmed ? " mergeButtonArmed" : ""}`}
+          onClick={handleMerge}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape" || !mergeArmed) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setMergeArmed(false);
+          }}
+          type="button"
+        >
+          <span aria-hidden="true" className="mergeButtonIcons">
+            <svg className="mergeButtonIcon mergeLockIcon" fill="none" viewBox="0 0 24 24">
+              <rect height="10" rx="2" stroke="currentColor" strokeWidth="2" width="16" x="4" y="11" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+            </svg>
+            <svg className="mergeButtonIcon mergeExecuteIcon" fill="none" viewBox="0 0 24 24">
+              <circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="2" />
+              <circle cx="18" cy="19" r="2.5" stroke="currentColor" strokeWidth="2" />
+              <path d="M6 7.5v5A6.5 6.5 0 0 0 12.5 19h3M8.5 5H12a6 6 0 0 1 6 6v5.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+            </svg>
+          </span>
+          <span>Merge</span>
+        </button>
+      ) : null}
+      <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"} id="merge-status">{message}</p>
     </section>
   );
 }
