@@ -55,6 +55,32 @@ used.
   agent counts only issues without a configured claim or confirmed open
   blocker. It becomes a
   two-column document-flow navigation on narrow screens.
+- Settings entry: the last control in the laptop work navigation. On narrow
+  screens it becomes the compact gear control in the application header.
+  Settings replaces both the work list and quick read.
+- Settings search: the primary field matches supported setting names,
+  repository names, and the fixed words `ignore`, `hide`, `restore`,
+  `repository`, and `sync`. An empty field suggests Repository visibility and
+  links to currently hidden repositories.
+- Repository visibility result: each repository states its loaded item count,
+  saved or staged visibility, and one Hide or Restore action. Hidden
+  repositories without active work remain available for restoration.
+- Staged settings summary: every unsaved change is a sentence naming the
+  repository and direction. Discard restores the saved set. Apply changes
+  replaces the complete hidden set once and disables another submission while
+  pending.
+- Settings impact: current and proposed counts for Now, pull requests, Ready
+  for agent, Needs me, Triage, and Epics, followed by the current-selection
+  result and accurate account-sync copy. It sits beside the action on laptop
+  and below it on narrow screens without horizontal scrolling.
+- Settings save states: pending leaves saved queues in force. Failure keeps the
+  staged changes and offers Apply changes or Discard. A stale revision loads
+  the latest saved set, preserves staged intent, recalculates impact, and
+  requires another explicit choice. Live settings events reload the overview;
+  a tab with staged work enters the same conflict review.
+- Visibility empty states: when every active repository is hidden, the work
+  view says the queue is intentionally empty and links to Restore repositories.
+  An empty queue or search links back to Repository visibility.
 - Work queue: on desktop, a three-column scan-and-read layout keeps navigation,
   the page header and loaded-work search, and the quick read in separate
   columns. A selected row keeps the list visible while a plain-text quick-read
@@ -164,6 +190,13 @@ used.
   accessibility tree.
 
 ## Deviations
+
+The Repository visibility screen follows option 03 on slide 5 of the pinned
+settings concepts. The production version uses full queue names in the impact
+list, supports multiple staged changes instead of the mockup's one sentence,
+and says "hidden" rather than "ignored" in most interface copy. The extra
+detail is required by the accepted workflow. Laptop and narrow screenshot
+tests are the visual comparison record.
 
 The right-hand quick-read area remains because it makes the queue a stable
 scan-and-read surface. At narrow widths, selection temporarily replaces the

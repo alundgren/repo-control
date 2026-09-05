@@ -15,6 +15,7 @@ export type RefreshClient = Pick<GitHubReadClient, "readFocusedItem" | "readRela
 export type RefreshOutcome =
   | RefreshUpdated
   | RefreshRemoved
+  | { status: "ignored" }
   | RefreshNotFound
   | RefreshPermissionDenied
   | RefreshFailed;
@@ -61,10 +62,12 @@ export type UpsertOutcome =
 
 export type RefreshChange =
   | { status: "updated"; item: CacheItem }
-  | { status: "removed"; nodeId: string; itemType: CacheItem["type"]; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope" };
+  | { status: "removed"; nodeId: string; repositoryId: string; itemType: CacheItem["type"]; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope" }
+  | { status: "projection_changed" };
 
 export type ItemRefreshService = {
   refreshItem(input: { nodeId: string }): Promise<RefreshOutcome>;
+  refreshFromWebhook?(input: { nodeId: string }): Promise<RefreshOutcome>;
   upsertItem?(input: { nodeId: string }): Promise<UpsertOutcome>;
 };
 
@@ -87,31 +90,42 @@ export function createItemRefreshService({
   const inFlightUpserts = new Map<string, Promise<UpsertOutcome>>();
   const runItem = <T>(operation: () => Promise<T>) => coordinator ? coordinator.runItem(operation) : operation();
 
+  function startRefresh(nodeId: string) {
+    const existing = inFlight.get(nodeId);
+    if (existing) return existing;
+    const startedAt = now();
+    const promise = runItem(() => runRefresh(cache, client, nodeId, onChange)).then((outcome) => {
+      logRefreshOutcome("refresh", outcome, Math.max(0, now() - startedAt), logEvent);
+      return outcome;
+    }).catch((error: unknown) => {
+      emitLogEvent(logEvent, {
+        event: "refresh.finished",
+        level: "error",
+        status: "failed",
+        mode: "refresh",
+        durationMs: Math.max(0, now() - startedAt),
+        errorCode: "unexpected_failure",
+      });
+      throw error;
+    }).finally(() => {
+      inFlight.delete(nodeId);
+    });
+    inFlight.set(nodeId, promise);
+    return promise;
+  }
+
   return {
     refreshItem({ nodeId }) {
-      const existing = inFlight.get(nodeId);
-      if (existing) {
-        return existing;
+      const previous = cache.getItem(nodeId);
+      if (previous && cache.isRepositoryIgnored(previous.repositoryId)) {
+        const outcome = { status: "ignored" } as const;
+        logRefreshOutcome("refresh", outcome, 0, logEvent);
+        return Promise.resolve(outcome);
       }
-      const startedAt = now();
-      const promise = runItem(() => runRefresh(cache, client, nodeId, onChange)).then((outcome) => {
-        logRefreshOutcome("refresh", outcome, Math.max(0, now() - startedAt), logEvent);
-        return outcome;
-      }).catch((error: unknown) => {
-        emitLogEvent(logEvent, {
-          event: "refresh.finished",
-          level: "error",
-          status: "failed",
-          mode: "refresh",
-          durationMs: Math.max(0, now() - startedAt),
-          errorCode: "unexpected_failure",
-        });
-        throw error;
-      }).finally(() => {
-        inFlight.delete(nodeId);
-      });
-      inFlight.set(nodeId, promise);
-      return promise;
+      return startRefresh(nodeId);
+    },
+    refreshFromWebhook({ nodeId }) {
+      return startRefresh(nodeId);
     },
     upsertItem({ nodeId }) {
       const existing = inFlightUpserts.get(nodeId);
@@ -177,7 +191,6 @@ async function runRefresh(
   if (!previous) {
     return { status: "not_found" };
   }
-
   const read = await client.readFocusedItem({ nodeId });
 
   if (read.status === "unavailable") {
@@ -188,7 +201,7 @@ async function runRefresh(
 
   if (read.status === "out_of_scope") {
     cache.removeItem(nodeId);
-    onChange?.({ status: "removed", nodeId, itemType: previous.type, number: previous.number, reason: removalReason(previous.type, read.reason) });
+    onChange?.({ status: "removed", nodeId, repositoryId: previous.repositoryId, itemType: previous.type, number: previous.number, reason: removalReason(previous.type, read.reason) });
     return { status: "removed", reason: read.reason, rateLimit: read.rateLimit };
   }
 
@@ -221,6 +234,10 @@ async function runRefresh(
     };
   }
 
+  if (cache.isRepositoryIgnored(merged.repositoryId)) {
+    onChange?.({ status: "projection_changed" });
+    return { status: "ignored" };
+  }
   onChange?.({ status: "updated", item: merged });
   return { status: "updated", item: merged, fetchedAt: read.fetchedAt, relationshipStatus, rateLimit: read.rateLimit };
 }

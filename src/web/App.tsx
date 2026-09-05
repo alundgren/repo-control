@@ -5,10 +5,10 @@ import type { PullRequestDiffFile } from "../github/read-client.js";
 import type { PullRequestReviewEvent } from "../github/write-client.js";
 import type { MergeReadiness } from "../merge/index.js";
 import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
-import { getOverview, getPullRequestDiff, getPullRequestMergeReadiness, mergePullRequest, refreshItem, submitPullRequestReview, syncOverview, type LiveItemEvent, type PullRequestDiffResponse } from "./api.js";
+import { getOverview, getPullRequestDiff, getPullRequestMergeReadiness, getRepositoryVisibility, mergePullRequest, refreshItem, replaceRepositoryVisibility, submitPullRequestReview, syncOverview, type LiveItemEvent, type LiveSettingsEvent, type PullRequestDiffResponse, type RepositoryVisibilitySettings } from "./api.js";
 import { DraftCommentStore, getSessionStorage, maxDraftBodyBytes, type DraftComment, type DraftSide } from "./draft-comments.js";
 
-type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics";
+type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics" | "settings";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
 type ItemRefreshState = "idle" | "busy" | "success" | "partial" | "failed" | "removed";
 type DiffState =
@@ -51,6 +51,7 @@ const views: Record<View, ViewDetails> = {
     title: "Epics",
     sectionTitle: "Epics",
   },
+  settings: { title: "Settings" },
 };
 
 const mainViews: View[] = ["now", "pullRequests"];
@@ -72,13 +73,26 @@ export function App() {
   const [liveState, setLiveState] = useState<"connected" | "unavailable">("connected");
   const [diffItem, setDiffItem] = useState<Extract<ApiItem, { type: "pull_request" }> | null>(null);
   const [diffState, setDiffState] = useState<DiffState | null>(null);
+  const [settings, setSettings] = useState<RepositoryVisibilitySettings | null>(null);
+  const [stagedIgnored, setStagedIgnored] = useState<Set<string>>(new Set());
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [settingsState, setSettingsState] = useState<"idle" | "loading" | "pending" | "success" | "failed" | "conflict">("idle");
+  const [settingsSelectedRepositoryId, setSettingsSelectedRepositoryId] = useState<string | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const quickReadHeadingRef = useRef<HTMLHeadingElement>(null);
   const overviewRef = useRef<Extract<OverviewResponse, { status: "ready" }> | null>(null);
+  const overviewRequestRef = useRef(0);
   const selectedItemRef = useRef<string | null>(null);
   const viewRef = useRef<View>("now");
   const queryRef = useRef("");
   const eventBufferRef = useRef<LiveItemEvent[]>([]);
+  const settingsEventBufferRef = useRef<LiveSettingsEvent[]>([]);
+  const settingsPendingRef = useRef(false);
+  const settingsMinimumRevisionRef = useRef(0);
+  const settingsReconcileRunningRef = useRef(false);
+  const settingsSelectedRepositoryIdRef = useRef<string | null>(null);
+  const stagedIgnoredRef = useRef<Set<string>>(new Set());
+  const settingsRef = useRef<RepositoryVisibilitySettings | null>(null);
   const reconcilingLiveRef = useRef(false);
   const diffOpenerRef = useRef<HTMLElement | null>(null);
   const diffScrollRef = useRef(0);
@@ -100,10 +114,21 @@ export function App() {
     source.addEventListener("item", (message) => {
       try {
         const event = JSON.parse((message as MessageEvent).data) as LiveItemEvent;
-        if (reconcilingLiveRef.current || !overviewRef.current) eventBufferRef.current.push(event);
+        if (event.type === "reconcile") void reconcileLiveOverview();
+        else if (reconcilingLiveRef.current || !overviewRef.current) eventBufferRef.current.push(event);
         else applyLiveEvent(event);
       } catch {
         // Ignore malformed events and preserve the loaded view.
+      }
+    });
+    source.addEventListener("settings", (message) => {
+      try {
+        const event = JSON.parse((message as MessageEvent).data) as LiveSettingsEvent;
+        settingsMinimumRevisionRef.current = Math.max(settingsMinimumRevisionRef.current, event.revision);
+        if (settingsPendingRef.current) settingsEventBufferRef.current.push(event);
+        else void scheduleSettingsReconciliation();
+      } catch {
+        // Ignore malformed events and preserve staged settings.
       }
     });
     source.onopen = () => {
@@ -136,27 +161,141 @@ export function App() {
   }, [itemMessage]);
 
   async function loadOverview() {
+    const requestId = overviewRequestRef.current + 1;
+    overviewRequestRef.current = requestId;
     setLoading(true);
     try {
       const response = await getOverview();
+      if (requestId !== overviewRequestRef.current) return;
       setOverview(response.status === "ready" ? response : null);
       overviewRef.current = response.status === "ready" ? response : null;
       setLoadMessage("");
     } catch {
-      setLoadMessage("The work queue is unavailable. Try again.");
+      if (requestId === overviewRequestRef.current) setLoadMessage("The work queue is unavailable. Try again.");
     } finally {
-      setLoading(false);
+      if (requestId === overviewRequestRef.current) setLoading(false);
     }
   }
 
   function changeView(nextView: View) {
+    if (nextView === "settings") {
+      const selectedId = selectedItemRef.current ?? selectedItemId;
+      const selected = selectedId && overviewRef.current ? itemFromOverview(overviewRef.current, selectedId) : null;
+      const repositoryId = selected?.repositoryId ?? null;
+      settingsSelectedRepositoryIdRef.current = repositoryId;
+      setSettingsSelectedRepositoryId(repositoryId);
+    }
     setView(nextView);
     viewRef.current = nextView;
     setQuery("");
     queryRef.current = "";
     setSelectedItemId(null);
     selectedItemRef.current = null;
+    if (nextView === "settings") void loadRepositorySettings();
     window.requestAnimationFrame(() => titleRef.current?.focus());
+  }
+
+  async function loadRepositorySettings(preservedIntent?: Set<string>, minimumRevision = 0) {
+    setSettingsState("loading");
+    try {
+      const loaded = await getRepositoryVisibility();
+      const acceptedRevision = Math.max(minimumRevision, settingsMinimumRevisionRef.current, settingsRef.current?.revision ?? 0);
+      if (loaded.revision < acceptedRevision) return false;
+      settingsRef.current = loaded;
+      setSettings(loaded);
+      const nextStaged = preservedIntent ?? new Set(loaded.repositories.filter((repository) => repository.ignored).map((repository) => repository.id));
+      stagedIgnoredRef.current = nextStaged;
+      setStagedIgnored(new Set(nextStaged));
+      setSettingsState(preservedIntent ? "conflict" : "idle");
+      return true;
+    } catch {
+      setSettingsState("failed");
+      return false;
+    }
+  }
+
+  async function reconcileSettingsEvent(minimumRevision = 0) {
+    const saved = settingsRef.current;
+    const intent = new Set(stagedIgnoredRef.current);
+    const dirty = saved ? !sameIds(intent, new Set(saved.repositories.filter((repository) => repository.ignored).map((repository) => repository.id))) : false;
+    await Promise.all([loadRepositorySettings(dirty ? intent : undefined, minimumRevision), reconcileLiveOverview()]);
+  }
+
+  async function scheduleSettingsReconciliation() {
+    if (settingsReconcileRunningRef.current) return;
+    settingsReconcileRunningRef.current = true;
+    try {
+      while (true) {
+        const revision = settingsMinimumRevisionRef.current;
+        await reconcileSettingsEvent(revision);
+        if (settingsMinimumRevisionRef.current <= revision) break;
+      }
+    } finally {
+      settingsReconcileRunningRef.current = false;
+    }
+  }
+
+  function stageRepository(repositoryId: string, ignored: boolean) {
+    const next = new Set(stagedIgnoredRef.current);
+    if (ignored) next.add(repositoryId);
+    else next.delete(repositoryId);
+    stagedIgnoredRef.current = next;
+    setStagedIgnored(next);
+    setSettingsState("idle");
+  }
+
+  function discardRepositoryChanges() {
+    const saved = new Set(settings?.repositories.filter((repository) => repository.ignored).map((repository) => repository.id) ?? []);
+    stagedIgnoredRef.current = saved;
+    setStagedIgnored(saved);
+    setSettingsState("idle");
+  }
+
+  async function applyRepositoryChanges() {
+    if (!settings || settingsPendingRef.current) return;
+    const intent = new Set(stagedIgnoredRef.current);
+    const selectedRepositoryId = settingsSelectedRepositoryIdRef.current;
+    settingsPendingRef.current = true;
+    settingsEventBufferRef.current = [];
+    setSettingsState("pending");
+    const response = await replaceRepositoryVisibility(settings.revision, [...intent]);
+    settingsPendingRef.current = false;
+    const newestBuffered = Math.max(0, ...settingsEventBufferRef.current.map((event) => event.revision));
+    settingsEventBufferRef.current = [];
+    if (response.status === "updated") {
+      settingsRef.current = response;
+      setSettings(response);
+      const saved = new Set(response.repositories.filter((repository) => repository.ignored).map((repository) => repository.id));
+      stagedIgnoredRef.current = saved;
+      setStagedIgnored(saved);
+      await reconcileLiveOverview();
+      if (selectedRepositoryId && saved.has(selectedRepositoryId)) {
+        const repository = response.repositories.find((entry) => entry.id === selectedRepositoryId);
+        selectedItemRef.current = null;
+        setSelectedItemId(null);
+        setItemMessage(`${repository?.nameWithOwner ?? "The repository"} is hidden. ${repository?.activeItemCount ?? 0} loaded items were removed.`);
+      }
+      if (newestBuffered > response.revision) {
+        await loadRepositorySettings(new Set(saved), newestBuffered);
+        window.requestAnimationFrame(() => titleRef.current?.focus());
+      } else {
+        setSettingsState("success");
+        window.requestAnimationFrame(() => titleRef.current?.focus());
+      }
+      return;
+    }
+    if (response.status === "conflict") {
+      settingsRef.current = response;
+      setSettings(response);
+      stagedIgnoredRef.current = intent;
+      setStagedIgnored(intent);
+      await reconcileLiveOverview();
+      if (newestBuffered > response.revision) await loadRepositorySettings(intent, newestBuffered);
+      else setSettingsState("conflict");
+      return;
+    }
+    if (newestBuffered > 0) await Promise.all([loadRepositorySettings(intent, newestBuffered), reconcileLiveOverview()]);
+    else setSettingsState("failed");
   }
 
   async function syncAccount() {
@@ -226,6 +365,23 @@ export function App() {
         if (wasSelected) focusNextRowOrPageHeading();
         return;
       }
+      if (response.status === "ignored") {
+        const current = overviewRef.current;
+        if (current) {
+          const next = removeOverviewItem(current, nodeId);
+          overviewRef.current = next;
+          setOverview(next);
+        }
+        if (selectedItemRef.current === nodeId) {
+          selectedItemRef.current = null;
+          setSelectedItemId(null);
+          focusNextRowOrPageHeading();
+        }
+        setItemRefreshStates((states) => ({ ...states, [nodeId]: "removed" }));
+        setItemMessage("This repository is hidden. Restore it in Settings before refreshing its work.");
+        await reconcileLiveOverview();
+        return;
+      }
       setOverview((current) => current ? replaceOverviewItem(current, response.item) : current);
       setItemRefreshStates((states) => ({ ...states, [nodeId]: "failed" }));
     } catch {
@@ -255,6 +411,9 @@ export function App() {
     setItemMessage("");
     selectedItemRef.current = nodeId;
     setSelectedItemId(nodeId);
+    const item = overviewRef.current ? itemFromOverview(overviewRef.current, nodeId) : null;
+    settingsSelectedRepositoryIdRef.current = item?.repositoryId ?? null;
+    setSettingsSelectedRepositoryId(item?.repositoryId ?? null);
   }
 
   function returnToList() {
@@ -294,28 +453,36 @@ export function App() {
   }
 
   async function reconcileLiveOverview() {
+    const requestId = overviewRequestRef.current + 1;
+    overviewRequestRef.current = requestId;
     reconcilingLiveRef.current = true;
     let reconciled = false;
     try {
       const response = await getOverview();
-      if (response.status === "ready") {
+      if (requestId === overviewRequestRef.current && response.status === "ready") {
         reconcileSelectionAfterOverview(overviewRef.current, response);
         setOverview(response);
         overviewRef.current = response;
         reconciled = true;
       }
     } catch {
-      setLiveState("unavailable");
+      if (requestId === overviewRequestRef.current) setLiveState("unavailable");
     } finally {
-      reconcilingLiveRef.current = false;
-      if (reconciled || overviewRef.current) {
-        const buffered = eventBufferRef.current.splice(0);
-        buffered.forEach(applyLiveEvent);
+      if (requestId === overviewRequestRef.current) {
+        reconcilingLiveRef.current = false;
+        if (reconciled || overviewRef.current) {
+          const buffered = eventBufferRef.current.splice(0);
+          buffered.forEach(applyLiveEvent);
+        }
       }
     }
   }
 
   function applyLiveEvent(event: LiveItemEvent) {
+    if (event.type === "reconcile") {
+      void reconcileLiveOverview();
+      return;
+    }
     if (event.type === "updated") {
       const current = overviewRef.current;
       if (!current) {
@@ -405,15 +572,20 @@ export function App() {
             viewNames={issueViews}
           />
         </div>
+        <div className="settingsNavigation">
+          <button aria-current={view === "settings" ? "page" : undefined} className="settingsButton" onClick={() => changeView("settings")} type="button">
+            <span aria-hidden="true">⚙</span><span>Settings</span>
+          </button>
+        </div>
       </aside>
 
-      <section aria-busy={loading} aria-label="Work queues" className="content">
+      <section aria-busy={view === "settings" ? settingsState === "loading" : loading} aria-label={view === "settings" ? "Settings" : "Work queues"} className={`content ${view === "settings" ? "settingsContent" : ""}`}>
         <div className="contentInner">
           <header className="pageHeader">
             <div>
               <h1 ref={titleRef} tabIndex={-1}>{currentView.title}</h1>
             </div>
-            <div className="syncArea">
+            {view !== "settings" ? <div className="syncArea">
               {overview ? (
                 <p className={`freshness ${overview.scope.truncatedReason ? "warning" : "complete"}`}>
                   {freshness(overview)}
@@ -428,9 +600,22 @@ export function App() {
               >
                 {syncState === "busy" ? "Syncing account…" : "Sync account"}
               </button>
-            </div>
+            </div> : null}
           </header>
 
+          {view === "settings" ? (
+            <>{itemMessage ? <p aria-live="polite" className="statusMessage success">{itemMessage}</p> : null}<SettingsView
+              onApply={() => void applyRepositoryChanges()}
+              onDiscard={discardRepositoryChanges}
+              onQuery={setSettingsQuery}
+              onStage={stageRepository}
+              query={settingsQuery}
+              settings={settings}
+              selectedRepositoryId={settingsSelectedRepositoryId}
+              stagedIgnored={stagedIgnored}
+              state={settingsState}
+            /></>
+          ) : <>
           <p aria-live="polite" className={`statusMessage ${syncState}`}>{statusMessage}</p>
 
           {loading ? <p>Loading the work queue…</p> : null}
@@ -478,15 +663,115 @@ export function App() {
                   )}
                 </div> : null}
               </div>
+              {overview.scope.visibleRepositoryCount === 0 ? (
+                <div className="allHiddenState"><h2>The queue is intentionally empty</h2><p>All active repositories are hidden.</p><button className="primaryButton" onClick={() => changeView("settings")} type="button">Restore repositories</button></div>
+              ) : filteredItems.length === 0 ? <button className="quietButton emptySettingsLink" onClick={() => changeView("settings")} type="button">Change repository visibility</button> : null}
             </>
           ) : null}
+          </>}
         </div>
       </section>
-      {overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
+      {view !== "settings" && overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
     {diffItem && diffState && overview ? <DiffOverlay draftStore={draftStoreRef.current} item={diffItem} onClose={closeDiff} repository={repositoryName(overview, diffItem.repositoryId)} state={diffState} /> : null}
     </>
   );
+}
+
+function SettingsView({
+  onApply,
+  onDiscard,
+  onQuery,
+  onStage,
+  query,
+  settings,
+  selectedRepositoryId,
+  stagedIgnored,
+  state,
+}: {
+  onApply: () => void;
+  onDiscard: () => void;
+  onQuery: (query: string) => void;
+  onStage: (repositoryId: string, ignored: boolean) => void;
+  query: string;
+  settings: RepositoryVisibilitySettings | null;
+  selectedRepositoryId: string | null;
+  stagedIgnored: Set<string>;
+  state: "idle" | "loading" | "pending" | "success" | "failed" | "conflict";
+}) {
+  if (!settings && state === "loading") return <p className="settingsStatus">Loading settings…</p>;
+  if (!settings) return <p className="settingsStatus failed">Repository visibility is unavailable. Try Settings again.</p>;
+  const savedIgnored = new Set(settings.repositories.filter((repository) => repository.ignored).map((repository) => repository.id));
+  const changes = settings.repositories.filter((repository) => savedIgnored.has(repository.id) !== stagedIgnored.has(repository.id));
+  const normalized = query.trim().toLocaleLowerCase();
+  const settingKeywords = ["repository visibility", "ignore", "hide", "restore", "repository", "sync"];
+  const showSetting = !normalized || settingKeywords.some((keyword) => keyword.startsWith(normalized));
+  const repositories = settings.repositories.filter((repository) => {
+    if (!normalized) return repository.ignored;
+    if (normalized === "restore") return repository.ignored;
+    if (normalized === "hide" || normalized === "ignore") return !repository.ignored;
+    return repository.nameWithOwner.toLocaleLowerCase().includes(normalized) || settingKeywords.some((keyword) => keyword.startsWith(normalized));
+  });
+  const currentCounts = visibilityTotals(settings, savedIgnored);
+  const proposedCounts = visibilityTotals(settings, stagedIgnored);
+  const selectedWillClear = selectedRepositoryId !== null && !savedIgnored.has(selectedRepositoryId) && stagedIgnored.has(selectedRepositoryId);
+
+  return (
+    <div className="settingsLayout">
+      <div className="settingsMain">
+        <p className="description">Search settings or choose a suggestion.</p>
+        <label className="visuallyHidden" htmlFor="settings-search">Search settings and repositories</label>
+        <input id="settings-search" onChange={(event) => onQuery(event.target.value)} placeholder="Search settings or repositories" type="search" value={query} />
+        <div className="settingsResults" aria-label="Settings search results">
+          {showSetting ? <div className="settingResult"><span aria-hidden="true" className="resultIcon">◎</span><div><h2>Repository visibility</h2><p>Show or hide a repository in work queues and search.</p></div></div> : null}
+          {!normalized && settings.repositories.some((repository) => repository.ignored) ? <button className="ignoredRoute" onClick={() => onQuery("restore")} type="button">Show currently hidden repositories</button> : null}
+          {!normalized && settings.repositories.length === 0 ? <p className="settingsHint">No repositories are available yet. Return to a work view and sync the account.</p> : null}
+          {!normalized && settings.repositories.length > 0 && !settings.repositories.some((repository) => repository.ignored) ? <p className="settingsHint">Nothing is hidden. Search for a repository to change its visibility.</p> : null}
+          {repositories.map((repository) => {
+            const willIgnore = stagedIgnored.has(repository.id);
+            return <div className="repositoryResult" key={repository.id}>
+              <div><strong>{repository.nameWithOwner}</strong><p>{repository.inActiveSnapshot ? `${repository.activeItemCount} loaded ${repository.activeItemCount === 1 ? "item" : "items"}` : "No loaded work"} · {willIgnore ? "hidden" : "shown"}</p></div>
+              <button className="secondaryButton" disabled={state === "pending"} onClick={() => onStage(repository.id, !willIgnore)} type="button">{willIgnore ? "Restore" : "Hide"}</button>
+            </div>;
+          })}
+          {normalized && !showSetting && repositories.length === 0 ? <p className="settingsHint">No setting or repository matches this search.</p> : null}
+        </div>
+        {changes.length > 0 ? <section aria-atomic="true" aria-label="Staged changes" aria-live="polite" className="stagedChanges">
+          <p className="eyebrow">Staged changes</p>
+          {changes.map((repository) => <p key={repository.id}>{stagedIgnored.has(repository.id) ? "Hide" : "Restore"} <strong>{repository.nameWithOwner}</strong> {stagedIgnored.has(repository.id) ? "from queues and search." : "in queues and search."}</p>)}
+          <div className="settingsActions"><button className="secondaryButton" disabled={state === "pending"} onClick={onDiscard} type="button">Discard</button><button className="primaryButton" disabled={state === "pending"} onClick={onApply} type="button">{state === "pending" ? "Applying changes…" : "Apply changes"}</button></div>
+        </section> : null}
+        <div aria-live="polite" className={`settingsStatus ${state}`}>
+          {state === "pending" ? "Current queues remain unchanged while the save finishes." : null}
+          {state === "success" ? "Repository visibility saved." : null}
+          {state === "failed" ? "Could not save repository settings. No queues changed. Try again or discard the staged changes." : null}
+          {state === "conflict" ? "Settings changed elsewhere. Review the updated impact, then apply again or discard." : null}
+        </div>
+      </div>
+      <aside className="settingsImpact" aria-label="Queue impact">
+        <p className="eyebrow">Queue impact</p>
+        {(["now", "pullRequests", "agent", "human", "triage", "epics"] as const).map((key) => <div className="impactLine" key={key}><span>{impactTitle(key)}</span><strong>{currentCounts[key]} → {proposedCounts[key]}</strong></div>)}
+        <p className="impactNote">{selectedWillClear ? "The current selection will clear." : "The current selection will stay available."} Account sync still loads work from hidden repositories.</p>
+      </aside>
+    </div>
+  );
+}
+
+function visibilityTotals(settings: RepositoryVisibilitySettings, ignored: Set<string>) {
+  const total = { now: 0, pullRequests: 0, agent: 0, human: 0, triage: 0, epics: 0 };
+  for (const repository of settings.repositories) {
+    if (ignored.has(repository.id)) continue;
+    for (const key of Object.keys(total) as Array<keyof typeof total>) total[key] += repository.counts[key];
+  }
+  return total;
+}
+
+function impactTitle(key: "now" | "pullRequests" | "agent" | "human" | "triage" | "epics") {
+  return key === "pullRequests" ? "Pull requests" : key === "agent" ? "Ready for agent" : key === "human" ? "Needs me" : `${key[0]!.toUpperCase()}${key.slice(1)}`;
+}
+
+function sameIds(left: Set<string>, right: Set<string>) {
+  return left.size === right.size && [...left].every((id) => right.has(id));
 }
 
 function ViewNavigation({
@@ -1459,7 +1744,7 @@ function filterItems(items: ApiItem[], query: string, overview: Extract<Overview
 
 function freshness(overview: Extract<OverviewResponse, { status: "ready" }>) {
   const partial = overview.scope.truncatedReason ? " · Partial result" : "";
-  return `Synced ${relativeTime(overview.fetchedAt)} · ${overview.scope.itemCount} items from ${overview.scope.repositoryCount} repositories${partial}`;
+  return `Synced ${relativeTime(overview.fetchedAt)} · ${overview.scope.itemCount} loaded items from ${overview.scope.repositoryCount} repositories · ${overview.scope.visibleItemCount ?? overview.scope.itemCount} shown from ${overview.scope.visibleRepositoryCount ?? overview.scope.repositoryCount} repositories${partial}`;
 }
 
 function syncStatusMessage(syncState: SyncState) {

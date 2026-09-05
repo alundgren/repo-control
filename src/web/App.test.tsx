@@ -54,7 +54,7 @@ describe("work queue overview", () => {
     expect(screen.getByRole("button", { name: "Needs me 1" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Triage 2" })).toBeTruthy();
     expect(screen.getByText("Issues")).toBeTruthy();
-    expect(screen.getByText(/Synced .* · 6 items from 2 repositories · Partial result/)).toBeTruthy();
+    expect(screen.getByText(/Synced .* · 6 loaded items from 2 repositories · 6 shown from 2 repositories · Partial result/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sync account" })).toBeTruthy();
     expect(screen.queryByText("Current work")).toBeNull();
   });
@@ -72,6 +72,270 @@ describe("work queue overview", () => {
       "Work queues",
       "Quick read",
     ]);
+  });
+
+  it("searches repository settings, stages multiple changes, previews impact, and applies once", async () => {
+    const user = userEvent.setup();
+    const updatedSettings = repositorySettings(1, new Set(["R_1"]));
+    const hiddenOverview = readyOverview();
+    hiddenOverview.repositories = [{ id: "R_2", nameWithOwner: "fictional-tools/river" }];
+    hiddenOverview.issues = [];
+    hiddenOverview.queues = hiddenOverview.queues.map((queue) => ({ ...queue, issues: [] }));
+    hiddenOverview.scope = { ...hiddenOverview.scope, visibleItemCount: 1, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockResolvedValueOnce(response({ status: "updated", ...updatedSettings }))
+      .mockResolvedValueOnce(response(hiddenOverview));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "Repository visibility" })).toBeTruthy();
+    expect(screen.getByText("Nothing is hidden. Search for a repository to change its visibility.")).toBeTruthy();
+
+    const search = screen.getByRole("searchbox", { name: "Search settings and repositories" });
+    await user.type(search, "garden");
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    expect(screen.getByRole("region", { name: "Staged changes" }).getAttribute("aria-live")).toBe("polite");
+    expect(screen.getByText(/Hide/).closest("section")?.textContent).toContain("fictional-tools/garden");
+    expect(within(screen.getByRole("complementary", { name: "Queue impact" })).getByText("Ready for agent").parentElement?.textContent).toContain("2 → 0");
+    await user.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: "PUT" });
+    expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string)).toEqual({ revision: 0, ignoredRepositoryIds: ["R_1"] });
+    expect(screen.queryByText(/Hide fictional-tools\/garden/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Now 1" }));
+    expect(screen.getByText("Keep fictional paths tidy")).toBeTruthy();
+    expect(screen.queryByText("Add a fictional seed")).toBeNull();
+  });
+
+  it("discards staged repository changes back to the saved configuration", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), "garden");
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(screen.queryByRole("region", { name: "Staged changes" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
+  });
+
+  it("explains when no repositories are selectable", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", revision: 0, repositories: [] })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByText("No repositories are available yet. Return to a work view and sync the account.")).toBeTruthy();
+  });
+
+  it("links an all-hidden queue directly to repository restoration", async () => {
+    const user = userEvent.setup();
+    const hidden = readyOverview();
+    hidden.repositories = [];
+    hidden.issues = [];
+    hidden.pullRequests = [];
+    hidden.queues = hidden.queues.map((queue) => ({ ...queue, issues: [] }));
+    hidden.scope = { ...hidden.scope, visibleItemCount: 0, visibleRepositoryCount: 0, ignoredRepositoryCount: 2 };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(hidden))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings(1, new Set(["R_1", "R_2"])) })));
+
+    render(<App />);
+    expect(await screen.findByText("The queue is intentionally empty")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Restore repositories" }));
+
+    expect(await screen.findByRole("heading", { name: "Repository visibility" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show currently hidden repositories" })).toBeTruthy();
+  });
+
+  it("keeps staged repository intent after a revision conflict", async () => {
+    const latest = repositorySettings(1, new Set(["R_2"]));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockResolvedValueOnce(response({ status: "conflict", ...latest }))
+      .mockResolvedValueOnce(response(readyOverview())));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), { target: { value: "garden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Settings changed elsewhere. Review the updated impact, then apply again or discard.")).toBeTruthy();
+    expect(screen.getByText(/Hide/).closest("section")?.textContent).toContain("fictional-tools/garden");
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeTruthy();
+  });
+
+  it("loads a newer buffered revision after a conflict response", async () => {
+    const save = deferred<ReturnType<typeof response>>();
+    vi.stubGlobal("EventSource", TestEventSource);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockImplementationOnce(() => save.promise)
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings(2, new Set(["R_2"])) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), { target: { value: "garden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    act(() => TestEventSource.last?.emitSettings({ type: "settings", revision: 2, visibleItemCount: 5, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 }));
+    save.resolve(response({ status: "conflict", ...repositorySettings(1, new Set(["R_2"])) }));
+
+    expect(await screen.findByText("Settings changed elsewhere. Review the updated impact, then apply again or discard.")).toBeTruthy();
+    expect(screen.getByText(/Hide/).closest("section")?.textContent).toContain("fictional-tools/garden");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("buffers its own settings event until the successful response clears the staged edit", async () => {
+    const user = userEvent.setup();
+    const save = deferred<ReturnType<typeof response>>();
+    const updated = repositorySettings(1, new Set(["R_1"]));
+    const hiddenOverview = readyOverview();
+    hiddenOverview.issues = [];
+    hiddenOverview.queues = hiddenOverview.queues.map((queue) => ({ ...queue, issues: [] }));
+    hiddenOverview.repositories = [{ id: "R_2", nameWithOwner: "fictional-tools/river" }];
+    hiddenOverview.scope = { ...hiddenOverview.scope, visibleItemCount: 1, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 };
+    vi.stubGlobal("EventSource", TestEventSource);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockImplementationOnce(() => save.promise)
+      .mockResolvedValueOnce(response(hiddenOverview));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), "garden");
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    await user.click(screen.getByRole("button", { name: "Apply changes" }));
+    act(() => TestEventSource.last?.emitSettings({ type: "settings", revision: 1, visibleItemCount: 1, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 }));
+    save.resolve(response({ status: "updated", ...updated }));
+
+    expect(await screen.findByText("Repository visibility saved.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Staged changes" })).toBeNull();
+    expect(screen.queryByText(/Settings changed elsewhere/)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("serializes rapid settings events and keeps the newest saved revision", async () => {
+    const user = userEvent.setup();
+    const firstSettings = deferred<ReturnType<typeof response>>();
+    vi.stubGlobal("EventSource", TestEventSource);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockImplementationOnce(() => firstSettings.promise)
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings(2, new Set(["R_2"])) }))
+      .mockResolvedValueOnce(response(readyOverview()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await screen.findByRole("heading", { name: "Repository visibility" });
+    act(() => {
+      TestEventSource.last?.emitSettings({ type: "settings", revision: 1, visibleItemCount: 5, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 });
+      TestEventSource.last?.emitSettings({ type: "settings", revision: 2, visibleItemCount: 5, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    firstSettings.resolve(response({ status: "ready", ...repositorySettings(1, new Set(["R_1"])) }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    await user.click(await screen.findByRole("button", { name: "Show currently hidden repositories" }));
+    expect(screen.getByText("fictional-tools/river")).toBeTruthy();
+    expect(screen.queryByText("fictional-tools/garden")).toBeNull();
+  });
+
+  it("preserves staged intent when a newer settings event arrives before save completes", async () => {
+    const save = deferred<ReturnType<typeof response>>();
+    const ownUpdate = repositorySettings(1, new Set(["R_1"]));
+    const externalUpdate = repositorySettings(2, new Set(["R_2"]));
+    vi.stubGlobal("EventSource", TestEventSource);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockImplementationOnce(() => save.promise)
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...externalUpdate })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), { target: { value: "garden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+    act(() => TestEventSource.last?.emitSettings({ type: "settings", revision: 2, visibleItemCount: 5, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 }));
+    save.resolve(response({ status: "updated", ...ownUpdate }));
+
+    expect(await screen.findByText("Settings changed elsewhere. Review the updated impact, then apply again or discard.")).toBeTruthy();
+    expect(screen.getByText(/Hide/).closest("section")?.textContent).toContain("fictional-tools/garden");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Settings" })));
+  });
+
+  it("keeps staged repository changes after a failed save", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockResolvedValueOnce(response({ status: "failed" })));
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.change(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), { target: { value: "garden" } });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("Could not save repository settings. No queues changed. Try again or discard the staged changes.")).toBeTruthy();
+    expect(screen.getByText(/Hide/).closest("section")?.textContent).toContain("fictional-tools/garden");
+    expect(screen.getByRole("button", { name: "Apply changes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Discard" })).toBeTruthy();
+  });
+
+  it("announces the repository and removed count when applying a hide for the prior selection", async () => {
+    const user = userEvent.setup();
+    const hiddenOverview = readyOverview();
+    hiddenOverview.issues = [];
+    hiddenOverview.queues = hiddenOverview.queues.map((queue) => ({ ...queue, issues: [] }));
+    hiddenOverview.repositories = [{ id: "R_2", nameWithOwner: "fictional-tools/river" }];
+    hiddenOverview.scope = { ...hiddenOverview.scope, visibleItemCount: 1, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ready", ...repositorySettings() }))
+      .mockResolvedValueOnce(response({ status: "updated", ...repositorySettings(1, new Set(["R_1"])) }))
+      .mockResolvedValueOnce(response(hiddenOverview)));
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.type(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), "garden");
+    await user.click(screen.getByRole("button", { name: "Hide" }));
+    await user.click(screen.getByRole("button", { name: "Apply changes" }));
+
+    expect(await screen.findByText("fictional-tools/garden is hidden. 5 loaded items were removed.")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Settings" })));
   });
 
   it("opens full lists and searches the loaded work with keyboard navigation", async () => {
@@ -231,23 +495,24 @@ describe("work queue overview", () => {
     expect(screen.queryByText("Unblocked")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
-    const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
-    await user.type(search, "claimed bulbs");
+    let search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    fireEvent.change(search, { target: { value: "claimed bulbs" } });
     expect(screen.getByText("Plant claimed bulbs")).toBeTruthy();
     expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: `Now ${overview.scope.itemCount - 2}` }));
-    await user.type(search, "blocked trellis");
+    search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    fireEvent.change(search, { target: { value: "blocked trellis" } });
     expect(screen.getByText("Repair blocked trellis")).toBeTruthy();
     expect(screen.getByText("Hidden from Ready: blocked")).toBeTruthy();
 
-    await user.clear(search);
-    await user.type(search, "human claim");
+    fireEvent.change(search, { target: { value: "human claim" } });
     expect(screen.getByText("Review human claim")).toBeTruthy();
     expect(screen.queryByText(/Hidden from Ready:/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Needs me 1" }));
-    await user.type(search, "blocked trellis");
+    search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
+    fireEvent.change(search, { target: { value: "blocked trellis" } });
     expect(screen.queryByText("Repair blocked trellis")).toBeNull();
   });
 
@@ -266,13 +531,54 @@ describe("work queue overview", () => {
     await screen.findByText("Review fictional moss");
     await user.click(screen.getByRole("button", { name: "Ready for agent 1" }));
     const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
-    await user.type(search, "claimed fictional");
+    fireEvent.change(search, { target: { value: "claimed fictional" } });
     await user.click(screen.getByRole("button", { name: "Select Claimed fictional seed" }));
     await user.click(screen.getByRole("button", { name: "Refresh this item" }));
 
     expect(await screen.findByRole("heading", { name: "Refreshed claimed fictional seed" })).toBeTruthy();
     expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
     expect(screen.queryByText(/left Ready for agent/)).toBeNull();
+  });
+
+  it("removes an ignored focused item even when authoritative reconciliation fails", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockResolvedValueOnce(response({ status: "ignored" }))
+      .mockRejectedValueOnce(new Error("overview unavailable")));
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    expect(await screen.findByText("This repository is hidden. Restore it in Settings before refreshing its work.")).toBeTruthy();
+    expect(screen.queryByText("Add a fictional seed")).toBeNull();
+    await waitFor(() => expect(document.activeElement?.classList.contains("itemRow")).toBe(true));
+  });
+
+  it("does not let an older overview reconciliation restore hidden work", async () => {
+    const olderOverview = deferred<ReturnType<typeof response>>();
+    const hiddenOverview = readyOverview();
+    hiddenOverview.issues = hiddenOverview.issues.filter((item) => item.id !== "I_1");
+    hiddenOverview.queues = hiddenOverview.queues.map((queue) => ({ ...queue, issues: queue.issues.filter((item) => item.id !== "I_1") }));
+    vi.stubGlobal("EventSource", TestEventSource);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(readyOverview()))
+      .mockImplementationOnce(() => olderOverview.promise)
+      .mockResolvedValueOnce(response(hiddenOverview));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Add a fictional seed");
+    act(() => TestEventSource.last?.open());
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => TestEventSource.last?.emit({ type: "reconcile" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.queryByText("Add a fictional seed")).toBeNull());
+    olderOverview.resolve(response(readyOverview()));
+
+    await act(async () => Promise.resolve());
+    expect(screen.queryByText("Add a fictional seed")).toBeNull();
   });
 
   it("removes a Ready issue selected from Now when focused refresh marks it claimed", async () => {
@@ -1271,6 +1577,9 @@ function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
       repositoryCount: 2,
       itemLimit: 200,
       itemCount: 6,
+      visibleItemCount: 6,
+      visibleRepositoryCount: 2,
+      ignoredRepositoryCount: 0,
       truncatedReason: "item_limit",
     },
     pullRequests: [pullRequest({ id: "PR_1", number: 41, title: "Keep fictional paths tidy" })],
@@ -1287,6 +1596,16 @@ function readyOverview(): Extract<OverviewResponse, { status: "ready" }> {
       { name: "triage", issues: [issue({ id: "I_4", number: 25, title: "Clarify fictional soil" }), issue({ id: "I_5", number: 26, title: "Sort fictional leaves" })] },
     ],
     epics: [],
+  };
+}
+
+function repositorySettings(revision = 0, ignored = new Set<string>()) {
+  return {
+    revision,
+    repositories: [
+      { id: "R_1", nameWithOwner: "fictional-tools/garden", ignored: ignored.has("R_1"), inActiveSnapshot: true, activeItemCount: 5, counts: { now: 5, pullRequests: 0, agent: 2, human: 1, triage: 2, epics: 0 } },
+      { id: "R_2", nameWithOwner: "fictional-tools/river", ignored: ignored.has("R_2"), inActiveSnapshot: true, activeItemCount: 1, counts: { now: 1, pullRequests: 1, agent: 0, human: 0, triage: 0, epics: 0 } },
+    ],
   };
 }
 
@@ -1340,6 +1659,10 @@ class TestEventSource {
 
   emit(data: unknown) {
     this.listeners.get("item")?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  emitSettings(data: unknown) {
+    this.listeners.get("settings")?.({ data: JSON.stringify(data) } as MessageEvent);
   }
 
   close() {}

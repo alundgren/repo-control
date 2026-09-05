@@ -2,7 +2,7 @@ import fastify, { LogController, type FastifyBaseLogger, type FastifyError } fro
 import fastifyStatic from "@fastify/static";
 
 import { apiPlugin, type ApiPluginOptions } from "../api/plugin.js";
-import { toApiItem } from "../api/read-models.js";
+import { buildOverview, toApiItem } from "../api/read-models.js";
 import { artifactPlugin, type ArtifactService } from "../artifact/index.js";
 import type { ChangeEventHub } from "../events/index.js";
 import { registerWebhookRoutes, type WebhookService } from "../webhook/index.js";
@@ -15,7 +15,7 @@ export type AppOptions = {
   artifactService?: ArtifactService;
 } & ApiPluginOptions;
 
-export async function createApp({ webRoot, logger, cache, syncService, refreshService, diffClient, reviewService, mergeService, eventHub, webhookService, artifactService }: AppOptions) {
+export async function createApp({ webRoot, logger, cache, syncService, refreshService, diffClient, reviewService, mergeService, eventHub, webhookService, artifactService, logEvent }: AppOptions) {
   const app = logger
     ? fastify({ loggerInstance: logger, logController: new LogController({ disableRequestLogging: true }) })
     : fastify();
@@ -39,7 +39,7 @@ export async function createApp({ webRoot, logger, cache, syncService, refreshSe
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService, diffClient, reviewService, mergeService });
+  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService, diffClient, reviewService, mergeService, eventHub, logEvent });
 
   if (webhookService) {
     await registerWebhookRoutes(app, webhookService);
@@ -62,10 +62,22 @@ export async function createApp({ webRoot, logger, cache, syncService, refreshSe
     });
     reply.raw.write(": connected\n\n");
     const unsubscribe = eventHub.subscribe((change) => {
-      const active = cache.getActiveSnapshot();
+      if (change.status === "settings") {
+        reply.raw.write(`event: settings\ndata: ${JSON.stringify({ ...change, type: "settings", status: undefined })}\n\n`);
+        return;
+      }
+      if (change.status === "projection_changed") {
+        reply.raw.write("event: item\ndata: {\"type\":\"reconcile\"}\n\n");
+        return;
+      }
+      const repositoryId = change.status === "removed" ? change.repositoryId : change.item.repositoryId;
+      if (cache.isRepositoryIgnored(repositoryId)) return;
+      const overview = buildOverview(cache);
+      const repositories = overview.status === "ready" ? overview.repositories : [];
+      const scope = overview.status === "ready" ? overview.scope : { repositoryCount: 0, itemCount: 0, visibleItemCount: 0, visibleRepositoryCount: 0, ignoredRepositoryCount: 0, truncatedReason: null };
       const event = change.status === "updated"
-        ? { type: "updated", item: toApiItem(cache, change.item), repositories: active?.repositories ?? [], scope: active?.scope ?? { repositoryCount: 0, itemCount: 0, truncatedReason: null } }
-        : { type: "removed", nodeId: change.nodeId, itemType: change.itemType, number: change.number, reason: change.reason, scope: active?.scope ?? { repositoryCount: 0, itemCount: 0, truncatedReason: null } };
+        ? { type: "updated", item: toApiItem(cache, change.item), repositories, scope }
+        : { type: "removed", nodeId: change.nodeId, itemType: change.itemType, number: change.number, reason: change.reason, scope };
       reply.raw.write(`event: item\ndata: ${JSON.stringify(event)}\n\n`);
     });
     request.raw.on("close", () => {

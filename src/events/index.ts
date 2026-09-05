@@ -1,9 +1,18 @@
 import type { RefreshChange } from "../refresh/index.js";
 
-export type ChangeSubscriber = (change: RefreshChange) => void;
+export type SettingsChange = {
+  status: "settings";
+  revision: number;
+  visibleItemCount: number;
+  visibleRepositoryCount: number;
+  ignoredRepositoryCount: number;
+};
+
+export type ChangeEvent = RefreshChange | SettingsChange;
+export type ChangeSubscriber = (change: ChangeEvent) => void;
 
 export type ChangeEventHub = {
-  publish(change: RefreshChange): void;
+  publish(change: ChangeEvent): void;
   subscribe(subscriber: ChangeSubscriber): () => void;
   subscriberCount(): number;
 };

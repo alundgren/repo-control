@@ -82,6 +82,67 @@ describe("GitHub webhook delivery", () => {
     store.close();
   });
 
+  it("uses the webhook refresh path for cached work", async () => {
+    const store = await deliveryStore();
+    const refreshes: string[] = [];
+    const service = createWebhookService({
+      cache: { getItem: () => ({ type: "issue" }) } as unknown as Cache,
+      refreshService: {
+        refreshItem: async () => { throw new Error("direct refresh must not handle webhook work"); },
+        refreshFromWebhook: async ({ nodeId }) => {
+          refreshes.push(nodeId);
+          return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+    });
+    const body = Buffer.from(JSON.stringify(issuePayload()));
+
+    try {
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-cached", eventName: "issues" });
+      await service.start();
+
+      expect(refreshes).toEqual(["I_fixture"]);
+      expect(store.takePending(new Date().toISOString())).toEqual([]);
+    } finally {
+      await service.stop();
+      store.close();
+    }
+  });
+
+  it("upserts reopened cached work that is absent from the active snapshot", async () => {
+    const store = await deliveryStore();
+    const upserts: string[] = [];
+    const service = createWebhookService({
+      cache: {
+        getItem: () => ({ type: "issue" }),
+        isItemInActiveSnapshot: () => false,
+      } as unknown as Cache,
+      refreshService: {
+        refreshItem: async () => { throw new Error("inactive cached work must use upsert"); },
+        upsertItem: async ({ nodeId }) => {
+          upserts.push(nodeId);
+          return { status: "updated", item: {} as never, fetchedAt: "now", relationshipStatus: "fresh", rateLimit: { cost: 1, remaining: 1, resetAt: "later" } };
+        },
+      },
+      secret: "fixture-secret",
+      store,
+    });
+    const body = Buffer.from(JSON.stringify(issuePayload({ action: "reopened" })));
+
+    try {
+      await service.accept({ body, signature: sign(body, "fixture-secret"), deliveryId: "d-reopened", eventName: "issues" });
+      await service.start();
+
+      expect(upserts).toEqual(["I_fixture"]);
+      expect(store.takePending(new Date().toISOString())).toEqual([]);
+    } finally {
+      await service.stop();
+      store.close();
+    }
+  });
+
   it("refreshes the parent and child for a sub-issue link delivery", async () => {
     const store = await deliveryStore();
     const refreshes: string[] = [];

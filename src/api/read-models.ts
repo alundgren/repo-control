@@ -4,12 +4,30 @@ import type { SyncOutcome } from "../sync/index.js";
 import { classifyIssues, type ClassifiedIssue, type IssueReadiness, type QueueMapping, type ReadyExclusion } from "../domain/workflow.js";
 import type { GitHubReadError } from "../github/read-client.js";
 
-export type ApiScope = SuccessfulSnapshot["scope"];
+export type RepositoryQueueCounts = {
+  now: number;
+  pullRequests: number;
+  agent: number;
+  human: number;
+  triage: number;
+  epics: number;
+};
+
+export type RepositoryVisibilityResponse = ReturnType<Cache["getRepositoryVisibility"]> & {
+  repositories: Array<ReturnType<Cache["getRepositoryVisibility"]>["repositories"][number] & { counts: RepositoryQueueCounts }>;
+};
+
+export type ApiScope = SuccessfulSnapshot["scope"] & {
+  visibleItemCount: number;
+  visibleRepositoryCount: number;
+  ignoredRepositoryCount: number;
+};
 export type ApiRepository = SuccessfulSnapshot["repositories"][number];
 
 export type ApiBlocker =
   | { status: "known"; id: string; repositoryId: string; repositoryNameWithOwner?: string; number: number; title: string; url: string }
-  | { status: "unknown"; id: string };
+  | { status: "unknown"; id: string }
+  | { status: "unavailable" };
 
 export type ApiReadiness =
   | { kind: "unblocked" }
@@ -97,7 +115,7 @@ export type OverviewResponse =
 export type ApiError = { code: string; retryAfterSeconds?: number; retryAt?: string };
 
 export type SyncResponse =
-  | { status: "complete" | "partial"; fetchedAt: string; scope: ApiScope }
+  | { status: "complete" | "partial"; fetchedAt: string; scope: SuccessfulSnapshot["scope"] }
   | {
       status: "failed";
       error: ApiError;
@@ -108,6 +126,7 @@ export type ItemRefreshResponse =
   | { status: "updated"; item: ApiItem; fetchedAt: string; relationshipStatus: "fresh" | "stale"; repositories?: ApiRepository[]; scope?: ApiScope }
   | { status: "removed"; reason: "closed" | "merged" | "repository_not_owned"; scope?: ApiScope }
   | { status: "not_found" }
+  | { status: "ignored" }
   | { status: "permission_denied"; error: ApiError; item: ApiItem }
   | { status: "failed"; error: ApiError; item: ApiItem };
 
@@ -118,11 +137,14 @@ export function buildOverview(cache: Cache): OverviewResponse {
   }
 
   const mapping = cache.getQueueMapping();
+  const visibility = cache.getRepositoryVisibility();
+  const ignoredIds = new Set(visibility.repositories.filter((repository) => repository.ignored).map((repository) => repository.id));
   const epicLabel = cache.getEpicLabel();
-  const issues = snapshot.items.filter(
+  const visibleItems = snapshot.items.filter((item) => !ignoredIds.has(item.repositoryId));
+  const issues = visibleItems.filter(
     (item): item is CacheItem & { type: "issue" } => item.type === "issue",
   );
-  const pullRequests = snapshot.items.filter(
+  const pullRequests = visibleItems.filter(
     (item): item is CacheItem & { type: "pull_request" } => item.type === "pull_request",
   );
 
@@ -134,14 +156,50 @@ export function buildOverview(cache: Cache): OverviewResponse {
   return {
     status: "ready",
     fetchedAt: snapshot.fetchedAt,
-    repositories: snapshot.repositories,
-    scope: snapshot.scope,
+    repositories: snapshot.repositories.filter((repository) => !ignoredIds.has(repository.id)),
+    scope: toApiScope(snapshot, visibility),
     issues: apiIssues,
     queues: groupIntoQueues(mapping, apiIssues.filter((issue): issue is ApiIssue & { queue: string } => issue.queue !== null)),
     pullRequests: pullRequests.map((item) => toApiPullRequest(cache, item)).sort(comparePullRequests),
     epics: apiIssues
       .filter((issue) => issue.queue === null)
       .sort(compareEpics),
+  };
+}
+
+export function buildRepositoryVisibility(cache: Cache): RepositoryVisibilityResponse {
+  const visibility = cache.getRepositoryVisibility();
+  const snapshot = cache.getActiveSnapshot();
+  const counts = new Map<string, RepositoryQueueCounts>();
+  for (const repository of visibility.repositories) {
+    counts.set(repository.id, { now: 0, pullRequests: 0, agent: 0, human: 0, triage: 0, epics: 0 });
+  }
+  if (snapshot) {
+    const issueCounts = classifyIssues(cache.getQueueMapping(), snapshot.items.filter(
+      (item): item is CacheItem & { type: "issue" } => item.type === "issue",
+    ), { epicLabel: cache.getEpicLabel(), claimedLabel: cache.getClaimedLabel() });
+    for (const item of snapshot.items.filter((entry) => entry.type === "pull_request")) {
+      const entry = counts.get(item.repositoryId);
+      if (entry) {
+        entry.pullRequests += 1;
+        entry.now += 1;
+      }
+    }
+    for (const issue of issueCounts) {
+      const entry = counts.get(issue.repositoryId);
+      if (!entry) continue;
+      if (issue.queue === null) {
+        entry.epics += 1;
+        entry.now += 1;
+      } else if (!(issue.queue === "agent" && issue.readyExclusion !== null)) {
+        if (issue.queue === "agent" || issue.queue === "human" || issue.queue === "triage") entry[issue.queue] += 1;
+        entry.now += 1;
+      }
+    }
+  }
+  return {
+    revision: visibility.revision,
+    repositories: visibility.repositories.map((repository) => ({ ...repository, counts: counts.get(repository.id)! })),
   };
 }
 
@@ -161,8 +219,10 @@ export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): It
   switch (outcome.status) {
     case "not_found":
       return { status: "not_found" };
+    case "ignored":
+      return { status: "ignored" };
     case "removed":
-      return { status: "removed", reason: outcome.reason, ...(active ? { scope: active.scope } : {}) };
+      return { status: "removed", reason: outcome.reason, ...(active ? { scope: toApiScope(active, cache.getRepositoryVisibility()) } : {}) };
     case "updated":
       {
       const active = cache.getActiveSnapshot();
@@ -171,7 +231,10 @@ export function toItemRefreshResponse(cache: Cache, outcome: RefreshOutcome): It
         item: toApiItem(cache, outcome.item),
         fetchedAt: outcome.fetchedAt,
         relationshipStatus: outcome.relationshipStatus,
-        ...(active ? { repositories: active.repositories, scope: active.scope } : {}),
+        ...(active ? {
+          repositories: active.repositories.filter((repository) => !cache.isRepositoryIgnored(repository.id)),
+          scope: toApiScope(active, cache.getRepositoryVisibility()),
+        } : {}),
       };
       }
     case "permission_denied":
@@ -238,6 +301,7 @@ function toApiEpicMembership(
   if (!summary && !cached) {
     return null;
   }
+  if (cache.isRepositoryIgnored(summary?.repositoryId ?? cached!.repositoryId)) return null;
   return {
     id: parentId,
     repositoryId: summary?.repositoryId ?? cached!.repositoryId,
@@ -272,7 +336,10 @@ function resolveBlocker(cache: Cache, id: string, blockerCache: Map<string, ApiB
   }
   const item = cache.getItem(id);
   const related = cache.getRelatedItem(id);
-  const resolved: ApiBlocker = item
+  const repositoryId = item?.repositoryId ?? related?.repositoryId;
+  const resolved: ApiBlocker = repositoryId && cache.isRepositoryIgnored(repositoryId)
+    ? { status: "unavailable" }
+    : item
     ? { status: "known", id: item.id, repositoryId: item.repositoryId, number: item.number, title: item.title, url: item.url }
     : related
       ? {
@@ -318,7 +385,17 @@ function toApiRelatedItems(cache: Cache, item: CacheItem, type: "closing_issue")
   if (related.some((entry) => !entry)) {
     return { status: "unavailable" };
   }
-  return { status: "complete", items: related as ApiRelatedItem[] };
+  return { status: "complete", items: (related as ApiRelatedItem[]).filter((entry) => !cache.isRepositoryIgnored(entry.repositoryId)) };
+}
+
+function toApiScope(snapshot: SuccessfulSnapshot, visibility: ReturnType<Cache["getRepositoryVisibility"]>): ApiScope {
+  const ignored = new Set(visibility.repositories.filter((repository) => repository.ignored).map((repository) => repository.id));
+  return {
+    ...snapshot.scope,
+    visibleItemCount: snapshot.items.filter((item) => !ignored.has(item.repositoryId)).length,
+    visibleRepositoryCount: snapshot.repositories.filter((repository) => !ignored.has(repository.id)).length,
+    ignoredRepositoryCount: ignored.size,
+  };
 }
 
 function compareEpics(left: ApiIssue, right: ApiIssue): number {

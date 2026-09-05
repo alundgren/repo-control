@@ -33,7 +33,7 @@ describe("local cache", () => {
       expect(first.getStatus()).toEqual({
         activeGenerationId: null,
         retainedGenerationCount: 0,
-        schemaVersion: 6,
+        schemaVersion: 7,
         storedAccountCount: 0,
         storedItemCount: 0,
       });
@@ -44,7 +44,7 @@ describe("local cache", () => {
     const reopened = openCache({ path });
 
     try {
-      expect(reopened.getStatus().schemaVersion).toBe(6);
+      expect(reopened.getStatus().schemaVersion).toBe(7);
     } finally {
       reopened.close();
     }
@@ -59,7 +59,9 @@ describe("local cache", () => {
 
     const versionOne = new Database(path);
     versionOne.exec(`
-      DELETE FROM cache_migrations WHERE version IN (2, 3, 4, 5, 6);
+      DELETE FROM cache_migrations WHERE version IN (2, 3, 4, 5, 6, 7);
+      DROP TABLE ignored_repositories;
+      DROP TABLE repository_visibility_state;
       DROP TABLE related_item_summaries;
       ALTER TABLE items DROP COLUMN github_created_at;
       ALTER TABLE items DROP COLUMN sub_issues_total;
@@ -75,7 +77,7 @@ describe("local cache", () => {
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(6);
+      expect(migrated.getStatus().schemaVersion).toBe(7);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained generation" }],
@@ -94,7 +96,9 @@ describe("local cache", () => {
 
     const versionTwo = new Database(path);
     versionTwo.exec(`
-      DELETE FROM cache_migrations WHERE version IN (3, 4, 5, 6);
+      DELETE FROM cache_migrations WHERE version IN (3, 4, 5, 6, 7);
+      DROP TABLE ignored_repositories;
+      DROP TABLE repository_visibility_state;
       DROP TABLE related_item_summaries;
       ALTER TABLE instance_configuration DROP COLUMN claimed_label;
     `);
@@ -102,7 +106,7 @@ describe("local cache", () => {
 
     const migrated = openCache({ path });
     try {
-      expect(migrated.getStatus().schemaVersion).toBe(6);
+      expect(migrated.getStatus().schemaVersion).toBe(7);
       expect(migrated.getActiveSnapshot()).toMatchObject({
         generationId: activeBefore?.generationId,
         items: [{ id: "I_issue_1", title: "Retained reconciliation generation" }],
@@ -350,6 +354,7 @@ describe("local cache", () => {
     try {
       cache.replaceActiveSnapshot(snapshot({ title: "Original" }));
       const activeBefore = cache.getActiveSnapshot();
+      expect(cache.isItemInActiveSnapshot("I_issue_1")).toBe(true);
 
       const item = cache.getItem("I_issue_1");
       if (!item) throw new Error("expected seeded item");
@@ -412,6 +417,7 @@ describe("local cache", () => {
       cache.removeItem("I_issue_1");
 
       expect(cache.getItem("I_issue_1")).toBeNull();
+      expect(cache.isItemInActiveSnapshot("I_issue_1")).toBe(false);
       expect(cache.getActiveSnapshot()?.items).toEqual([]);
       expect(cache.getStatus().storedItemCount).toBe(0);
       expect(cache.getRelatedItem("I_issue_2")).toBeNull();
@@ -476,7 +482,7 @@ describe("local cache", () => {
     cache.close();
 
     const oldDatabase = new Database(path);
-    oldDatabase.exec("DELETE FROM cache_migrations WHERE version = 6; ALTER TABLE instance_configuration DROP COLUMN claimed_label;");
+    oldDatabase.exec("DELETE FROM cache_migrations WHERE version IN (6, 7); DROP TABLE ignored_repositories; DROP TABLE repository_visibility_state; ALTER TABLE instance_configuration DROP COLUMN claimed_label;");
     oldDatabase.close();
 
     const migrated = openCache({ path });
@@ -524,6 +530,29 @@ describe("local cache", () => {
           { label: "ready-for-agent", queue: "agent" },
         ],
       });
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("replaces repository visibility atomically with revision conflicts and remembered identity", async () => {
+    const cache = openCache({ path: await createCachePath() });
+    try {
+      cache.replaceActiveSnapshot(snapshot());
+      expect(cache.getRepositoryVisibility()).toMatchObject({ revision: 0, repositories: [{ id: "R_repo_1", ignored: false, inActiveSnapshot: true, activeItemCount: 1 }] });
+
+      expect(cache.replaceIgnoredRepositories(["R_repo_1"], 0)).toMatchObject({ status: "updated", settings: { revision: 1 } });
+      expect(cache.isRepositoryIgnored("R_repo_1")).toBe(true);
+      expect(cache.replaceIgnoredRepositories([], 0)).toMatchObject({ status: "conflict", settings: { revision: 1 } });
+      expect(cache.replaceIgnoredRepositories(["R_unknown"], 1)).toEqual({ status: "unknown_repository", repositoryId: "R_unknown" });
+
+      const next = snapshot({ fetchedAt: "2026-08-24T10:00:00.000Z" });
+      next.repositories = [];
+      next.items = [];
+      next.scope = { ...next.scope, repositoryCount: 0, itemCount: 0 };
+      cache.replaceActiveSnapshot(next);
+      expect(cache.getRepositoryVisibility()).toMatchObject({ repositories: [{ id: "R_repo_1", nameWithOwner: "octo-user/example-repository", ignored: true, inActiveSnapshot: false }] });
+      expect(cache.replaceIgnoredRepositories([], 1)).toMatchObject({ status: "updated", settings: { revision: 2, repositories: [] } });
     } finally {
       cache.close();
     }

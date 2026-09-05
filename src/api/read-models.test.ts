@@ -217,6 +217,42 @@ describe("api read models", () => {
       }
     });
 
+    it("filters ignored work and removes ignored identities from visible relationships", async () => {
+      const cache = await freshCache();
+      try {
+        const visibleIssue = issue({
+          id: "I_visible",
+          relationships: [
+            { sourceId: "I_visible", targetId: "I_hidden_blocker", type: "blocker" },
+            { sourceId: "I_visible", targetId: "I_hidden_epic", type: "parent" },
+          ],
+        });
+        const visiblePullRequest = pullRequest({ id: "PR_visible" });
+        visiblePullRequest.relationships = [{ sourceId: "PR_visible", targetId: "I_hidden_closing", type: "closing_issue" }];
+        visiblePullRequest.relatedItems = [{ id: "I_hidden_closing", repositoryId: "R_hidden", repositoryNameWithOwner: "octo-user/hidden", number: 9, title: "Hidden closing issue", url: "https://github.test/hidden/issues/9" }];
+        const hiddenBlocker = issue({ id: "I_hidden_blocker", repositoryId: "R_hidden", title: "Hidden blocker" });
+        const hiddenEpic = issue({ id: "I_hidden_epic", repositoryId: "R_hidden", title: "Hidden epic", labels: ["epic"] });
+        const data = snapshot({ items: [visibleIssue, visiblePullRequest, hiddenBlocker, hiddenEpic] });
+        data.repositories.push({ id: "R_hidden", nameWithOwner: "octo-user/hidden" });
+        data.scope = { ...data.scope, itemCount: 4, repositoryCount: 2 };
+        cache.replaceActiveSnapshot(data);
+        cache.replaceIgnoredRepositories(["R_hidden"], 0);
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+        expect(overview.repositories).toEqual([{ id: "R_repo_1", nameWithOwner: "octo-user/fictional" }]);
+        expect(overview.scope).toMatchObject({ itemCount: 4, repositoryCount: 2, visibleItemCount: 2, visibleRepositoryCount: 1, ignoredRepositoryCount: 1 });
+        const issueRead = overview.issues.find((entry) => entry.id === "I_visible");
+        expect(issueRead?.readiness).toEqual({ kind: "blocked", blockers: [{ status: "unavailable" }] });
+        expect(issueRead?.epic).toBeNull();
+        expect(overview.pullRequests[0]?.closingIssues).toEqual({ status: "complete", items: [] });
+        expect(JSON.stringify(overview)).not.toContain("Hidden");
+        expect(JSON.stringify(overview)).not.toContain("R_hidden");
+      } finally {
+        cache.close();
+      }
+    });
+
     it("keeps every issue in the read model while the Ready projection omits claimed and confirmed-blocked work", async () => {
       const cache = await freshCache();
       try {
@@ -484,6 +520,7 @@ describe("api read models", () => {
         toItemRefreshResponse({} as Cache, { status: "removed", reason: "closed", rateLimit: { cost: 1, remaining: 1, resetAt: "x" } }),
       ).toEqual({ status: "removed", reason: "closed" });
       expect(toItemRefreshResponse({} as Cache, { status: "not_found" })).toEqual({ status: "not_found" });
+      expect(toItemRefreshResponse({} as Cache, { status: "ignored" })).toEqual({ status: "ignored" });
     });
 
     it("maps a failed refresh to a safe error plus the last-known item, dropping the raw message", async () => {
