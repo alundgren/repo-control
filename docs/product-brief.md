@@ -27,6 +27,10 @@ update the matching receiver when the required event specification advances.
 - Show dedicated full-list views for every item in the current cache
   generation. A full list reflects the last reconciliation; the view still
   exposes a partial-result state when GitHub's search cap prevents a full inventory.
+- Let the account owner hide repositories from every work view and restore
+  them through Settings. Account sync still caches current work from hidden
+  repositories. Active-snapshot counts describe everything loaded from
+  GitHub, while visible counts describe what the work views can show.
 - Work for any person who connects their own GitHub account. Version one
   includes only repositories whose owner is that personal account, even if the
   token can read organization-owned repositories. Production code derives
@@ -65,8 +69,10 @@ the installation's claimed label. The claimed label is instance configuration
 and defaults to `claimed`. Its navigation count and Now preview use the same
 filtered queue. The cache and API retain every loaded issue, so Ready and Now
 searches can still find hidden work and say whether a claim, an open blocker,
-or both kept it out of Ready. `scope.itemCount` counts the complete loaded
-collection.
+or both kept it out of Ready. `scope.itemCount` and `scope.repositoryCount`
+count the complete active snapshot. Visible item and repository counts exclude
+hidden repositories. The ignored count includes remembered hidden repositories
+that have left the active snapshot.
 
 Incomplete dependency data never hides an issue from Ready. Repo Control keeps
 the issue visible with a dependency-status warning instead of guessing that it
@@ -84,6 +90,13 @@ A focused refresh fetches one selected pull request or issue after the person
 knows something changed on GitHub, such as merging a pull request or assigning
 an issue. It updates that item and the relationship facts shown with it. It
 does not force an account-wide sync.
+
+A focused refresh stops before contacting GitHub when its cached item belongs
+to a hidden repository. Account sync and webhook processing may keep that
+cached work current, but no work view, search result, count, selection, epic,
+closing issue, or blocker detail exposes the hidden repository. Restoring a
+repository reveals only work in the active snapshot. It never reads an older
+generation to fill the view.
 
 When both the receiver secret and a validated public receiver URL are set, an
 explicit account sync also inventories the personal account's repositories and

@@ -5,7 +5,59 @@ import type { MergeReadiness } from "../merge/index.js";
 
 export type LiveItemEvent =
   | { type: "updated"; item: import("../api/read-models.js").ApiItem; repositories: ApiRepository[]; scope: ApiScope }
-  | { type: "removed"; nodeId: string; itemType: "issue" | "pull_request"; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope"; scope: ApiScope };
+  | { type: "removed"; nodeId: string; itemType: "issue" | "pull_request"; number: number; reason: "issue_closed" | "pull_request_closed" | "pull_request_merged" | "repository_out_of_scope"; scope: ApiScope }
+  | { type: "reconcile" };
+
+export type LiveSettingsEvent = {
+  type: "settings";
+  revision: number;
+  visibleItemCount: number;
+  visibleRepositoryCount: number;
+  ignoredRepositoryCount: number;
+};
+
+export type RepositoryVisibilitySettings = {
+  revision: number;
+  repositories: Array<{
+    id: string;
+    nameWithOwner: string;
+    ignored: boolean;
+    inActiveSnapshot: boolean;
+    activeItemCount: number;
+    counts: {
+      now: number;
+      pullRequests: number;
+      agent: number;
+      human: number;
+      triage: number;
+      epics: number;
+    };
+  }>;
+};
+
+export async function getRepositoryVisibility(): Promise<RepositoryVisibilitySettings> {
+  const response = await request<{ status: "ready" } & RepositoryVisibilitySettings>("/api/settings/repository-visibility");
+  return response;
+}
+
+export type ReplaceRepositoryVisibilityResponse =
+  | ({ status: "updated" } & RepositoryVisibilitySettings)
+  | ({ status: "conflict" } & RepositoryVisibilitySettings)
+  | { status: "invalid"; error: { code: "duplicate_repository" | "unknown_repository" | "invalid_request" } }
+  | { status: "failed" };
+
+export async function replaceRepositoryVisibility(revision: number, ignoredRepositoryIds: string[]): Promise<ReplaceRepositoryVisibilityResponse> {
+  try {
+    const response = await fetch("/api/settings/repository-visibility", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ revision, ignoredRepositoryIds }),
+    });
+    return await response.json() as ReplaceRepositoryVisibilityResponse;
+  } catch {
+    return { status: "failed" };
+  }
+}
 
 export async function getOverview(): Promise<OverviewResponse> {
   return request<OverviewResponse>("/api/overview");

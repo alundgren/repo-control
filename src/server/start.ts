@@ -127,6 +127,7 @@ export async function startServer({
       reviewService,
       mergeService,
       eventHub,
+      logEvent,
       webhookService: webhookService ?? undefined,
       artifactService: artifactService ?? undefined,
     });

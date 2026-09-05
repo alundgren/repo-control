@@ -53,6 +53,63 @@ describe("focused item refresh", () => {
     }
   });
 
+  it("returns an ignored result without contacting GitHub", async () => {
+    const cache = await seededCache();
+    try {
+      cache.replaceIgnoredRepositories(["R_fixture"], 0);
+      const client = countingClient({
+        readFocusedItem: async () => { throw new Error("GitHub must not be called"); },
+        readRelationshipEnrichment: async () => { throw new Error("GitHub must not be called"); },
+      });
+      const service = createItemRefreshService({ cache, client });
+
+      await expect(service.refreshItem({ nodeId: "I_issue_1" })).resolves.toEqual({ status: "ignored" });
+      expect(client.focusedCalls).toBe(0);
+      expect(client.enrichmentCalls).toBe(0);
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("refreshes ignored cached work when a webhook requests reconciliation", async () => {
+    const cache = await seededCache();
+    try {
+      cache.replaceIgnoredRepositories(["R_fixture"], 0);
+      const client = countingClient({
+        readFocusedItem: async () => openIssue({ title: "Updated while hidden" }),
+        readRelationshipEnrichment: async () => enrichment({ blocker: "complete" }),
+      });
+      const service = createItemRefreshService({ cache, client });
+
+      await expect(service.refreshFromWebhook?.({ nodeId: "I_issue_1" })).resolves.toEqual({ status: "ignored" });
+      expect(client.focusedCalls).toBe(1);
+      expect(cache.getItem("I_issue_1")?.title).toBe("Updated while hidden");
+    } finally {
+      cache.close();
+    }
+  });
+
+  it("returns ignored and publishes removal when visibility changes during a refresh", async () => {
+    const cache = await seededCache();
+    const changes: unknown[] = [];
+    try {
+      const client = countingClient({
+        readFocusedItem: async () => {
+          cache.replaceIgnoredRepositories(["R_fixture"], 0);
+          return openIssue({ title: "Updated before hiding" });
+        },
+        readRelationshipEnrichment: async () => enrichment({ blocker: "complete" }),
+      });
+      const service = createItemRefreshService({ cache, client, onChange: (change) => changes.push(change) });
+
+      await expect(service.refreshItem({ nodeId: "I_issue_1" })).resolves.toEqual({ status: "ignored" });
+      expect(cache.getItem("I_issue_1")?.title).toBe("Updated before hiding");
+      expect(changes).toEqual([{ status: "projection_changed" }]);
+    } finally {
+      cache.close();
+    }
+  });
+
   it("updates only the selected item's facts and relationships without a sampled sync", async () => {
     const cache = await seededCache();
 
@@ -316,7 +373,7 @@ describe("focused item refresh", () => {
     }
   });
 
-  it("dedupes concurrent refreshes of the same item into a single GitHub read", async () => {
+  it("dedupes concurrent direct and webhook refreshes into a single GitHub read", async () => {
     const cache = await seededCache();
     const events: Array<Record<string, unknown>> = [];
 
@@ -331,7 +388,7 @@ describe("focused item refresh", () => {
       const service = createItemRefreshService({ cache, client, logEvent: (event) => events.push(event) });
 
       const first = service.refreshItem({ nodeId: "I_issue_1" });
-      const second = service.refreshItem({ nodeId: "I_issue_1" });
+      const second = service.refreshFromWebhook?.({ nodeId: "I_issue_1" });
       resolveRead(openIssue({ title: "Resolved once" }));
       const [firstResult, secondResult] = await Promise.all([first, second]);
 
