@@ -134,8 +134,8 @@ used.
   head SHA remain in a separate stale section where their text can be copied or
   discarded. Closing the overlay and switching arrangements never clears,
   moves, or duplicates them. Each draft has its own discard action, and Discard
-  all asks for confirmation before removing every current and stale draft for
-  that pull request. When the operator enables review submission, the review bar
+  all immediately removes every current and stale draft for that pull request.
+  When the operator enables review submission, the review bar
   lets the person choose Comment, Approve, or Request changes and add an optional
   summary. The submit control states how many comments belong to the displayed
   head and asks for confirmation before contacting GitHub. Comment and Request
@@ -150,15 +150,17 @@ used.
   It reads current GitHub state when the overlay opens and shows checking,
   pending checks, a named block, unavailable, or not-permitted text. If GitHub
   is still calculating mergeability, Check again repeats the readiness read.
-  Network and mutation failures never retry automatically. Only a
-  configured and currently ready pull request gets a Squash and merge control.
-  Its confirmation names the pull request and source branch and states that
-  version one leaves the branch in place. A moved head, permission denial,
+  Network and mutation failures never retry automatically. Only a configured
+  and currently ready pull request gets a Merge control. Its first press slides
+  from a lock icon to a merge icon and arms the same control for three seconds.
+  A second press during that window starts a squash merge; an unused window
+  locks itself again. The nearby status states that Repo Control will not delete
+  the pull request branch. A moved head, permission denial,
   policy rejection, or validation failure states that nothing was retried. An
   ambiguous response sends the person to GitHub before another attempt.
-  Confirmed success remains visible as a terminal merged state while focused
-  refresh and the item event remove the pull request from the queue. If live
-  updates removed the opening control, focus
+  Confirmed success silently discards every pending draft for the pull request
+  and closes the overlay while focused refresh and the item event remove the
+  pull request from the queue. If live updates removed the opening control, focus
   returns to the queue heading. Added and removed rows use low-saturation tints derived from the
   success and warning roles, plus visible `+` and `−` gutter markers so colour
   is never the only distinction. Omitted, incomplete, and size-limited patches,

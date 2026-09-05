@@ -182,7 +182,20 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
 .reviewBar select { padding: 0.375rem 0.625rem; border: 1px solid var(--color-divider); border-radius: var(--radius-control); background: var(--color-field); color: var(--color-text); font-size: 0.875rem; }
 .primaryButton, .mergeButton { padding: 0.5rem 0.75rem; border: 0; border-radius: var(--radius-control); color: var(--color-field); cursor: pointer; font-weight: 600; }
 .primaryButton { background: var(--color-accent); }
-.mergeButton { background: var(--color-danger); }
+.mergeButton { position: relative; display: inline-flex; align-items: center; gap: 0.4375rem; overflow: hidden; background: var(--color-danger); }
+.mergeButtonArmed { box-shadow: inset 0 0 0 0.125rem color-mix(in srgb, var(--color-field) 65%, transparent); }
+.mergeButtonArmed::after { position: absolute; right: 0; bottom: 0; left: 0; height: 0.1875rem; background: color-mix(in srgb, var(--color-field) 75%, transparent); content: ""; transform-origin: left; animation: merge-arm-window 3s linear forwards; }
+.mergeButtonIcons { position: relative; width: 1.125rem; height: 1.125rem; overflow: hidden; }
+.mergeButtonIcon { position: absolute; inset: 0; width: 1.125rem; height: 1.125rem; transition: transform 160ms ease; }
+.mergeLockIcon { transform: translateX(0); }
+.mergeExecuteIcon { transform: translateX(1.5rem); }
+.mergeButtonArmed .mergeLockIcon { transform: translateX(-1.5rem); }
+.mergeButtonArmed .mergeExecuteIcon { transform: translateX(0); }
+@keyframes merge-arm-window { to { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) {
+  .mergeButtonArmed::after { animation: none; }
+  .mergeButtonIcon { transition: none; }
+}
 .primaryButton:disabled { cursor: wait; opacity: 0.7; }
 .reviewBar .discardAll { padding: 0; border: 0; background: transparent; color: var(--color-danger); cursor: pointer; font-size: 0.84375rem; text-decoration: underline; }
 .mergePanel { display: contents; }
