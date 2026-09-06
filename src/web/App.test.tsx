@@ -552,6 +552,28 @@ describe("work queue overview", () => {
     expect(screen.queryByText("Repair blocked trellis")).toBeNull();
   });
 
+  it("orders Now search results across item kinds by most recent update", async () => {
+    const overview = readyOverview();
+    overview.pullRequests = [{
+      ...pullRequest({ id: "PR_ordering", number: 41, title: "Ordering pull request" }),
+      updatedAt: "2026-08-22T10:00:00.000Z",
+    }];
+    overview.issues = [{
+      ...issue({ id: "I_ordering", number: 22, title: "Ordering issue" }),
+      updatedAt: "2026-08-24T10:00:00.000Z",
+    }];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+
+    render(<App />);
+    const search = await screen.findByRole("searchbox", { name: "Filter pull requests and issues" });
+    fireEvent.change(search, { target: { value: "ordering" } });
+
+    expect(screen.getAllByRole("button", { name: /Select / }).map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Select Ordering issue",
+      "Select Ordering pull request",
+    ]);
+  });
+
   it("keeps an already-hidden Ready search result selected after focused refresh", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();
@@ -1327,7 +1349,7 @@ describe("work queue overview", () => {
     expect(screen.getByText("0 comments pending")).toBeTruthy();
   });
 
-  it("moves a refreshed issue to its returned queue in queue order", async () => {
+  it("moves a refreshed issue to its returned queue in newest-first order", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();
     const refreshed = {
@@ -1358,8 +1380,8 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Needs me 2" }));
     const rows = screen.getAllByRole("button", { name: /Select / });
     expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
-      "Select Add a fictional seed",
       "Select Choose a garden name",
+      "Select Add a fictional seed",
     ]);
   });
 

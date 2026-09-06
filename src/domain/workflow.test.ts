@@ -12,7 +12,7 @@ describe("classifyIssues", () => {
     ],
   };
 
-  it("uses configured mappings and a stable version-one order", () => {
+  it("uses configured mappings and orders issues by most recent update", () => {
     const classified = classifyIssues(mapping, [
       issue({ id: "I_later", number: 3, updatedAt: "2026-08-23T12:00:00.000Z" }),
       issue({
@@ -25,9 +25,9 @@ describe("classifyIssues", () => {
     ], { epicLabel: "epic", claimedLabel: "claimed" });
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
+      { id: "I_human", queue: "human" },
       { id: "I_earlier", queue: "agent" },
       { id: "I_later", queue: "agent" },
-      { id: "I_human", queue: "human" },
     ]);
   });
 
@@ -100,8 +100,8 @@ describe("classifyIssues", () => {
 
     expect(classified.map(({ id, readyExclusion, eligibleForRecommendation }) => ({ id, readyExclusion, eligibleForRecommendation }))).toEqual([
       { id: "I_claimed", readyExclusion: "claimed", eligibleForRecommendation: false },
-      { id: "I_unavailable", readyExclusion: null, eligibleForRecommendation: false },
       { id: "I_claimed_blocked", readyExclusion: "claimed_and_blocked", eligibleForRecommendation: false },
+      { id: "I_unavailable", readyExclusion: null, eligibleForRecommendation: false },
     ]);
   });
 
@@ -121,7 +121,7 @@ describe("classifyIssues", () => {
     ]);
   });
 
-  it("orders unblocked before unavailable before blocked regardless of recency", () => {
+  it("orders by recency regardless of readiness", () => {
     const classified = classifyIssues(mapping, [
       issue({
         id: "I_blocked_but_newest",
@@ -133,9 +133,9 @@ describe("classifyIssues", () => {
     ], { epicLabel: "epic", claimedLabel: "claimed" });
 
     expect(classified.map(({ id }) => id)).toEqual([
-      "I_unblocked_but_oldest",
-      "I_unavailable_middle",
       "I_blocked_but_newest",
+      "I_unavailable_middle",
+      "I_unblocked_but_oldest",
     ]);
   });
 
@@ -147,9 +147,9 @@ describe("classifyIssues", () => {
     ], { epicLabel: "epic", claimedLabel: "claimed" });
 
     expect(classified.map(({ id, queue }) => ({ id, queue }))).toEqual([
-      { id: "I_regular", queue: "agent" },
-      { id: "I_epic_only", queue: null },
       { id: "I_epic_and_queue", queue: null },
+      { id: "I_epic_only", queue: null },
+      { id: "I_regular", queue: "agent" },
     ]);
   });
 

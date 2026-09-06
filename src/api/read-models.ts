@@ -441,9 +441,10 @@ function queueOrder(mapping: QueueMapping): string[] {
 
 function comparePullRequests(left: ApiPullRequest, right: ApiPullRequest): number {
   return (
-    compareStrings(left.updatedAt, right.updatedAt) ||
+    compareStrings(right.updatedAt, left.updatedAt) ||
     compareStrings(left.repositoryId, right.repositoryId) ||
-    left.number - right.number
+    left.number - right.number ||
+    compareStrings(left.id, right.id)
   );
 }
 

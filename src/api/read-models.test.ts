@@ -28,7 +28,7 @@ describe("api read models", () => {
       }
     });
 
-    it("groups issues into queues ordered by readiness band then oldest-updated first, with queues sorted by name", async () => {
+    it("groups issues into queues ordered by most recent update, with queues sorted by name", async () => {
       const cache = await freshCache();
       try {
         cache.replaceQueueMapping({ defaultQueue: "triage", labels: [{ label: "ready-for-agent", queue: "agent" }] });
@@ -49,8 +49,8 @@ describe("api read models", () => {
 
         expect(overview.queues.map((queue) => queue.name)).toEqual(["agent", "triage"]);
         expect(overview.queues[0]?.issues.map((issueRead) => issueRead.id)).toEqual([
-          "I_agent_old",
           "I_agent_new",
+          "I_agent_old",
         ]);
       } finally {
         cache.close();
@@ -119,6 +119,23 @@ describe("api read models", () => {
             closingIssues: { status: "complete", items: [] },
           },
         ]);
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("orders pull requests by most recent update", async () => {
+      const cache = await freshCache();
+      try {
+        cache.replaceActiveSnapshot(snapshot({ items: [
+          pullRequest({ id: "PR_old", updatedAt: "2026-08-20T10:00:00.000Z" }),
+          pullRequest({ id: "PR_new", updatedAt: "2026-08-24T10:00:00.000Z" }),
+        ] }));
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+
+        expect(overview.pullRequests.map((pullRequestRead) => pullRequestRead.id)).toEqual(["PR_new", "PR_old"]);
       } finally {
         cache.close();
       }
@@ -285,15 +302,15 @@ describe("api read models", () => {
 
         expect(overview.scope.itemCount).toBe(5);
         expect(overview.issues.map(({ id, readyExclusion }) => ({ id, readyExclusion }))).toEqual([
-          { id: "I_claimed", readyExclusion: "claimed" },
-          { id: "I_unblocked", readyExclusion: null },
-          { id: "I_unavailable", readyExclusion: null },
           { id: "I_blocked", readyExclusion: "blocked" },
           { id: "I_both", readyExclusion: "claimed_and_blocked" },
+          { id: "I_claimed", readyExclusion: "claimed" },
+          { id: "I_unavailable", readyExclusion: null },
+          { id: "I_unblocked", readyExclusion: null },
         ]);
         expect(overview.queues.find((queue) => queue.name === "agent")?.issues.map((item) => item.id)).toEqual([
-          "I_unblocked",
           "I_unavailable",
+          "I_unblocked",
         ]);
       } finally {
         cache.close();

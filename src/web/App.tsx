@@ -1743,7 +1743,7 @@ function filterItems(items: ApiItem[], query: string, overview: Extract<Overview
     const repository = repositoryName(overview, item.repositoryId);
     const kind = item.type === "issue" ? queueTitle(item.queue) : "Pull request";
     return `${item.title} ${repository} ${item.number} ${kind}`.toLocaleLowerCase().includes(normalizedQuery);
-  });
+  }).sort(compareWorkItems);
 }
 
 function freshness(overview: Extract<OverviewResponse, { status: "ready" }>) {
@@ -1845,21 +1845,19 @@ function compareEpics(left: ApiItem, right: ApiItem) {
 }
 
 function comparePullRequests(left: Extract<ApiItem, { type: "pull_request" }>, right: Extract<ApiItem, { type: "pull_request" }>) {
-  return left.updatedAt.localeCompare(right.updatedAt) || left.repositoryId.localeCompare(right.repositoryId) || left.number - right.number;
+  return compareWorkItems(left, right);
 }
 
 function compareIssues(left: Extract<ApiItem, { type: "issue" }>, right: Extract<ApiItem, { type: "issue" }>) {
-  return readinessBand(left.readiness) - readinessBand(right.readiness)
-    || left.updatedAt.localeCompare(right.updatedAt)
-    || left.repositoryId.localeCompare(right.repositoryId)
-    || left.number - right.number
-    || left.id.localeCompare(right.id);
+  return compareWorkItems(left, right);
 }
 
-function readinessBand(readiness: Extract<ApiItem, { type: "issue" }> ["readiness"]) {
-  if (readiness.kind === "unblocked") return 0;
-  if (readiness.kind === "unavailable") return 1;
-  return 2;
+function compareWorkItems(left: ApiItem, right: ApiItem) {
+  return right.updatedAt.localeCompare(left.updatedAt)
+    || left.repositoryId.localeCompare(right.repositoryId)
+    || left.number - right.number
+    || left.type.localeCompare(right.type)
+    || left.id.localeCompare(right.id);
 }
 
 function removeOverviewItem(

@@ -97,6 +97,10 @@ used.
   the success, warning, and secondary text roles. Ready rows do not repeat an
   `Unblocked` fact. Issues with unavailable dependency coverage stay visible
   and keep their warning.
+- Work-queue ordering: Now previews, dedicated issue queues, pull requests,
+  epics, and work-item search results show the most recently updated item first.
+  Readiness and item kind do not override update time. Existing queue membership
+  and blocked-item visibility rules still apply.
 - Loaded-work search: Ready for agent search includes claimed and
   confirmed-blocked issues hidden from its normal list. Now search includes the
   complete loaded collection. Hidden Ready results name the claim, blocker, or
