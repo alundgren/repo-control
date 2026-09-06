@@ -3,7 +3,9 @@ import type { FastifyError, FastifyPluginAsync, FastifyReply } from "fastify";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import {
   ArtifactQuotaExceededError,
+  ARTIFACT_SHARE_POSITIONS,
   type ArtifactAppearance,
+  type ArtifactSharePosition,
   type ArtifactStore,
   type ArtifactType,
   type StoredArtifact,
@@ -96,7 +98,12 @@ export type PublishedArtifact = Pick<StoredArtifact, "id" | "type" | "createdAt"
 };
 
 export type ArtifactService = {
-  publish(type: ArtifactType, content: Buffer, appearance?: ArtifactAppearance): PublishedArtifact;
+  publish(
+    type: ArtifactType,
+    content: Buffer,
+    appearance?: ArtifactAppearance,
+    sharePosition?: ArtifactSharePosition,
+  ): PublishedArtifact;
   find(id: string): StoredArtifact | null;
   start(): void;
   stop(): void;
@@ -130,6 +137,10 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
         }
         if (readArtifactAppearance(request.headers["x-artifact-appearance"]) === INVALID_APPEARANCE) {
           await reply.code(400).send(artifactError("artifact_appearance_invalid"));
+          return;
+        }
+        if (readArtifactSharePosition(request.headers["x-artifact-share-position"]) === INVALID_SHARE_POSITION) {
+          await reply.code(400).send(artifactError("artifact_share_position_invalid"));
         }
       },
     }, async (request, reply) => {
@@ -141,7 +152,14 @@ export const artifactPlugin: FastifyPluginAsync<{ service: ArtifactService }> = 
         if (appearance === INVALID_APPEARANCE) {
           return reply.code(400).send(artifactError("artifact_appearance_invalid"));
         }
-        return reply.code(201).send({ status: "published", ...service.publish(type, request.body, appearance) });
+        const sharePosition = readArtifactSharePosition(request.headers["x-artifact-share-position"]);
+        if (sharePosition === INVALID_SHARE_POSITION) {
+          return reply.code(400).send(artifactError("artifact_share_position_invalid"));
+        }
+        return reply.code(201).send({
+          status: "published",
+          ...service.publish(type, request.body, appearance, sharePosition),
+        });
       } catch (error) {
         if (error instanceof ArtifactQuotaExceededError) {
           return reply.code(507).send(artifactError(error.code));
@@ -220,10 +238,10 @@ export function createArtifactService({
   }
 
   return {
-    publish(type, content, appearance) {
+    publish(type, content, appearance, sharePosition) {
       const startedAt = clock();
       try {
-        const artifact = store.publish({ type, content, appearance });
+        const artifact = store.publish({ type, content, appearance, sharePosition });
         emitLogEvent(logEvent, {
           event: "artifact.publication.finished",
           level: "info",
@@ -277,6 +295,18 @@ function readArtifactAppearance(value: string | string[] | undefined): ArtifactA
   if (value === undefined) return undefined;
   if (value === "light" || value === "dark") return value;
   return INVALID_APPEARANCE;
+}
+
+const INVALID_SHARE_POSITION = Symbol("invalid artifact share position");
+
+function readArtifactSharePosition(
+  value: string | string[] | undefined,
+): ArtifactSharePosition | undefined | typeof INVALID_SHARE_POSITION {
+  if (value === undefined) return undefined;
+  if (Array.isArray(value)) return INVALID_SHARE_POSITION;
+  return (ARTIFACT_SHARE_POSITIONS as readonly string[]).includes(value)
+    ? value as ArtifactSharePosition
+    : INVALID_SHARE_POSITION;
 }
 
 function defaultScheduleEvery(callback: () => void, intervalMs: number) {

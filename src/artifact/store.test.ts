@@ -6,7 +6,12 @@ import { Worker } from "node:worker_threads";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { ArtifactQuotaExceededError, type ArtifactType, openArtifactStore } from "./store.js";
+import {
+  ARTIFACT_SHARE_POSITIONS,
+  ArtifactQuotaExceededError,
+  type ArtifactType,
+  openArtifactStore,
+} from "./store.js";
 
 describe("artifact store", () => {
   const temporaryDirectories: string[] = [];
@@ -18,7 +23,7 @@ describe("artifact store", () => {
   it("keeps each supported type, original bytes, and UTC timestamps across reopen", async () => {
     const path = await databasePath();
     const content = Buffer.from([0, 255, 60, 104, 116, 109, 108, 62]);
-    const ids = ["a".repeat(32), "b".repeat(32), "c".repeat(32)];
+    const ids = Array.from({ length: 18 }, (_, index) => String.fromCharCode(97 + index).repeat(32));
     const publishing = openArtifactStore({
       path,
       now: () => new Date("2026-08-31T10:00:00.000Z"),
@@ -27,11 +32,13 @@ describe("artifact store", () => {
 
     const types: ArtifactType[] = ["archify", "presentation", "mockup"];
     const appearances = [undefined, "light", "dark"] as const;
-    const published = types.map((type, index) =>
-      publishing.publish({ type, content, appearance: appearances[index] }),
-    );
+    const published = types.flatMap((type, index) => ARTIFACT_SHARE_POSITIONS.map((sharePosition) =>
+      publishing.publish({ type, content, appearance: appearances[index], sharePosition }),
+    ));
 
-    expect(published.map(({ type }) => type)).toEqual(["archify", "presentation", "mockup"]);
+    expect(published.map(({ sharePosition }) => sharePosition)).toEqual(
+      types.flatMap(() => ARTIFACT_SHARE_POSITIONS),
+    );
     expect(published[0]!.createdAt).toBe("2026-08-31T10:00:00.000Z");
     expect(published[0]!.deleteAfter).toBe("2026-09-30T10:00:00.000Z");
     publishing.close();
@@ -65,12 +72,25 @@ describe("artifact store", () => {
     original.close();
 
     const migrated = openArtifactStore({ path, generateId: () => "b".repeat(32) });
-    expect(migrated.find("a".repeat(32))).toMatchObject({ appearance: null, content: Buffer.from([0, 255, 1]) });
-    const hinted = migrated.publish({ type: "mockup", content: Buffer.from([2, 0, 254]), appearance: "dark" });
+    expect(migrated.find("a".repeat(32))).toMatchObject({
+      appearance: null,
+      sharePosition: null,
+      content: Buffer.from([0, 255, 1]),
+    });
+    const hinted = migrated.publish({
+      type: "mockup",
+      content: Buffer.from([2, 0, 254]),
+      appearance: "dark",
+      sharePosition: "left-center",
+    });
     migrated.close();
 
     const reopened = openArtifactStore({ path });
-    expect(reopened.find(hinted.id)).toMatchObject({ appearance: "dark", content: Buffer.from([2, 0, 254]) });
+    expect(reopened.find(hinted.id)).toMatchObject({
+      appearance: "dark",
+      sharePosition: "left-center",
+      content: Buffer.from([2, 0, 254]),
+    });
     reopened.close();
 
     const earlierSchema = new Database(path);

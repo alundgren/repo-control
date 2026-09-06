@@ -281,6 +281,7 @@ describe("application server", () => {
           type: "archify",
           content: Buffer.from("<!doctype html><title>Fixture</title>"),
           appearance: null,
+          sharePosition: null,
           createdAt: "2026-08-31T10:00:00.000Z",
           deleteAfter: "2026-09-30T10:00:00.000Z",
         };

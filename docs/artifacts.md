@@ -44,6 +44,7 @@ curl --fail-with-body \
   --request POST \
   --header 'Content-Type: text/html; charset=utf-8' \
   --header 'X-Artifact-Appearance: light' \
+  --header 'X-Artifact-Share-Position: right-center' \
   --data-binary '@fictional-presentation.html' \
   'http://repo-control.internal.test:3000/api/artifacts/presentation'
 ```
@@ -71,6 +72,16 @@ appearance. Any other present value, including an empty value, surrounding
 whitespace, different casing, comma-joined values, or a repeated header,
 returns `400` before publication. The response does not echo the hint.
 
+`X-Artifact-Share-Position` is also optional on every upload endpoint. Its
+exact value may be `bottom-right`, `right-center`, `top-right`, `bottom-left`,
+`left-center`, or `top-left`. A publisher should try them in that order and
+use the first position known not to cover navigation or important content.
+Omitting the header uses `bottom-right`. Empty, whitespace-padded,
+differently cased, comma-joined, repeated, and unsupported values return
+`400` before publication. The response does not echo the hint. The metadata
+contract remains optional so a future artifact viewer can ignore it when the
+position does not apply.
+
 Upload responses use `Cache-Control: no-store`. Rejections return only a safe
 error code:
 
@@ -78,6 +89,7 @@ error code:
 | --- | --- | --- |
 | `400` | `artifact_empty` | The request contained no document bytes. |
 | `400` | `artifact_appearance_invalid` | The optional appearance header was present but was not exactly `light` or `dark`. |
+| `400` | `artifact_share_position_invalid` | The optional Share position header was present but was not one exact supported value. |
 | `413` | `artifact_too_large` | The document exceeded 10 MiB while being read. |
 | `415` | `artifact_media_type_unsupported` | The media type or charset was not accepted. |
 | `507` | `artifact_quota_exceeded` | The stored payload total would exceed 1 GiB. |
@@ -128,30 +140,38 @@ response uses `X-Frame-Options: DENY`; omitting `frame-ancestors` from the
 inherited CSP is necessary so WebKit can load the sandboxed blob iframe and its
 blob children.
 
-The Share tab copies and encodes the exact canonical `/view` URL and links to
+The 28 by 28 pixel collapsed Share button contains a centered 16 pixel
+connected-nodes icon with the accessible name `Share artifact`. Its background
+and border are transparent. The icon uses the same 58% light or dark aware
+Share color as the earlier text control. The button sits 8 pixels inside its
+selected viewport edge. The panel opens toward the viewport interior and
+stays at least 8 pixels from every viewport edge. On short viewports it uses
+the available height and scrolls its own contents without adding viewer-page
+scrollbars or changing the artifact iframe.
+
+The Share panel copies and encodes the exact canonical `/view` URL and links to
 the existing `/download` URL. QR generation and interaction code are carried
 inside the response and make no runtime request. If the Clipboard API rejects
 the copy, the panel selects the canonical URL for manual copying and does not
 report success.
 
-The optional appearance hint changes only the collapsed Share tab. Neutral
-uses raised `#E0D2BD` with text `#604939`; light uses field `#F9F6F0` with text
-`#604939`; dark uses ground `#292019` with text `#C1AF9A`. Neutral and light
-use a dark inner boundary and light outer halo. Dark swaps those boundary
-roles. The expanded panel, QR code, dimensions, interactions, and artifact
-iframe do not change. The server does not inspect document pixels, markup,
-styles, or type to choose a treatment, and it does not expose artifact CSS to
-the viewer.
+The optional appearance hint changes only the collapsed Share icon. Neutral
+and light use `rgba(96, 73, 57, 0.58)`, and dark uses
+`rgba(193, 175, 154, 0.58)`. The collapsed button has no fill, visible border,
+or halo. The expanded panel and QR code do not change. The server does not
+inspect document pixels, markup, scripts, styles, or type to choose a
+treatment or position, and it does not expose artifact CSS to the viewer.
 
-SQLite stores the hint in a nullable column. Rows created before the column
-was added, and uploads without the header, read as neutral. The migration is
-additive, so the earlier application can still read and insert rows after a
-rollback. Removing the header restores neutral behavior for later uploads.
-The migration does not alter uploaded or downloaded bytes.
+SQLite stores the appearance and Share position hints in nullable columns.
+Rows created before the columns were added, and uploads without their headers,
+read as neutral and `bottom-right`. Both migrations are additive, so an
+earlier application can still read and insert rows after a rollback. Removing
+the headers restores those defaults for later uploads. The migration does not
+alter uploaded or downloaded bytes.
 
-Previously cached immutable `/view` responses may remain raw artifacts until
-their 30-day cache entry expires. Reverting the application restores raw views
-without changing stored rows. No data migration is involved.
+Previously cached immutable `/view` responses may retain the earlier Share
+control until their 30-day cache entry expires. An older binary ignores the
+nullable position column after rollback. No reverse migration is required.
 
 Install the browser binaries used by the local Playwright suite through the
 pinned package manager:

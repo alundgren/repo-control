@@ -5,7 +5,13 @@ import { PNG } from "pngjs";
 import { expect, test } from "@playwright/test";
 
 import { artifactPlugin, type ArtifactService } from "./index.js";
-import type { ArtifactAppearance, ArtifactType, StoredArtifact } from "./store.js";
+import {
+  ARTIFACT_SHARE_POSITIONS,
+  type ArtifactAppearance,
+  type ArtifactSharePosition,
+  type ArtifactType,
+  type StoredArtifact,
+} from "./store.js";
 
 const require = createRequire(import.meta.url);
 const jsQR = require("jsqr") as (data: Uint8ClampedArray, width: number, height: number) => QRCode | null;
@@ -29,7 +35,22 @@ const fixtureIds = {
   darkNeutral: "p".repeat(32),
   darkHint: "q".repeat(32),
   misleadingDark: "r".repeat(32),
+  bottomRightPosition: "s".repeat(32),
+  rightCenterPosition: "t".repeat(32),
+  topRightPosition: "u".repeat(32),
+  bottomLeftPosition: "v".repeat(32),
+  leftCenterPosition: "w".repeat(32),
+  topLeftPosition: "x".repeat(32),
 } as const;
+
+const positionFixtureIds: Record<ArtifactSharePosition, string> = {
+  "bottom-right": fixtureIds.bottomRightPosition,
+  "right-center": fixtureIds.rightCenterPosition,
+  "top-right": fixtureIds.topRightPosition,
+  "bottom-left": fixtureIds.bottomLeftPosition,
+  "left-center": fixtureIds.leftCenterPosition,
+  "top-left": fixtureIds.topLeftPosition,
+};
 
 let app: FastifyInstance;
 let origin: string;
@@ -48,12 +69,16 @@ test.beforeAll(async () => {
     [fixtureIds.fixed, storedArtifact(fixtureIds.fixed, fixedFixture())],
     [fixtureIds.scrolling, storedArtifact(fixtureIds.scrolling, scrollingFixture())],
     [fixtureIds.narrow, storedArtifact(fixtureIds.narrow, visualFixture("narrow", "#d8c6aa"))],
-    [fixtureIds.presentation, storedArtifact(fixtureIds.presentation, presentationFixture(), "presentation")],
+    [fixtureIds.presentation, storedArtifact(fixtureIds.presentation, presentationFixture(), "presentation", null, "top-left")],
     [fixtureIds.lightNeutral, storedArtifact(fixtureIds.lightNeutral, visualFixture("light-neutral", "#F2EADE"))],
     [fixtureIds.lightHint, storedArtifact(fixtureIds.lightHint, visualFixture("light-hint", "#F2EADE"), "archify", "light")],
     [fixtureIds.darkNeutral, storedArtifact(fixtureIds.darkNeutral, visualFixture("dark-neutral", "#292019"))],
     [fixtureIds.darkHint, storedArtifact(fixtureIds.darkHint, visualFixture("dark-hint", "#292019"), "archify", "dark")],
     [fixtureIds.misleadingDark, storedArtifact(fixtureIds.misleadingDark, misleadingDarkFixture(), "archify", "dark")],
+    ...ARTIFACT_SHARE_POSITIONS.map((position) => [
+      positionFixtureIds[position],
+      storedArtifact(positionFixtureIds[position], visualFixture(position, "#d8c6aa"), "archify", null, position),
+    ] as const),
   ]);
   const service: ArtifactService = {
     publish() {
@@ -83,7 +108,10 @@ test("opens, pins, and closes Share without exposing hidden controls", async ({ 
   expect(await page.locator("body").ariaSnapshot()).not.toContain("Copy link");
   const closedBox = await tab.boundingBox();
   expect(closedBox).not.toBeNull();
-  expect(closedBox).toEqual({ x: 1208, y: 686, width: 72, height: 28 });
+  expect(closedBox).toEqual({ x: 1244, y: 684, width: 28, height: 28 });
+  await expect(tab).toHaveAccessibleName("Share artifact");
+  await expect(tab.locator("svg")).toHaveCSS("width", "16px");
+  await expect(tab.locator("svg")).toHaveCSS("height", "16px");
 
   await tab.hover();
   await expect(panel).toBeVisible();
@@ -95,6 +123,10 @@ test("opens, pins, and closes Share without exposing hidden controls", async ({ 
 
   await tab.focus();
   await expect(panel).toBeVisible();
+  expect(await tab.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth };
+  })).toEqual({ color: "rgb(61, 93, 113)", style: "solid", width: "3px" });
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
   await expect(tab).toBeFocused();
@@ -271,6 +303,60 @@ test("fills changing viewports without viewer scrollbars or artifact layout chan
   await expect(page.frameLocator("[data-artifact-frame]").locator("[data-important-corner]")).toHaveText("Important");
 });
 
+test("keeps every Share position and its panel inside the viewport without changing the artifact", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => { throw new Error("denied"); } },
+    });
+  });
+
+  for (const viewport of [
+    { width: 1280, height: 720 },
+    { width: 360, height: 640 },
+    { width: 640, height: 260 },
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const position of ARTIFACT_SHARE_POSITIONS) {
+      await page.goto(viewUrl(positionFixtureIds[position]));
+      const before = await viewerMeasurements(page);
+      const tab = page.locator("[data-share-tab]");
+      const panel = page.locator("[data-share-panel]");
+
+      expect(await tab.boundingBox()).toEqual(expectedTriggerBox(position, viewport));
+      await tab.click();
+      await expect(panel).toBeVisible();
+      await expectWithinViewport(panel, viewport);
+      expect(await viewerMeasurements(page)).toEqual(before);
+
+      if (viewport.height === 260) {
+        expect(await panel.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+        await page.keyboard.press("Tab");
+        await expect(page.locator("[data-share-close]")).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(page.locator("[data-copy-link]")).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(page.locator("[data-download-link]")).toBeFocused();
+      }
+
+      await page.locator("[data-copy-link]").click();
+      await expect(page.locator("[data-share-fallback]")).toBeFocused();
+      await page.locator("[data-share-fallback]").evaluate((element) => element.scrollIntoView({ block: "nearest" }));
+      await expectWithinViewport(panel, viewport);
+      if (viewport.height === 260) expect(await panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(await viewerMeasurements(page)).toEqual(before);
+    }
+  }
+});
+
+test("keeps bottom-right presentation navigation usable with a top-left Share position", async ({ page }) => {
+  await page.goto(viewUrl(fixtureIds.presentation));
+  await expect(page.locator("[data-share-root]")).toHaveAttribute("data-share-position", "top-left");
+  const navigation = page.frameLocator("[data-artifact-frame]").locator("[data-presentation-navigation]");
+  await navigation.click();
+  await expect(navigation).toHaveText("Next slide");
+});
+
 test("uses no motion when reduced motion is requested", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto(viewUrl(fixtureIds.interaction));
@@ -290,21 +376,19 @@ test("uses the low-contrast Share tab treatment for each appearance hint", async
   expect(neutralLight).toMatchObject({
     fill: "rgba(0, 0, 0, 0)",
     text: "rgba(96, 73, 57, 0.58)",
-    innerBoundary: "rgba(96, 73, 57, 0.28)",
-    outerBoundary: "none",
+    border: "rgba(0, 0, 0, 0)",
   });
   expect(hintedLight).toEqual(neutralLight);
   expect(neutralDark).toEqual(neutralLight);
   expect(hintedDark).toMatchObject({
     fill: "rgba(0, 0, 0, 0)",
     text: "rgba(193, 175, 154, 0.58)",
-    innerBoundary: "rgba(249, 246, 240, 0.28)",
-    outerBoundary: "none",
+    border: "rgba(0, 0, 0, 0)",
   });
 
   for (const id of [fixtureIds.lightNeutral, fixtureIds.lightHint, fixtureIds.darkNeutral, fixtureIds.darkHint]) {
     await page.goto(viewUrl(id));
-    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1158, y: 666, width: 122, height: 54 } });
+    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1218, y: 658, width: 62, height: 62 } });
   }
 });
 
@@ -314,11 +398,10 @@ test("keeps the dark-hint treatment when nearby artifact content is light", asyn
   expect(treatment).toMatchObject({
     fill: "rgba(0, 0, 0, 0)",
     text: "rgba(193, 175, 154, 0.58)",
-    innerBoundary: "rgba(249, 246, 240, 0.28)",
-    outerBoundary: "none",
+    border: "rgba(0, 0, 0, 0)",
   });
   await expect(page).toHaveScreenshot("share-tab-dark-over-light-block.png", {
-    clip: { x: 1158, y: 666, width: 122, height: 54 },
+    clip: { x: 1218, y: 658, width: 62, height: 62 },
   });
 });
 
@@ -342,12 +425,14 @@ function storedArtifact(
   content: string,
   type: ArtifactType = "archify",
   appearance: ArtifactAppearance | null = null,
+  sharePosition: ArtifactSharePosition | null = null,
 ): StoredArtifact {
   return {
     id,
     type,
     content: Buffer.from(content),
     appearance,
+    sharePosition,
     createdAt: "2026-09-01T00:00:00.000Z",
     deleteAfter: "2026-10-01T00:00:00.000Z",
   };
@@ -379,8 +464,7 @@ async function shareTabColors(page: import("@playwright/test").Page, id: string)
     return {
       fill: style.backgroundColor,
       text: style.color,
-      innerBoundary: style.borderTopColor,
-      outerBoundary: style.boxShadow,
+      border: style.borderTopColor,
     };
   });
 }
@@ -406,7 +490,35 @@ function scrollingFixture() {
 }
 
 function presentationFixture() {
-  return documentFixture('<section data-fixture="presentation">Slide</section>', 'section{position:fixed;inset:0;display:grid;place-items:center;font-size:8vw;background:#223;color:#eed}');
+  return documentFixture(
+    '<section data-fixture="presentation">Slide</section><button data-presentation-navigation onclick="this.textContent=\'Next slide\'">Next</button>',
+    'section{position:fixed;inset:0;display:grid;place-items:center;font-size:8vw;background:#223;color:#eed}button{position:fixed;right:8px;bottom:8px;padding:12px}',
+  );
+}
+
+function expectedTriggerBox(
+  position: ArtifactSharePosition,
+  viewport: { width: number; height: number },
+) {
+  const horizontal = position.endsWith("right") || position === "right-center" ? viewport.width - 36 : 8;
+  const vertical = position.startsWith("bottom")
+    ? viewport.height - 36
+    : position.startsWith("top")
+      ? 8
+      : (viewport.height - 28) / 2;
+  return { x: horizontal, y: vertical, width: 28, height: 28 };
+}
+
+async function expectWithinViewport(
+  locator: import("@playwright/test").Locator,
+  viewport: { width: number; height: number },
+) {
+  const box = await locator.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(8);
+  expect(box!.y).toBeGreaterThanOrEqual(8);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width - 8);
+  expect(box!.y + box!.height + 4).toBeLessThanOrEqual(viewport.height - 8);
 }
 
 function delayedFixture() {
