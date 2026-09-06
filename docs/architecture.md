@@ -146,19 +146,22 @@ than presented as a full inventory.
 An agent on the Tailnet can upload one self-contained HTML artifact to a
 private artifact endpoint. The artifact service stores the original bytes
 in SQLite and returns view and download URLs built from the configured public
-origin. An upload may include an exact `light` or `dark` appearance hint. The
-service validates it before publication and stores it in a nullable additive
-column; absent values and older rows remain neutral. A dedicated public
+origin. An upload may include an exact `light` or `dark` appearance hint and
+one of six exact Share positions. The service validates both before
+publication and stores them in nullable additive columns. Absent values and
+older rows remain neutral and bottom-right. A dedicated public
 hostname forwards only matching `GET /public/...`
 requests. The view response base64-encodes those bytes inside a fixed viewer.
 The browser reconstructs a byte-identical Blob and renders its object URL in a
 full-window iframe without same-origin permission. The viewer's Share overlay
 uses the canonical view URL for its QR code and copy action and the existing
 download route for export. Only the collapsed Share tab reads the stored
-appearance. The server never examines artifact content to choose it, and the
-expanded panel stays neutral. The viewer and artifact have no messaging or DOM
-access between them. An earlier binary can ignore the nullable column after a
-rollback. The service deletes expired rows during startup cleanup,
+appearance. The selected position places a compact icon at a fixed viewport
+edge and opens the bounded, internally scrollable panel toward the viewport
+interior. The server never examines artifact content to choose either value,
+and the expanded panel stays neutral. The viewer and artifact have no messaging
+or DOM access between them. An earlier binary can ignore the nullable columns
+after a rollback. The service deletes expired rows during startup cleanup,
 scheduled cleanup, and a later publication transaction. Public caches may
 retain bytes after deletion or may serve the prior raw-view format until an
 immutable entry expires.

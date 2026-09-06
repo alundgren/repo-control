@@ -61,13 +61,19 @@ describe("artifact service", () => {
       clock: () => 100,
     });
 
-    expect(service.publish("presentation", Buffer.from("fixture"))).toEqual({
+    expect(service.publish("presentation", Buffer.from("fixture"), "dark", "top-left")).toEqual({
       id: "a".repeat(32),
       type: "presentation",
       createdAt: "2026-08-31T10:00:00.000Z",
       deleteAfter: "2026-09-30T10:00:00.000Z",
       viewUrl: `https://artifacts.example.test/public/${"a".repeat(32)}/view`,
       downloadUrl: `https://artifacts.example.test/public/${"a".repeat(32)}/download`,
+    });
+    expect(store.publish).toHaveBeenCalledWith({
+      type: "presentation",
+      content: Buffer.from("fixture"),
+      appearance: "dark",
+      sharePosition: "top-left",
     });
     expect(events).toEqual([expect.objectContaining({
       event: "artifact.publication.finished",
@@ -122,12 +128,13 @@ describe("artifact service", () => {
 });
 
 function storeFixture(overrides: Partial<ArtifactStore> = {}): ArtifactStore {
-  return {
-    publish({ type }) {
+  const store: ArtifactStore = {
+    publish({ type, appearance, sharePosition }) {
       return {
         id: "a".repeat(32),
         type,
-        appearance: null,
+        appearance: appearance ?? null,
+        sharePosition: sharePosition ?? null,
         createdAt: "2026-08-31T10:00:00.000Z",
         deleteAfter: "2026-09-30T10:00:00.000Z",
       };
@@ -141,4 +148,6 @@ function storeFixture(overrides: Partial<ArtifactStore> = {}): ArtifactStore {
     close() {},
     ...overrides,
   };
+  store.publish = vi.fn(store.publish);
+  return store;
 }

@@ -7,18 +7,33 @@ export const ARTIFACT_QUOTA_BYTES = 1024 * 1024 * 1024;
 
 export type ArtifactType = "archify" | "presentation" | "mockup";
 export type ArtifactAppearance = "light" | "dark";
+export const ARTIFACT_SHARE_POSITIONS = [
+  "bottom-right",
+  "right-center",
+  "top-right",
+  "bottom-left",
+  "left-center",
+  "top-left",
+] as const;
+export type ArtifactSharePosition = typeof ARTIFACT_SHARE_POSITIONS[number];
 
 export type StoredArtifact = {
   id: string;
   type: string;
   content: Buffer;
   appearance: ArtifactAppearance | null;
+  sharePosition: ArtifactSharePosition | null;
   createdAt: string;
   deleteAfter: string;
 };
 
 export type ArtifactStore = {
-  publish(input: { type: ArtifactType; content: Buffer; appearance?: ArtifactAppearance }): Omit<StoredArtifact, "content">;
+  publish(input: {
+    type: ArtifactType;
+    content: Buffer;
+    appearance?: ArtifactAppearance;
+    sharePosition?: ArtifactSharePosition;
+  }): Omit<StoredArtifact, "content">;
   find(id: string): StoredArtifact | null;
   cleanup(): number;
   close(): void;
@@ -54,20 +69,29 @@ export function openArtifactStore({
       content BLOB NOT NULL,
       created_at TEXT NOT NULL,
       delete_after TEXT NOT NULL,
-      appearance TEXT CHECK (appearance IN ('light', 'dark'))
+      appearance TEXT CHECK (appearance IN ('light', 'dark')),
+      share_position TEXT CHECK (share_position IN ('bottom-right', 'right-center', 'top-right', 'bottom-left', 'left-center', 'top-left'))
     )
   `);
   const columns = database.pragma("table_info(artifacts)") as Array<{ name: string }>;
   if (!columns.some(({ name }) => name === "appearance")) {
     database.exec("ALTER TABLE artifacts ADD COLUMN appearance TEXT CHECK (appearance IN ('light', 'dark'))");
   }
+  if (!columns.some(({ name }) => name === "share_position")) {
+    database.exec("ALTER TABLE artifacts ADD COLUMN share_position TEXT CHECK (share_position IN ('bottom-right', 'right-center', 'top-right', 'bottom-left', 'left-center', 'top-left'))");
+  }
 
   const deleteExpired = database.prepare("DELETE FROM artifacts WHERE delete_after <= ?");
   const payloadBytes = database.prepare("SELECT COALESCE(SUM(length(content)), 0) AS total FROM artifacts");
   const insert = database.prepare(
-    "INSERT INTO artifacts (id, type, content, created_at, delete_after, appearance) VALUES (?, ?, ?, ?, ?, ?)",
+    "INSERT INTO artifacts (id, type, content, created_at, delete_after, appearance, share_position) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
-  const publish = database.transaction((input: { type: ArtifactType; content: Buffer; appearance?: ArtifactAppearance }) => {
+  const publish = database.transaction((input: {
+    type: ArtifactType;
+    content: Buffer;
+    appearance?: ArtifactAppearance;
+    sharePosition?: ArtifactSharePosition;
+  }) => {
     const createdAt = now();
     const createdAtText = createdAt.toISOString();
     const deleteAfter = new Date(createdAt.getTime() + ARTIFACT_RETENTION_MS).toISOString();
@@ -81,8 +105,9 @@ export function openArtifactStore({
       const id = generateId();
       try {
         const appearance = input.appearance ?? null;
-        insert.run(id, input.type, input.content, createdAtText, deleteAfter, appearance);
-        return { id, type: input.type, appearance, createdAt: createdAtText, deleteAfter };
+        const sharePosition = input.sharePosition ?? null;
+        insert.run(id, input.type, input.content, createdAtText, deleteAfter, appearance, sharePosition);
+        return { id, type: input.type, appearance, sharePosition, createdAt: createdAtText, deleteAfter };
       } catch (error) {
         if (!isIdentityConflict(error)) throw error;
       }
@@ -95,7 +120,7 @@ export function openArtifactStore({
     },
     find(id) {
       const row = database.prepare(
-        "SELECT id, type, content, appearance, created_at AS createdAt, delete_after AS deleteAfter FROM artifacts WHERE id = ?",
+        "SELECT id, type, content, appearance, share_position AS sharePosition, created_at AS createdAt, delete_after AS deleteAfter FROM artifacts WHERE id = ?",
       ).get(id) as StoredArtifact | undefined;
       return row ?? null;
     },

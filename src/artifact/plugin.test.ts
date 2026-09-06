@@ -1,7 +1,12 @@
 import fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ArtifactQuotaExceededError, type ArtifactType, type StoredArtifact } from "./store.js";
+import {
+  ARTIFACT_SHARE_POSITIONS,
+  ArtifactQuotaExceededError,
+  type ArtifactType,
+  type StoredArtifact,
+} from "./store.js";
 import {
   ARTIFACT_VIEWER_RESPONSE_OVERHEAD_BYTES,
   HTML_ARTIFACT_MAX_BYTES,
@@ -36,7 +41,7 @@ describe("artifact HTTP routes", () => {
       expect(response.statusCode).toBe(201);
       expect(response.headers["cache-control"]).toBe("no-store");
       expect(response.json()).toEqual({ status: "published", ...publishedArtifact(type) });
-      expect(publish).toHaveBeenLastCalledWith(type, content, undefined);
+      expect(publish).toHaveBeenLastCalledWith(type, content, undefined, undefined);
     }
   });
 
@@ -58,9 +63,56 @@ describe("artifact HTTP routes", () => {
 
         expect(response.statusCode).toBe(201);
         expect(response.json()).not.toHaveProperty("appearance");
-        expect(publish).toHaveBeenLastCalledWith(type, Buffer.from("fixture"), appearance);
+        expect(publish).toHaveBeenLastCalledWith(type, Buffer.from("fixture"), appearance, undefined);
       }
     }
+  });
+
+  it("accepts every Share position for every supported type without changing the response", async () => {
+    const publish = vi.fn((type) => publishedArtifact(type));
+    const app = await buildApp(serviceFixture({ publish }));
+
+    for (const type of ["archify", "presentation", "mockup"] as const) {
+      for (const sharePosition of ARTIFACT_SHARE_POSITIONS) {
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/artifacts/${type}`,
+          headers: { "content-type": "text/html", "x-artifact-share-position": sharePosition },
+          payload: Buffer.from("fixture"),
+        });
+
+        expect(response.statusCode).toBe(201);
+        expect(response.json()).not.toHaveProperty("sharePosition");
+        expect(publish).toHaveBeenLastCalledWith(type, Buffer.from("fixture"), undefined, sharePosition);
+      }
+    }
+  });
+
+  it("rejects every other present Share position before publication", async () => {
+    const publish = vi.fn((type) => publishedArtifact(type));
+    const app = await buildApp(serviceFixture({ publish }));
+
+    for (const sharePosition of ["", " ", "BOTTOM-RIGHT", "center", "bottom-right,top-left", "bottom-right "]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/artifacts/archify",
+        headers: { "content-type": "text/html", "x-artifact-share-position": sharePosition },
+        payload: Buffer.from("fixture"),
+      });
+      expectError(response, 400, "artifact_share_position_invalid");
+    }
+
+    const repeated = await app.inject({
+      method: "POST",
+      url: "/api/artifacts/archify",
+      headers: {
+        "content-type": "text/html",
+        "x-artifact-share-position": ["bottom-right", "top-left"],
+      },
+      payload: Buffer.from("fixture"),
+    });
+    expectError(repeated, 400, "artifact_share_position_invalid");
+    expect(publish).not.toHaveBeenCalled();
   });
 
   it("rejects every other present appearance value before publication", async () => {
@@ -256,6 +308,7 @@ function storedArtifact(overrides: Partial<StoredArtifact>): StoredArtifact {
     type: "archify",
     content: Buffer.from("<!doctype html><title>Fixture</title>"),
     appearance: null,
+    sharePosition: null,
     createdAt: "2026-08-31T10:00:00.000Z",
     deleteAfter: "2026-09-30T10:00:00.000Z",
     ...overrides,

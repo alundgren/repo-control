@@ -179,15 +179,17 @@ used.
   read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
   opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
-  72 by 28 pixel Share tab sits at the bottom-right edge. Its neutral treatment
-  has no fill or halo. On neutral and `light` uploads, primary text appears at
-  58% opacity and the primary-text boundary at 28%. A `dark` hint uses Share
-  dark text at 58% and a field boundary at 28%. The expanded panel always
+  transparent 28 by 28 pixel Share button contains a 16 pixel connected-nodes
+  icon and sits 8 pixels inside one of six supported viewport-edge positions.
+  The default is bottom-right. Neutral and `light` uploads use the existing
+  primary Share color at 58% opacity, while a `dark` hint uses the existing
+  light Share color at 58%. The expanded panel always
   keeps the warm-paper treatment. Hover or keyboard focus opens the panel
   temporarily. Click or tap pins it. The panel contains a 128 pixel QR code,
   Copy link, Download, copy status, and a selectable link when clipboard
-  access fails. Hidden panel controls leave both keyboard order and the
-  accessibility tree.
+  access fails. It opens inward, remains 8 pixels inside the viewport, and
+  scrolls internally when viewport height is limited. Hidden panel controls
+  leave both keyboard order and the accessibility tree.
 
 ## Deviations
 
@@ -205,10 +207,12 @@ list and a Back control restores it.
 The public viewer uses the system UI font stack instead of embedding IBM Plex.
 The viewer response must stay self-contained and its CSP permits no font
 request. The QR graphic alone uses pure white and black because scanner
-reliability needs maximum contrast at 128 pixels. The closed Share tab may
-cover a 72 by 28 pixel area of the artifact. Its transparent, low-contrast
+reliability needs maximum contrast at 128 pixels. The closed Share button may
+cover a 28 by 28 pixel area of the artifact. Its transparent, low-contrast
 treatment deliberately falls below the usual contrast for an interactive
-control so it obscures less of the artifact. The labeled 72 by 28 pixel hit
-area remains in place, keyboard focus adds a high-contrast outline, and the
-opened panel returns to standard contrast. The open panel may cover more, but
-it never changes the artifact iframe's viewport or layout.
+control so it obscures less of the artifact. The icon's hit area has the
+accessible name `Share artifact`; keyboard focus adds a high-contrast outline,
+and the opened panel returns to standard contrast. The open panel may cover
+more, but it never changes the artifact iframe's viewport or layout.
+Publisher-selected placement is bounded to six fixed positions because the
+isolated viewer cannot inspect artifact content for collisions.

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
-import type { ArtifactType, StoredArtifact } from "./store.js";
+import { ARTIFACT_SHARE_POSITIONS, type ArtifactType, type StoredArtifact } from "./store.js";
 
 export const ARTIFACT_VIEWER_RESPONSE_OVERHEAD_BYTES = 128 * 1024;
 
@@ -18,6 +18,9 @@ export function renderArtifactViewer(artifact: StoredArtifact) {
   const encodedArtifact = artifact.content.toString("base64");
   const frameTitle = artifactFrameTitles[artifact.type as ArtifactType];
   const appearance = artifact.appearance === "light" || artifact.appearance === "dark" ? artifact.appearance : "neutral";
+  const sharePosition = ARTIFACT_SHARE_POSITIONS.includes(artifact.sharePosition as typeof ARTIFACT_SHARE_POSITIONS[number])
+    ? artifact.sharePosition
+    : "bottom-right";
   const document = `<!doctype html>
 <html lang="en">
 <head>
@@ -37,47 +40,65 @@ export function renderArtifactViewer(artifact: StoredArtifact) {
   --viewer-link: #3D5D71;
   --viewer-ok: #3D6034;
   --viewer-share-text: rgba(96, 73, 57, 0.58);
-  --viewer-share-inner-boundary: rgba(96, 73, 57, 0.28);
   --viewer-qr-light: #FFFFFF;
   --viewer-qr-dark: #000000;
 }
 body[data-artifact-appearance="dark"] {
   --viewer-share-text: rgba(193, 175, 154, 0.58);
-  --viewer-share-inner-boundary: rgba(249, 246, 240, 0.28);
 }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1.45 system-ui, sans-serif; }
 .artifact-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; }
 .share-dismiss { position: fixed; z-index: 1; inset: 0; background: transparent; }
-.share-root { position: fixed; z-index: 2; right: 0; bottom: 6px; }
+.share-root { position: fixed; z-index: 2; width: 28px; height: 28px; }
+.share-root[data-share-position="bottom-right"] { right: 8px; bottom: 8px; }
+.share-root[data-share-position="right-center"] { right: 8px; top: 50%; transform: translateY(-50%); }
+.share-root[data-share-position="top-right"] { right: 8px; top: 8px; }
+.share-root[data-share-position="bottom-left"] { left: 8px; bottom: 8px; }
+.share-root[data-share-position="left-center"] { left: 8px; top: 50%; transform: translateY(-50%); }
+.share-root[data-share-position="top-left"] { left: 8px; top: 8px; }
 .share-tab {
-  display: block;
-  width: 72px;
+  display: grid;
+  place-items: center;
+  width: 28px;
   height: 28px;
-  border: 1px solid var(--viewer-share-inner-boundary);
-  border-right: 0;
-  border-radius: 8px 0 0 8px;
+  padding: 0;
+  border: 1px solid transparent;
   background: transparent;
   color: var(--viewer-share-text);
-  font: 600 13.5px/1 system-ui, sans-serif;
   cursor: pointer;
 }
+.share-tab svg { display: block; width: 16px; height: 16px; }
 .share-tab:focus-visible, .share-panel button:focus-visible, .share-panel a:focus-visible, .share-panel input:focus-visible {
   outline: 3px solid var(--viewer-link);
   outline-offset: 2px;
 }
 .share-panel {
   position: absolute;
-  bottom: 32px;
-  right: 8px;
   width: min(288px, calc(100vw - 16px));
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   border: 1px solid var(--viewer-line);
   border-radius: 12px;
   background: var(--viewer-surface);
   box-shadow: 0 4px 0 var(--viewer-line);
 }
+.share-root[data-share-position^="bottom-"] .share-panel { bottom: 36px; }
+.share-root[data-share-position^="top-"] .share-panel { top: 36px; }
+.share-root[data-share-position$="-right"] .share-panel { right: 0; }
+.share-root[data-share-position$="-left"] .share-panel { left: 0; }
+.share-root[data-share-position="right-center"] .share-panel,
+.share-root[data-share-position="left-center"] .share-panel {
+  top: 50%;
+  width: min(288px, calc(100vw - 52px));
+  max-height: calc(100vh - 24px);
+  transform: translateY(-50%);
+}
+.share-root[data-share-position="right-center"] .share-panel { right: 36px; }
+.share-root[data-share-position="left-center"] .share-panel { left: 36px; }
 .share-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .share-heading h1 { margin: 0; font-size: 17px; font-weight: 600; }
 .share-close { width: 32px; height: 32px; padding: 0; font-size: 22px; line-height: 1; }
@@ -106,8 +127,10 @@ body { background: var(--viewer-bg); color: var(--viewer-text); font: 400 16px/1
 <body data-artifact-viewer data-artifact-appearance="${appearance}">
 <iframe class="artifact-frame" data-artifact-frame title="${frameTitle}" sandbox="allow-scripts allow-downloads"></iframe>
 <div class="share-dismiss" data-share-dismiss aria-hidden="true" hidden></div>
-<aside class="share-root" data-share-root>
-  <button class="share-tab" data-share-tab type="button" aria-expanded="false" aria-controls="share-panel">Share</button>
+<aside class="share-root" data-share-root data-share-position="${sharePosition}">
+  <button class="share-tab" data-share-tab type="button" aria-label="Share artifact" aria-expanded="false" aria-controls="share-panel">
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M18 16a3 3 0 0 0-2.4 1.2L8.9 13.9a3.2 3.2 0 0 0 0-3.8l6.7-3.3A3 3 0 1 0 15 5c0 .2 0 .4.1.6L8.4 8.9a3 3 0 1 0 0 6.2l6.7 3.3A3 3 0 1 0 18 16Z"/></svg>
+  </button>
   <section class="share-panel" data-share-panel id="share-panel" aria-label="Share artifact" hidden>
     <div class="share-heading">
       <h1>Share artifact</h1>
