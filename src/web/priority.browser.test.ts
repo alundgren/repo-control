@@ -42,6 +42,14 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.setViewportSize(viewport);
     const dialog = await open(page);
     await expect(dialog.getByRole("article")).toHaveCount(2);
+    await expect(dialog.getByRole("navigation", { name: "Changed files" })).toBeHidden();
+    const code = await dialog.locator(".unifiedDiff").first().boundingBox();
+    expect(code!.width).toBeGreaterThan(viewport.width * 0.95);
+    expect(code!.y).toBeLessThan(viewport.width > 700 ? 220 : 340);
+    await dialog.getByRole("button", { name: "Navigator", exact: true }).click();
+    await expect(dialog.getByRole("link", { name: paths[0], exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Navigator", exact: true }).click();
+
     await expect(dialog.getByText("Some evidence is incomplete or unavailable. See Details above.")).toHaveCount(0);
     await dialog.getByText("Details", { exact: true }).click();
     await expect(dialog.getByText("Root AGENTS.md: absent.")).toBeVisible();

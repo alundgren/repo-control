@@ -1,13 +1,31 @@
 # UX notes for Repo Control
 
 **What it is for.** Repo Control helps one person decide which pull request,
-issue, or queue needs attention across the repositories they connect.
+issue, or queue needs attention across the repositories they connect, then gives
+the information needed for that task most of the available space.
 
 **Where it is used.** It is laptop-first for an account-wide work queue. The
 interface stays usable at narrower widths when the work needs a quick check.
 
 **Archetypes.** Admin work queue for the private application. Overlay for the
 public artifact viewer.
+
+## Space follows the task
+
+| View | Main task and content | Secondary controls and context |
+| --- | --- | --- |
+| Now and queues | Choose work from titles, recency, blockers, and change facts. | Compact navigation, search, and sync status. Facts are plain text, not pills. |
+| Quick read | Read the selected item's text and relationships. | One identity line, review and GitHub actions, then freshness and refresh. |
+| Pull request review | Inspect code in the chosen aspect and write line comments. | File navigation opens on request. One compact header and review bar stay available. |
+| AI priority | Read files in the selected tier and their reasons. | Tier controls carry selection and counts. Details explains the tier and classification. |
+| Settings | Find a repository and change its visibility. | Staged changes and queue impact appear when there is a change to apply. |
+| Public artifact | Read or interact with the artifact at full viewport size. | The small Share control opens sharing tools on request. |
+
+Repeated labels, outlined metadata, nested containers, and permanent help text
+spend space that belongs to the task. Remove them unless they answer a question
+needed at that point. Errors, incomplete evidence, draft recovery failures, and
+confirmation consequences remain visible. A compact layout must keep text
+readable and controls discoverable.
 
 ## Palette
 
@@ -40,10 +58,11 @@ do not introduce a dark application theme.
 
 The application self-hosts IBM Plex Sans for prose and IBM Plex Mono for
 labels and values people compare. It uses the warm-paper type scale: 16px body
-text at 1.6 line-height, 28px to 40px page titles at weight 600, 22px sections
-at weight 600, 17px subsections at weight 600, 13.5px secondary text, and
+text at 1.6 line-height, 28px page titles at weight 600, 22px selected-item titles, 17px queue sections
+at weight 600, 13.5px secondary text and diff group headings, and
 11px to 12px mono labels at weight 500. Only weights 400, 500, and 600 are
-used.
+used. Code uses 14px IBM Plex Mono at 1.5 line-height so more lines fit without
+reducing the prose size.
 
 ## Components
 
@@ -59,7 +78,8 @@ used.
   hide scores and offer Review all files. There is no manual inference retry.
   Empty tiers stay empty until the person chooses another tier.
 - Narrow priority review: all five tier controls fit in one row with stacked
-  number, label, and count. The file navigator collapses to a disclosure. Paths
+  number and count above the label. The file navigator starts closed and opens
+  through Navigator in every aspect, on laptop and narrow screens. Paths
   wrap and code scrolls inside its diff. This uses the existing palette, type,
   field, divider, and raised roles without adding visual tokens.
 
@@ -87,7 +107,8 @@ used.
   pending.
 - Settings impact: current and proposed counts for Now, pull requests, Ready
   for agent, Needs me, Triage, and Epics, followed by the current-selection
-  result and accurate account-sync copy. It sits beside the action on laptop
+  result and accurate account-sync copy. It appears only while changes are
+  staged and sits beside the action on laptop
   and below it on narrow screens without horizontal scrolling.
 - Settings save states: pending leaves saved queues in force. Failure keeps the
   staged changes and offers Apply changes or Discard. A stale revision loads
@@ -101,14 +122,15 @@ used.
   the page header and loaded-work search, and the quick read in separate
   columns. A selected row keeps the list visible while a plain-text quick-read
   area stays in the right column; GitHub links stay in that area.
-- Sync status: a quiet success or warning dot, reconciliation scope, and an
-  underlined account-wide sync action.
+- Sync status: a quiet success or warning dot, freshness disclosure, and an
+  underlined account-wide sync action. The disclosure contains reconciliation
+  totals; partial results remain visible in its summary.
 - Live update availability: a quiet warning beside sync freshness when the
   server event stream is unavailable. It never disables manual sync or focused
   refresh.
 - Work row: a compact number, title, repository, age, and available readiness
   or change-size facts. The whole row is the selection control. The quick-read
-  area carries the bounded excerpt, relationship links or their unavailable
+  area carries one identity line, the bounded excerpt, relationship links or their unavailable
   state, item freshness, and the focused refresh control. Status facts use
   the success, warning, and secondary text roles. Ready rows do not repeat an
   `Unblocked` fact. Issues with unavailable dependency coverage stay visible
@@ -127,14 +149,20 @@ used.
 - Pull-request diff overlay: a selected pull request opens a full-viewport
   modal above the mounted queue. On laptop screens, its single-row sticky
   header is at most 3.5rem high and keeps the repository, pull request, head
-  commit, change totals, Grouped and Files controls, pending-comment count,
+  commit, change totals, Navigator and aspect controls, pending-comment count,
   conditional Discard all action, and close action together. Long titles
   truncate in that row; the title disclosure shows the complete text to
   keyboard and pointer users. On narrow screens, the same header uses compact
   title, head-commit, and control lines so every action remains reachable
   without horizontal page scrolling. Grouped is selected on open. A persistent bottom review bar keeps
-  the current-head comment count, commit, review outcome, submit action, merge
-  action, and merge readiness in one place. The optional review summary opens
+  the current-head comment count, review outcome, submit action, merge
+  action, and merge readiness in one place. The commit stays in the header and
+  submission confirmation. File navigation starts closed to give code the full
+  width, and Navigator opens a compact column or an inline list at narrow widths.
+  File headers use one quiet background without a surrounding border or rounded
+  card. Group headings are small navigation cues. A plus button beside each
+  commentable line opens its editor and retains a descriptive accessible name.
+  The tab-only draft reminder appears in the editor. The optional review summary opens
   above that bar as the explicit submission confirmation step. The server
   assigns every file to one group from its path and filename. Category groups
   precede directory groups. Generated group labels are lowercase when every
@@ -186,11 +214,12 @@ used.
   is never the only distinction. Omitted, incomplete, and size-limited patches,
   a partial file list, and a failed read each state what is missing and link to
   GitHub.
-- Relationship pills: small static mono pills after status facts — a shortened
+- Relationship facts: plain static mono text after status facts, a shortened
   epic title with its `closed/total` fraction on issue rows that belong to an
   epic (`Epic:` prefixes stripped before word-boundary truncation), and linked
   closing issues as `repository#number` on pull-request rows. They are
-  metadata, never clickable, and never read as status.
+  metadata, never clickable, and never read as status. Readiness and relationship
+  facts have no enclosing pill or border.
 - Epics navigation row: one plain row inside the issue-queue navigation group,
   styled like the other rows, counting open epics.
 - Epics view: the same three-column scan-and-read layout as the queues. Epic
@@ -216,13 +245,17 @@ used.
 The Repository visibility screen follows option 03 on slide 5 of the pinned
 settings concepts. The production version uses full queue names in the impact
 list, supports multiple staged changes instead of the mockup's one sentence,
-and says "hidden" rather than "ignored" in most interface copy. The extra
-detail is required by the accepted workflow. Laptop and narrow screenshot
-tests are the visual comparison record.
+and says "hidden" rather than "ignored" in most interface copy. The impact list appears only while changes are staged, beside plain change
+sentences and Apply changes. This keeps the search task clear until there are
+consequences to review. Browser tests check laptop and narrow layouts through
+visibility, dimensions, and interactions. Screenshots used for manual inspection
+stay in temporary storage outside the checkout; image baselines are not committed.
 
 The right-hand quick-read area remains because it makes the queue a stable
 scan-and-read surface. At narrow widths, selection temporarily replaces the
-list and a Back control restores it.
+list, queue navigation, search, and sync header with the item text. The brand
+and Settings remain available. Back restores the queue and focuses the opening
+row. This keeps the selected title within the first 200 pixels of the viewport.
 
 The public viewer uses the system UI font stack instead of embedding IBM Plex.
 The viewer response must stay self-contained and its CSP permits no font

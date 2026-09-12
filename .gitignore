@@ -5,3 +5,9 @@ dist/
 !.env.example
 coverage/
 .DS_Store
+
+# Generated browser evidence stays local.
+**/*-snapshots/
+playwright-report/
+test-results/
+screenshots/

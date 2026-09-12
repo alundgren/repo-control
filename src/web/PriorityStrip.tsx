@@ -12,13 +12,14 @@ export function PriorityStrip({ priority, selectedTier, onSelect }: { priority: 
   const current = priority.status === "completed" && priority.result;
   return <div className="priorityStrip">
     <div aria-label="File priority" className="priorityTiers">
-      {priorityTiers.map(({ tier, name }) => <button aria-pressed={selectedTier === tier} disabled={!current} key={tier} onClick={() => onSelect(tier)} type="button">
+      {priorityTiers.map(({ tier, name, description }) => <button aria-pressed={selectedTier === tier} disabled={!current} key={tier} onClick={() => onSelect(tier)} title={description} type="button">
         <strong>{tier}</strong> <span>{name}</span> <span className="priorityTierCount">{current ? current.files.filter((file) => file.tier === tier).length : "–"}</span>
       </button>)}
     </div>
     <div className="priorityMeta">
-      <span className={current ? "priorityCurrent" : ""}>{current ? `Current · ${current.headSha}` : priorityStatusText(priority)}</span>
+      <span className={current ? "priorityCurrent" : ""}>{current ? "Current" : priorityStatusText(priority)}</span>
       <details className="priorityDetails"><summary>Details</summary><div>
+        <p>{priorityTiers.find((tier) => tier.tier === selectedTier)?.description}</p>
         <p>AI priorities guide file review. They do not approve this pull request.</p>
         {current ? <p>Classified commit <span className="mono">{current.headSha}</span>.</p> : null}
         {current && current.policyStatus ? <p>Root AGENTS.md: {current.policyStatus}.</p> : null}

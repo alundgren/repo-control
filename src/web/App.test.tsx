@@ -129,6 +129,7 @@ describe("work queue overview", () => {
     await screen.findByText("Add a fictional seed");
     await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(await screen.findByRole("heading", { name: "Repository visibility" })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "Queue impact" })).toBeNull();
     expect(screen.getByText("Nothing is hidden. Search for a repository to change its visibility.")).toBeTruthy();
 
     const search = screen.getByRole("searchbox", { name: "Search settings and repositories" });
@@ -162,6 +163,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Discard" }));
 
     expect(screen.queryByRole("region", { name: "Staged changes" })).toBeNull();
+    expect(screen.queryByRole("complementary", { name: "Queue impact" })).toBeNull();
     expect(screen.getByRole("button", { name: "Hide" })).toBeTruthy();
   });
 
@@ -675,7 +677,7 @@ describe("work queue overview", () => {
 
     expect(await screen.findByText("This issue left Ready for agent because it is claimed.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
     const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
     await user.type(search, "fictional seed");
     expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
@@ -755,7 +757,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Sync account" }));
 
     expect(await screen.findByText("Account synced with a partial result.")).toBeTruthy();
-    expect(screen.getByText(/Partial result/)).toBeTruthy();
+    expect(screen.getByText(/Partial result/, { selector: "summary" })).toBeTruthy();
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
   });
 
@@ -1395,7 +1397,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Refresh this item" }));
 
     expect(await screen.findByText("Item refreshed and moved to Needs me.")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Needs me 2" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Select Add a fictional seed" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Needs me 2" }));
@@ -1477,7 +1479,7 @@ describe("work queue overview", () => {
 
     expect(await screen.findByText("This issue left Ready for agent because it has an open blocker.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
   });
 
   it("announces unselected removals and distinguishes a search exit from a queue move", async () => {
