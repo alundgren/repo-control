@@ -1,3 +1,6 @@
+import { createExplorationEngine } from "../exploration/engine.js";
+import { createExplorationModel } from "../exploration/provider.js";
+import { createExplorationRepository } from "../exploration/github.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -92,6 +95,7 @@ export async function startServer({
   if (priorityConfiguration && priorityStore) {
     priorityService = createPriorityService({ cache, store: priorityStore, client, classify: createPriorityClassifier(priorityConfiguration), reconcile: () => syncService.sync() });
   }
+  const explorationEngine = priorityConfiguration ? createExplorationEngine(createExplorationRepository(cache, client, configuration.token), createExplorationModel(priorityConfiguration)) : undefined;
   const reviewService = createReviewSubmissionService({
     cache,
     readClient: client,
@@ -138,6 +142,7 @@ export async function startServer({
       reviewService,
       mergeService,
       priorityService,
+      explorationEngine,
       eventHub,
       logEvent,
       webhookService: webhookService ?? undefined,

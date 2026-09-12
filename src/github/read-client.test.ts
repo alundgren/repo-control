@@ -535,3 +535,18 @@ function restRateLimitHeaders(remaining = "4999") {
     "x-ratelimit-reset": "1787572800",
   };
 }
+
+it("cancels a paginated diff read without requesting the next page", async () => {
+  const controller = new AbortController();
+  const urls: string[] = [];
+  const client = createGitHubReadClient("fictional-token", async (url, init) => {
+    urls.push(url);
+    if (!url.includes("/files?")) return response({ head: { sha: "fictional-head" } }, restRateLimitHeaders());
+    controller.abort();
+    expect(init.signal?.aborted).toBe(true);
+    return response(Array.from({ length: 100 }, (_, index) => restFile({ filename: `src/file-${index}.ts`, additions: 1, patch: "@@ -1 +1 @@\n-old\n+new" })), restRateLimitHeaders());
+  });
+  const result = await client.readPullRequestDiff({ repositoryNameWithOwner: "sample/orchard", number: 42, signal: controller.signal });
+  expect(result.status).toBe("unavailable");
+  expect(urls.some(url => url.includes("page=2"))).toBe(false);
+});

@@ -250,3 +250,18 @@ focused refresh path, not an account-wide sync. Review submission and squash
 merge follow this contract. Merge has its own readiness read and confirmation,
 sends the reviewed SHA as GitHub's merge precondition, and leaves the source
 branch in place.
+
+## Interactive PR exploration
+
+`src/exploration` owns bounded review conversations separately from background
+file prioritization. Its transport-neutral engine receives a repository adapter
+and a model adapter, validates source references, and returns only explanation,
+location and reading-guide actions. Fastify and GitHub integration are adapters
+inside that directory. `src/web/exploration` owns chat and source explanations;
+the existing diff overlay supplies selection and return navigation.
+
+The current host uses in-memory sessions and the configured GLM connection.
+There is no persistence migration, repository checkout or arbitrary tool runner.
+[PR exploration](pr-exploration.md) documents the protocol, evidence budgets,
+revision guarantees, UI decisions and the boundaries intended for a possible
+standalone desktop review host.

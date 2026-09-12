@@ -1,3 +1,6 @@
+import { useExploration } from "./exploration/useExploration.js";
+import { ExplorerDrawer, ExplorationCode, type CodeVisit } from "./exploration/Explorer.js";
+import type { Selection } from "../exploration/contracts.js";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
 import { ItemBody } from "./ItemBody.js";
@@ -925,6 +928,20 @@ function DiffOverlay({ item, onClose, repository, state }: {
   state: DiffState;
 }) {
   const overlayRef = useRef<HTMLDivElement>(null);
+  const explorer = useExploration(item.id, state.status === "loaded" ? state.data.headSha : null);
+  const [codeVisit, setCodeVisit] = useState<CodeVisit | null>(null);
+  useEffect(() => { setCodeVisit(null); }, [state.status === "loaded" ? state.data.headSha : null]);
+  const reviewPosition = useRef(0);
+  const agentButton = useRef<HTMLButtonElement>(null);
+  function closeAgent() { explorer.setOpen(false); agentButton.current?.focus(); }
+  function visitCode(visit: CodeVisit) {
+    if (!codeVisit) reviewPosition.current = overlayRef.current?.scrollTop ?? 0;
+    setCodeVisit(visit);
+    if (window.matchMedia("(max-width: 800px)").matches) explorer.setOpen(false);
+    requestAnimationFrame(() => { overlayRef.current?.querySelector<HTMLElement>(".explorationCode")?.focus(); if (overlayRef.current) overlayRef.current.scrollTop = 0; });
+  }
+  function backToReview() { setCodeVisit(null); requestAnimationFrame(() => { if (overlayRef.current) overlayRef.current.scrollTop = reviewPosition.current; agentButton.current?.focus({ preventScroll: true }); }); }
+  function selectCode(selection: Selection) { explorer.setSelection(selection); explorer.setOpen(true); }
   const topRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0, priority: 0, description: 0 });
@@ -1052,11 +1069,12 @@ function DiffOverlay({ item, onClose, repository, state }: {
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      onClose();
+      if (explorer.open) closeAgent(); else if (codeVisit) backToReview(); else onClose();
       return;
     }
     if (event.key !== "Tab") return;
-    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), select:not([disabled]), summary, textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])].filter((element) => element.getClientRects().length > 0);
+    const focusRoot = explorer.open && window.matchMedia("(max-width: 800px)").matches ? overlayRef.current?.querySelector(".explorerDrawer") : overlayRef.current;
+    const focusable = [...(focusRoot?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), select:not([disabled]), summary, textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])].filter((element) => element.getClientRects().length > 0);
     if (focusable.length === 0) return;
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
@@ -1075,7 +1093,7 @@ function DiffOverlay({ item, onClose, repository, state }: {
   const tierDetails = priorityTiers.find((entry) => entry.tier === selectedTier)!;
 
   return (
-    <div aria-labelledby="diff-title" aria-modal="true" className={`diffOverlay${diffView === "priority" ? " priorityOverlay" : ""}`} onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
+    <div aria-labelledby="diff-title" aria-modal="true" className={`diffOverlay${diffView === "priority" ? " priorityOverlay" : ""}${explorer.open ? " explorationOpen" : ""}`} onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
       <div className="diffTop" ref={topRef}>
         <header className="diffHeader">
           <div className="diffHeaderSummary">
@@ -1088,6 +1106,7 @@ function DiffOverlay({ item, onClose, repository, state }: {
           {state.status === "loaded" ? (
             <div aria-label="Changed file arrangement" className="diffViewControls">
               <button aria-controls="review-file-navigator" aria-expanded={fileNavigatorOpen} onClick={() => { if (diffView === "description") selectDiffView("files"); setFileNavigatorOpen((open) => !open); }} type="button">Navigator</button>
+              {state.data.explorationEnabled ? <button aria-expanded={explorer.open} ref={agentButton} onClick={() => explorer.setOpen(!explorer.open)} type="button">Ask agent</button> : null}
               <select aria-label="Review aspect" value={diffView} onChange={(event) => selectDiffView(event.target.value as DiffView)}>
                 <option value="grouped">Grouped</option>
                 <option value="files">Files</option>
@@ -1109,6 +1128,9 @@ function DiffOverlay({ item, onClose, repository, state }: {
       ) : null}
       {state.status === "loaded" ? (
         <>
+          {explorer.stale ? <p className="diffNotice">Earlier revision. Close and reopen the review to inspect the current PR.</p> : null}
+          {codeVisit ? <ExplorationCode stale={explorer.stale} visit={codeVisit} onBack={backToReview} onAsk={() => selectCode({ path: codeVisit.source.path, side: codeVisit.source.side, startLine: codeVisit.source.startLine, endLine: codeVisit.source.endLine })} /> : null}
+          <div hidden={Boolean(codeVisit)}>
           {diffView === "priority" ? <PriorityStrip onSelect={(tier) => { setSelectedTier(tier); setFileNavigatorOpen(false); }} priority={priority} selectedTier={selectedTier} /> : null}
           <article hidden={diffView !== "description"} className="issueDocument prDescription" aria-label="Pull request description">
             <div className="descriptionLink"><a href={item.url} target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
@@ -1144,6 +1166,8 @@ function DiffOverlay({ item, onClose, repository, state }: {
                   id={`diff-file-${index}`}
                   key={`${file.path}-${index}`}
 
+                  selection={explorer.selection}
+                  onSelect={state.data.explorationEnabled ? selectCode : undefined}
                   onToggle={() => toggleFile(index)}
                 />
               ); }) : state.data.groups.map((group, groupIndex) => (
@@ -1159,6 +1183,8 @@ function DiffOverlay({ item, onClose, repository, state }: {
                         id={`diff-file-${index}`}
                         key={`${file.path}-${index}`}
 
+                        selection={explorer.selection}
+                        onSelect={state.data.explorationEnabled ? selectCode : undefined}
                         onToggle={() => toggleFile(index)}
                       />
                     );
@@ -1167,7 +1193,8 @@ function DiffOverlay({ item, onClose, repository, state }: {
               ))}
             </section>
           </div>}
-
+          </div>
+          {state.data.explorationEnabled ? <ExplorerDrawer controller={explorer} onVisit={visitCode} onClose={closeAgent} /> : null}
         </>
       ) : null}
     </div>
@@ -1246,7 +1273,9 @@ function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
   );
 }
 
-function DiffFile({ expanded, file, githubUrl, id, onToggle, priority }: {
+function DiffFile({ expanded, file, githubUrl, id, onToggle, priority, selection, onSelect }: {
+  selection?: Selection | null;
+  onSelect?: (selection: Selection) => void;
   expanded: boolean;
   file: PullRequestDiffFile;
   githubUrl: string;
@@ -1267,7 +1296,22 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle, priority }: {
         ) : (
           <>
             {file.patch.status === "incomplete" ? <p className="diffNotice">This patch may be incomplete because its lines do not match GitHub's file totals. <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p> : null}
-            <div className="unifiedDiff">{parseUnifiedPatch(file.patch.text).map((line, index) => <DiffLine key={index} line={line} />)}</div>
+            {onSelect ? <p className="explorationSelectionHelp">Select text or a line number to ask the agent. Shift-click a second line to select a range.</p> : null}
+            <div className="unifiedDiff" onMouseUp={() => {
+              if (!onSelect) return;
+              const marked = window.getSelection();
+              if (!marked || marked.isCollapsed) return;
+              const start = marked.anchorNode?.parentElement?.closest<HTMLElement>("[data-code-line]");
+              const end = marked.focusNode?.parentElement?.closest<HTMLElement>("[data-code-line]");
+              if (!start || !end || start.closest("article")?.id !== id || end.closest("article")?.id !== id || start.dataset.side !== end.dataset.side) return;
+              const startLine = Math.min(Number(start.dataset.codeLine), Number(end.dataset.codeLine));
+              const endLine = Math.max(Number(start.dataset.codeLine), Number(end.dataset.codeLine));
+              if (endLine - startLine < 160) onSelect({ path: file.path, side: start.dataset.side as "LEFT" | "RIGHT", startLine, endLine });
+            }}>{parseUnifiedPatch(file.patch.text).map((line, index) => <DiffLine key={index} line={line} selection={selection?.path === file.path ? selection : null} onSelect={onSelect ? (shift) => {
+              if (line.line === null || line.side === null) return;
+              const anchor = shift && selection?.path === file.path && selection.side === line.side ? selection.startLine : line.line;
+              onSelect({ path: file.path, side: line.side, startLine: Math.min(anchor, line.line), endLine: Math.min(Math.max(anchor, line.line), Math.min(anchor, line.line) + 159) });
+            } : undefined} />)}</div>
           </>
         )}
       </div> : null}
@@ -1275,10 +1319,11 @@ function DiffFile({ expanded, file, githubUrl, id, onToggle, priority }: {
   );
 }
 
-function DiffLine({ line }: { line: PatchLine }) {
+function DiffLine({ line, selection, onSelect }: { line: PatchLine; selection?: Selection | null; onSelect?: (shift: boolean) => void }) {
   const marker = line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " ";
-  return <div className={`diffLineBlock ${line.kind}`}>
+  return <div data-code-line={line.line ?? undefined} data-side={line.side ?? undefined} className={`diffLineBlock ${line.kind}${selection && line.side === selection.side && line.line !== null && line.line >= selection.startLine && line.line <= selection.endLine ? " explorationSelected" : ""}`}>
     <div className="diffLine">
+      {onSelect && line.line !== null ? <button className="explorationLineNumber" aria-label={`Select ${line.side === "LEFT" ? "base" : "head"} line ${line.line}`} type="button" onClick={event => onSelect(event.shiftKey)}>{line.line}</button> : null}
       <span aria-hidden="true" className="diffMarker">{marker}</span>
       <span className="visuallyHidden">{line.kind === "added" ? "Added line: " : line.kind === "removed" ? "Removed line: " : ""}</span>
       <span>{line.text}</span>

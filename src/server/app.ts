@@ -1,3 +1,4 @@
+import { explorationPlugin } from "../exploration/plugin.js";
 import fastify, { LogController, type FastifyBaseLogger, type FastifyError } from "fastify";
 import fastifyStatic from "@fastify/static";
 
@@ -15,7 +16,7 @@ export type AppOptions = {
   artifactService?: ArtifactService;
 } & ApiPluginOptions;
 
-export async function createApp({ webRoot, logger, cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, eventHub, webhookService, artifactService, logEvent }: AppOptions) {
+export async function createApp({ webRoot, logger, cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, explorationEngine, eventHub, webhookService, artifactService, logEvent }: AppOptions) {
   const app = logger
     ? fastify({ loggerInstance: logger, logController: new LogController({ disableRequestLogging: true }) })
     : fastify();
@@ -39,7 +40,11 @@ export async function createApp({ webRoot, logger, cache, syncService, refreshSe
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, eventHub, logEvent });
+  await app.register(apiPlugin, { prefix: "/api", cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, explorationEngine, eventHub, logEvent });
+  if (explorationEngine) {
+    await app.register(explorationPlugin, { prefix: "/api/exploration", engine: explorationEngine });
+    app.addHook("preClose", async () => explorationEngine.shutdown());
+  }
 
   if (webhookService) {
     await registerWebhookRoutes(app, webhookService);
