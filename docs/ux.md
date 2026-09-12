@@ -158,10 +158,10 @@ reducing the prose size.
   Merge sits at the upper right with space separating it from other controls.
   It checks current GitHub readiness and preserves the reviewed head check.
   The first press arms the button for three seconds, and a second press
-  performs a squash merge. Escape or timeout locks it again. Hover or keyboard
-  focus shows that the branch will be retained; the armed instruction and any
-  failure remain visible. Checking, blocked, unavailable, and ambiguous states
-  retain their explanations and recovery actions. Nothing retries automatically.
+  performs a squash merge. Escape or timeout locks it again. The button stays disabled
+  while readiness is loading or merging is unavailable, with no status popup
+  or hover label. The armed instruction and merge failures remain visible.
+  Unknown mergeability retains the explicit recheck action. Nothing retries automatically.
   Confirmed merge closes the overlay. Missing, incomplete, and limited patches
   retain their explanation and GitHub fallback.
 - Relationship facts: plain static mono text after status facts, a shortened

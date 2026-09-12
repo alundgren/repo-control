@@ -1233,64 +1233,45 @@ function MergePanel({ checkBusy, itemUrl, mergeState, onCheck, onMerge }: {
     onMerge();
   }
 
-  const blockedMessages: Record<import("../merge/index.js").MergeBlockedReason, string> = {
-    draft: "This draft pull request cannot be merged.",
-    conflicts: "Resolve merge conflicts on GitHub before merging.",
-    failed_checks: "Required checks failed.",
-    missing_reviews: "Required reviews are missing.",
-    repository_rules: "Repository rules still block this merge.",
-    base_update_required: "The source branch must be updated with the base branch.",
-    merge_queue: "This repository requires its merge queue. Repo Control does not operate merge queues.",
-    squash_disabled: "This repository does not allow squash merging.",
-  };
-  let message: ReactNode;
-  if (mergeState.status === "checking") message = checkBusy ? "Checking current merge status…" : "GitHub is still calculating mergeability.";
-  else if (mergeState.status === "checks_pending") message = "Required checks are still running.";
-  else if (mergeState.status === "blocked") message = blockedMessages[mergeState.reason];
-  else if (mergeState.status === "not_permitted") message = "Merge is not enabled for this installation or the connected account cannot merge this pull request.";
-  else if (mergeState.status === "unavailable") message = <>GitHub merge status is unavailable. <a href={itemUrl} rel="noreferrer" target="_blank">Check on GitHub.</a></>;
-  else if (mergeState.status === "merging") message = "Merging with the reviewed head commit…";
-  else if (mergeState.status === "merged") message = "This pull request is already merged.";
-  else if (mergeState.status === "failed" && mergeState.reason === "permission") message = "GitHub denied permission to merge. Nothing was retried.";
+  let message: ReactNode = null;
+  if (mergeState.status === "failed" && mergeState.reason === "permission") message = "GitHub denied permission to merge. Nothing was retried.";
   else if (mergeState.status === "failed" && mergeState.reason === "policy") message = "GitHub rejected the merge under the repository policy. Nothing was retried.";
   else if (mergeState.status === "failed" && mergeState.reason === "validation") message = "The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.";
   else if (mergeState.status === "failed") message = <><strong>Merge outcome unknown.</strong> <a href={itemUrl} rel="noreferrer" target="_blank">Verify on GitHub before trying again.</a></>;
   else if (mergeArmed) message = "Press Merge again within 3 seconds. Squash merge; the branch won't be deleted.";
-  else message = "Squash merge. The branch won't be deleted.";
 
   return (
     <section aria-labelledby="merge-title" className="mergePanel">
       <h2 className="visuallyHidden" id="merge-title">Merge pull request</h2>
       {mergeState.status === "checking" && !checkBusy ? <button className="quietButton" onClick={onCheck} type="button">Check again</button> : null}
-      {mergeState.status === "ready" ? (
-        <button
-          aria-describedby="merge-status"
-          aria-label={mergeArmed ? "Confirm merge" : "Unlock merge"}
-          className={`mergeButton${mergeArmed ? " mergeButtonArmed" : ""}`}
-          onClick={handleMerge}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape" || !mergeArmed) return;
-            event.preventDefault();
-            event.stopPropagation();
-            setMergeArmed(false);
-          }}
-          type="button"
-        >
-          <span aria-hidden="true" className="mergeButtonIcons">
-            <svg className="mergeButtonIcon mergeLockIcon" fill="none" viewBox="0 0 24 24">
-              <rect height="10" rx="2" stroke="currentColor" strokeWidth="2" width="16" x="4" y="11" />
-              <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
-            </svg>
-            <svg className="mergeButtonIcon mergeExecuteIcon" fill="none" viewBox="0 0 24 24">
-              <circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="2" />
-              <circle cx="18" cy="19" r="2.5" stroke="currentColor" strokeWidth="2" />
-              <path d="M6 7.5v5A6.5 6.5 0 0 0 12.5 19h3M8.5 5H12a6 6 0 0 1 6 6v5.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-            </svg>
-          </span>
-          <span>Merge</span>
-        </button>
-      ) : null}
-      <p hidden={mergeState.status === "ready" && !mergeArmed} aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"} id="merge-status">{message}</p>
+      <button
+        aria-describedby={message ? "merge-status" : undefined}
+        disabled={checkBusy || mergeState.status !== "ready"}
+        aria-label={mergeArmed ? "Confirm merge" : "Unlock merge"}
+        className={`mergeButton${mergeArmed ? " mergeButtonArmed" : ""}`}
+        onClick={handleMerge}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || !mergeArmed) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setMergeArmed(false);
+        }}
+        type="button"
+      >
+        <span aria-hidden="true" className="mergeButtonIcons">
+          <svg className="mergeButtonIcon mergeLockIcon" fill="none" viewBox="0 0 24 24">
+            <rect height="10" rx="2" stroke="currentColor" strokeWidth="2" width="16" x="4" y="11" />
+            <path d="M8 11V7a4 4 0 0 1 8 0v4" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+          </svg>
+          <svg className="mergeButtonIcon mergeExecuteIcon" fill="none" viewBox="0 0 24 24">
+            <circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="2" />
+            <circle cx="18" cy="19" r="2.5" stroke="currentColor" strokeWidth="2" />
+            <path d="M6 7.5v5A6.5 6.5 0 0 0 12.5 19h3M8.5 5H12a6 6 0 0 1 6 6v5.5" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+          </svg>
+        </span>
+        <span>Merge</span>
+      </button>
+      {message ? <p aria-live={mergeState.status === "failed" && mergeState.reason === "ambiguous" ? "assertive" : "polite"} id="merge-status">{message}</p> : null}
     </section>
   );
 }
