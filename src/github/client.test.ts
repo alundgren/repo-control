@@ -3,6 +3,21 @@ import { describe, expect, it } from "vitest";
 import { createGitHubReadClient } from "./client.js";
 
 describe("GitHub read client", () => {
+  it.each([null, "## Full body\n" + "Text past the excerpt. ".repeat(100)])("reads an uncapped issue body", async (body) => {
+    const client = createGitHubReadClient("fictional-token", async (_, init) => {
+      expect(JSON.parse(String(init.body)).variables).toEqual({ id: "I_1" });
+      return response({ data: { node: { __typename: "Issue", id: "I_1", body } } });
+    });
+    expect(await client.readIssueBody!({ nodeId: "I_1" })).toEqual({ status: "read", body });
+  });
+
+  it("rejects body reads for the wrong node or invalid payload", async () => {
+    for (const node of [null, { __typename: "PullRequest", id: "I_1", body: "text" }, { __typename: "Issue", id: "I_2", body: "text" }, { __typename: "Issue", id: "I_1", body: 7 }]) {
+      const client = createGitHubReadClient("fictional-token", async () => response({ data: { node } }));
+      expect(await client.readIssueBody!({ nodeId: "I_1" })).toMatchObject({ status: "unavailable" });
+    }
+  });
+
   it("uses named read operations for viewer and repository capabilities", async () => {
     const requests: Array<{ body: { operationName: string; variables: Record<string, unknown> } }> = [];
     const client = createGitHubReadClient("github_pat_example_token_for_tests", async (_, init) => {

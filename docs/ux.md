@@ -15,7 +15,7 @@ public artifact viewer.
 | View | Main task and content | Secondary controls and context |
 | --- | --- | --- |
 | Now and queues | Choose work from titles, recency, blockers, and change facts. | Compact navigation, search, and sync status. Facts are plain text, not pills. |
-| Quick read | Read the selected item's text and relationships. | One identity line, review and GitHub actions, then freshness and refresh. |
+| Issue reading window | Read the full issue title and formatted body. | A corner GitHub link and close control, then relationships, freshness, and refresh below the body. |
 | Pull request review | Inspect code in the chosen aspect. | File navigation opens on request. A compact header contains the aspect dropdown and merge action. |
 | AI priority | Read files in the selected tier and their reasons. | Tier controls carry selection and counts. Details explains the tier and classification. |
 | Settings | Find a repository and change its visibility. | Staged changes and queue impact appear when there is a change to apply. |
@@ -45,6 +45,7 @@ Ground: warm paper.
 | Success | `#3D6034` |
 | Warning | `#7E5220` |
 | Danger | `#8F3A2D` |
+| Overlay backdrop | Primary text at 22% opacity |
 | Share dark ground | `#292019` |
 | Share dark text | `#C1AF9A` |
 
@@ -91,7 +92,7 @@ reducing the prose size.
   two-column document-flow navigation on narrow screens.
 - Settings entry: the last control in the laptop work navigation. On narrow
   screens it becomes the compact gear control in the application header.
-  Settings replaces both the work list and quick read.
+  Settings replaces the work list.
 - Settings search: the primary field matches supported setting names,
   repository names, and the fixed words `ignore`, `hide`, `restore`,
   `repository`, and `sync`. An empty field suggests Repository visibility and
@@ -116,10 +117,16 @@ reducing the prose size.
 - Visibility empty states: when every active repository is hidden, the work
   view says the queue is intentionally empty and links to Restore repositories.
   An empty queue or search links back to Repository visibility.
-- Work queue: on desktop, a three-column scan-and-read layout keeps navigation,
-  the page header and loaded-work search, and the quick read in separate
-  columns. A selected row keeps the list visible while a plain-text quick-read
-  area stays in the right column; GitHub links stay in that area.
+- Work queue: navigation and the work list occupy two desktop columns. The list
+  uses the remaining width. There is no permanent detail panel.
+- Issue reading window: clicking an issue or epic opens a centered inset modal
+  above the mounted queue. A compact header keeps repository identity, GitHub
+  link, and close available while the title and full Markdown body scroll.
+  Tables, task lists, quotes, and code render without executing raw HTML or
+  unsafe URL schemes. Loading, retry, and empty-body states stay in the document.
+  Relationship facts and focused refresh follow the body. Escape and close
+  return focus and scroll to the opening row. Narrow screens retain a small
+  inset and scroll the document internally.
 - Sync status: a quiet success or warning dot, freshness disclosure, and an
   underlined account-wide sync action. The disclosure contains reconciliation
   totals; partial results remain visible in its summary.
@@ -127,9 +134,7 @@ reducing the prose size.
   server event stream is unavailable. It never disables manual sync or focused
   refresh.
 - Work row: a compact number, title, repository, age, and available readiness
-  or change-size facts. The whole row is the selection control. The quick-read
-  area carries one identity line, the bounded excerpt, relationship links or their unavailable
-  state, item freshness, and the focused refresh control. Status facts use
+  or change-size facts. The whole row opens the issue reading window or the existing PR review. Status facts use
   the success, warning, and secondary text roles. Ready rows do not repeat an
   `Unblocked` fact. Issues with unavailable dependency coverage stay visible
   and keep their warning.
@@ -172,11 +177,10 @@ reducing the prose size.
   facts have no enclosing pill or border.
 - Epics navigation row: one plain row inside the issue-queue navigation group,
   styled like the other rows, counting open epics.
-- Epics view: the same three-column scan-and-read layout as the queues. Epic
-  rows carry title, thin progress track, mono `closed/total`, and recency,
-  ordered most-recently-updated first. Selecting an epic shows a minimal quick
-  read (identity, excerpt, raw fraction with bar, freshness, GitHub link) and
-  opens no child details and filters no lists.
+- Epics view: the same queue layout. Epic rows carry title, a progress track,
+  mono `closed/total`, and recency, ordered most-recently-updated first.
+  Selecting an epic opens its issue reading window with progress facts below
+  the body. It opens no child details and filters no lists.
 - Public artifact viewer: the artifact owns the full browser viewport. A
   transparent 28 by 28 pixel Share button contains a 16 pixel connected-nodes
   icon and sits 8 pixels inside one of six supported viewport-edge positions.

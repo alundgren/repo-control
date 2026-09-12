@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+
+import { IssueOverlay } from "./IssueOverlay.js";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
 import type { PullRequestDiffFile } from "../github/read-client.js";
@@ -70,7 +72,7 @@ export function App() {
   const [syncState, setSyncState] = useState<SyncState>("idle");
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [itemRefreshStates, setItemRefreshStates] = useState<Record<string, ItemRefreshState>>({});
-  const [compactLayout, setCompactLayout] = useState(false);
+  const [issueOpen, setIssueOpen] = useState(false);
   const [liveState, setLiveState] = useState<"connected" | "unavailable">("connected");
   const [diffItem, setDiffItem] = useState<Extract<ApiItem, { type: "pull_request" }> | null>(null);
   const [diffState, setDiffState] = useState<DiffState | null>(null);
@@ -80,7 +82,7 @@ export function App() {
   const [settingsState, setSettingsState] = useState<"idle" | "loading" | "pending" | "success" | "failed" | "conflict">("idle");
   const [settingsSelectedRepositoryId, setSettingsSelectedRepositoryId] = useState<string | null>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const quickReadHeadingRef = useRef<HTMLHeadingElement>(null);
+  const issueOpenerRef = useRef<HTMLElement | null>(null);
   const overviewRef = useRef<Extract<OverviewResponse, { status: "ready" }> | null>(null);
   const overviewRequestRef = useRef(0);
   const selectedItemRef = useRef<string | null>(null);
@@ -136,21 +138,6 @@ export function App() {
     };
     source.onerror = () => setLiveState("unavailable");
     return () => source.close();
-  }, []);
-
-  useEffect(() => {
-    if (compactLayout && selectedItemId) {
-      window.requestAnimationFrame(() => quickReadHeadingRef.current?.focus());
-    }
-  }, [compactLayout, selectedItemId]);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(max-width: 64rem)");
-    const update = () => setCompactLayout(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
   }, []);
 
   useEffect(() => {
@@ -406,20 +393,19 @@ export function App() {
   const selectedItem = filteredItems.find((item) => item.id === selectedItemId) ?? null;
   const statusMessage = itemMessage || syncStatusMessage(syncState);
 
-  function selectItem(nodeId: string) {
+  function selectItem(nodeId: string, opener: HTMLElement) {
     setItemMessage("");
     selectedItemRef.current = nodeId;
     setSelectedItemId(nodeId);
     const item = overviewRef.current ? itemFromOverview(overviewRef.current, nodeId) : null;
     settingsSelectedRepositoryIdRef.current = item?.repositoryId ?? null;
     setSettingsSelectedRepositoryId(item?.repositoryId ?? null);
+    if (item?.type === "pull_request") void openDiff(item, opener);
+    else { issueOpenerRef.current = opener; setIssueOpen(true); }
   }
 
-  function returnToList() {
-    const previousSelection = selectedItemId;
-    setSelectedItemId(null);
-    selectedItemRef.current = null;
-    window.requestAnimationFrame(() => document.getElementById(`item-row-${previousSelection}`)?.focus());
+  function closeIssue() {
+    setIssueOpen(false);
   }
 
   async function openDiff(item: Extract<ApiItem, { type: "pull_request" }>, opener: HTMLElement) {
@@ -552,7 +538,7 @@ export function App() {
 
   return (
     <>
-    <main className={`appShell${compactLayout && selectedItem && view !== "settings" ? " readingSelection" : ""}`} inert={diffItem ? true : undefined}>
+    <main className="appShell" inert={diffItem || (issueOpen && selectedItem?.type === "issue") ? true : undefined}>
       <aside className="navigation">
         <button className="brand" onClick={() => changeView("now")} type="button">
           <span aria-hidden="true" className="brandMark">↗</span>
@@ -645,7 +631,7 @@ export function App() {
               />
               <p aria-live="polite" className="visuallyHidden">{selectedItem ? `Showing ${selectedItem.title}.` : ""}</p>
               <div className="workArea">
-                {!compactLayout || !selectedItem ? <div className="workList">
+                <div className="workList">
                   {view === "now" ? (
                     <NowView
                       onSelect={selectItem}
@@ -665,7 +651,7 @@ export function App() {
                       searching={Boolean(query.trim())}
                     />
                   )}
-                </div> : null}
+                </div>
               </div>
               {overview.scope.visibleRepositoryCount === 0 ? (
                 <div className="allHiddenState"><h2>The queue is intentionally empty</h2><p>All active repositories are hidden.</p><button className="primaryButton" onClick={() => changeView("settings")} type="button">Restore repositories</button></div>
@@ -675,9 +661,14 @@ export function App() {
           </>}
         </div>
       </section>
-      {view !== "settings" && overview && (!compactLayout || selectedItem) ? <QuickRead backLabel={currentView.title} headingRef={quickReadHeadingRef} item={selectedItem} onBack={compactLayout ? returnToList : undefined} onOpenDiff={openDiff} onRefresh={refreshFocusedItem} overview={overview} refreshState={selectedItem ? itemRefreshStates[selectedItem.id] ?? "idle" : "idle"} /> : null}
     </main>
+    {issueOpen && selectedItem?.type === "issue" && overview ? <IssueOverlay key={selectedItem.id} item={selectedItem} repository={repositoryName(overview, selectedItem.repositoryId)} onClose={closeIssue} opener={issueOpenerRef.current} fallback={titleRef.current}>
+      <p className="itemContextFreshness">Item facts checked {relativeTime(selectedItem.observedAt ?? selectedItem.updatedAt)}.</p>
+      {selectedItem.queue === null ? <EpicProgressFacts item={selectedItem} /> : <BlockerFacts item={selectedItem} overview={overview} />}
+      <div className="itemRefresh"><button className="quietButton" disabled={itemRefreshStates[selectedItem.id] === "busy"} onClick={() => void refreshFocusedItem(selectedItem.id)} type="button">{itemRefreshStates[selectedItem.id] === "busy" ? "Refreshing this item…" : "Refresh this item"}</button><span aria-live="polite" className="itemRefreshMessage">{itemRefreshMessage(itemRefreshStates[selectedItem.id] ?? "idle")}</span></div>
+    </IssueOverlay> : null}
     {diffItem && diffState && overview ? <DiffOverlay item={diffItem} onClose={closeDiff} repository={repositoryName(overview, diffItem.repositoryId)} state={diffState} /> : null}
+
     </>
   );
 }
@@ -818,7 +809,7 @@ function NowView({
   overview: Extract<OverviewResponse, { status: "ready" }>;
   query: string;
   filteredItems: ApiItem[];
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, opener: HTMLElement) => void;
   selectedItemId: string | null;
 }) {
   if (query.trim()) {
@@ -855,7 +846,7 @@ function ListSection({
   searching,
 }: {
   items: ApiItem[];
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, opener: HTMLElement) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   selectedItemId: string | null;
   showKind?: boolean;
@@ -881,7 +872,7 @@ function ItemList({
   view,
 }: {
   items: ApiItem[];
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, opener: HTMLElement) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   selectedItemId: string | null;
   showKind?: boolean;
@@ -904,7 +895,7 @@ function ItemRow({
   showReadyExclusion,
 }: {
   item: ApiItem;
-  onSelect: (nodeId: string) => void;
+  onSelect: (nodeId: string, opener: HTMLElement) => void;
   overview: Extract<OverviewResponse, { status: "ready" }>;
   selected: boolean;
   showKind: boolean;
@@ -913,7 +904,7 @@ function ItemRow({
   const repository = repositoryName(overview, item.repositoryId);
   return (
     <li>
-      <button aria-label={`Select ${item.title}`} aria-pressed={selected} className="itemRow" id={`item-row-${item.id}`} onClick={() => onSelect(item.id)} type="button">
+      <button aria-label={`Select ${item.title}`} aria-pressed={selected} className="itemRow" id={`item-row-${item.id}`} onClick={(event) => onSelect(item.id, event.currentTarget)} type="button">
         <span className="itemNumber">{item.type === "pull_request" ? `PR${item.number}` : `#${item.number}`}</span>
         <span className="itemBody">
           <span className="itemTitle">{item.title}</span>
@@ -923,39 +914,6 @@ function ItemRow({
         <span className="itemAge">Updated {relativeTime(item.updatedAt)}</span>
       </button>
     </li>
-  );
-}
-
-function QuickRead({ backLabel, headingRef, item, onBack, onOpenDiff, onRefresh, overview, refreshState }: {
-  backLabel: string;
-  headingRef: RefObject<HTMLHeadingElement | null>;
-  item: ApiItem | null;
-  onBack?: () => void;
-  onOpenDiff: (item: Extract<ApiItem, { type: "pull_request" }>, opener: HTMLElement) => void;
-  onRefresh: (nodeId: string) => void;
-  overview: Extract<OverviewResponse, { status: "ready" }>;
-  refreshState: ItemRefreshState;
-}) {
-  if (!item) {
-    return <aside aria-label="Quick read" className="quickRead"><h2 ref={headingRef} tabIndex={-1}>Choose an item to read</h2></aside>;
-  }
-  return (
-    <aside aria-label="Quick read" className="quickRead">
-      {onBack ? <button className="quietButton backToList" onClick={onBack} type="button">Back to {backLabel}</button> : null}
-      <p className="detailIdentity">{repositoryName(overview, item.repositoryId)} · {item.type === "pull_request" ? "PR" : "#"}{item.number}</p>
-      <h2 ref={headingRef} tabIndex={-1}>{item.title}</h2>
-      {item.type === "pull_request" ? <button className="reviewButton" onClick={(event) => void onOpenDiff(item, event.currentTarget)} type="button">Review changed files</button> : null}
-      <a className="detailLink" href={item.url} rel="noreferrer" target="_blank">Open on GitHub</a>
-      <p className="itemExcerpt">{item.excerpt ?? "No text excerpt is available for this item."}</p>
-      <p className="itemContextFreshness">Item facts checked {relativeTime(item.observedAt ?? item.updatedAt)}.</p>
-      {item.type === "pull_request" ? <ClosingIssueFacts item={item} /> : item.queue === null ? <EpicProgressFacts item={item} /> : <BlockerFacts item={item} overview={overview} />}
-      <div className="itemRefresh">
-        <button className="quietButton" disabled={refreshState === "busy"} onClick={() => onRefresh(item.id)} type="button">
-          {refreshState === "busy" ? "Refreshing this item…" : "Refresh this item"}
-        </button>
-        <span aria-live="polite" className={`itemRefreshMessage ${refreshState}`}>{itemRefreshMessage(refreshState)}</span>
-      </div>
-    </aside>
   );
 }
 
@@ -1314,13 +1272,6 @@ function DiffLine({ line }: { line: PatchLine }) {
       <span>{line.text}</span>
     </div>
   </div>;
-}
-
-function ClosingIssueFacts({ item }: { item: Extract<ApiItem, { type: "pull_request" }> }) {
-  if (item.closingIssues.status === "unavailable") return <p>Closing-issue details are unavailable.</p>;
-  if (item.closingIssues.status === "not_sampled") return <p>Closing-issue details were not sampled.</p>;
-  if (item.closingIssues.items.length === 0) return <p>No closing issue linked.</p>;
-  return <p>{item.closingIssues.items.map((issue, index) => <span key={issue.id}>{index > 0 ? ", " : "Closes "}<a href={issue.url} rel="noreferrer" target="_blank">{issue.repositoryNameWithOwner}#{issue.number}</a></span>)}</p>;
 }
 
 function EpicProgressFacts({ item }: { item: Extract<ApiItem, { type: "issue" }> }) {

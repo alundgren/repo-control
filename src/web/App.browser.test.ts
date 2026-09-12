@@ -57,6 +57,7 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 });
     await page.route("**/events", (route) => route.abort());
     await page.route("**/api/overview", (route) => route.fulfill({ json: readyFilteringOverview() }));
+    await page.route("**/api/items/*/body", (route) => route.fulfill({ json: { status: "read", body: null } }));
     await page.goto(origin);
     await page.getByRole("button", { name: "Ready for agent 2" }).click();
     const syncTotals = page.getByText(/4 loaded items from 1 repositories/);
@@ -65,34 +66,57 @@ for (const width of [1280, 390]) {
     await expect(syncTotals).toBeVisible();
     await page.getByText("Synced 1 day ago", { exact: true }).click();
     await page.getByRole("button", { name: "Select Start fictional irrigation" }).click();
-    await expect(page.getByRole("complementary", { name: "Quick read" })).toContainText("No text excerpt is available");
+    const dialog = page.getByRole("dialog", { name: "Start fictional irrigation" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText("No description provided.");
     expect(await page.locator(".appShell").evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(width);
-    if (width < 1024) {
-      expect((await page.getByRole("heading", { name: "Start fictional irrigation" }).boundingBox())!.y).toBeLessThan(200);
-      await expect(page.getByRole("searchbox")).toBeHidden();
-      await page.getByRole("button", { name: "Back to Ready for agent" }).click();
-      await expect(page.getByRole("button", { name: "Select Start fictional irrigation" })).toBeFocused();
-      await expect(page.getByRole("searchbox")).toBeVisible();
-    }
+    await expect(page.locator("main")).toHaveAttribute("inert", "");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Select Start fictional irrigation" })).toBeFocused();
+    await expect(page.getByRole("searchbox")).toBeVisible();
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`reads a long formatted issue body without page overflow at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/events", (route) => route.abort());
+    await page.route("**/api/overview", (route) => route.fulfill({ json: readyFilteringOverview() }));
+    const body = "## Expected behavior\n\nKeep **workspace preferences** after an upgrade.\n\n| Setting | After upgrade |\n| --- | --- |\n| Hidden repositories | Remain hidden |\n\n- [x] Preserve preferences\n- [ ] Verify recovery\n\n> Keep the previous settings when an upgrade fails.\n\n```text\n" + "long-path/".repeat(40) + "\n```\n\n" + "More issue context. ".repeat(200) + "\n\nEnd of full body.";
+    await page.route("**/api/items/*/body", (route) => route.fulfill({ json: { status: "read", body } }));
+    await page.goto(origin);
+    await page.getByRole("button", { name: "Select Start fictional irrigation" }).click();
+    const dialog = page.getByRole("dialog", { name: "Start fictional irrigation" });
+    await expect(dialog.getByRole("heading", { name: "Expected behavior" })).toBeVisible();
+    await expect(dialog.getByRole("table")).toBeVisible();
+    const box = (await dialog.boundingBox())!;
+    expect(box.x).toBeGreaterThan(0);
+    expect(box.x + box.width).toBeLessThan(width);
+    expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil(box.width));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({ path: `/tmp/issue-reading-window-${width}-${testInfo.project.name}.png` });
+    await dialog.getByText("End of full body.").scrollIntoViewIfNeeded();
+    await expect(dialog.getByRole("button", { name: "Close issue" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Select Start fictional irrigation" })).toBeFocused();
   });
 }
 
 test("restores queue view, selection, filter, and browser scroll after closing changed files", async ({ page }) => {
   await page.route("**/events", (route) => route.abort());
   await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
-  await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff() }));
+  await page.route("**/api/items/PR_10/diff", (route) => route.fulfill({ json: diff() }));
   await page.goto(origin);
 
   await page.getByRole("button", { name: "Pull requests 40" }).click();
-  await page.getByRole("button", { name: "Select Fictional pull request 1", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Filter pull requests and issues" });
   await search.fill("Fictional");
-  await page.evaluate(() => window.scrollTo(0, 700));
+  await page.getByRole("button", { name: "Select Fictional pull request 10", exact: true }).scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
   expect(before).toBeGreaterThan(500);
+  await page.getByRole("button", { name: "Select Fictional pull request 10", exact: true }).click();
 
-  await page.getByRole("button", { name: "Review changed files" }).click();
-  const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
+  const dialog = page.getByRole("dialog", { name: "Fictional pull request 10" });
   const firstFile = dialog.getByRole("button", { name: /src\/example-1.ts/ });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toHaveValue("grouped");
@@ -116,8 +140,8 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Pull requests" })).toBeVisible();
   await expect(search).toHaveValue("Fictional");
-  await expect(page.getByRole("button", { name: "Select Fictional pull request 1", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Review changed files" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Select Fictional pull request 10", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Select Fictional pull request 10", exact: true })).toBeFocused();
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(before);
 });
 
@@ -132,7 +156,6 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
 
   await page.getByRole("button", { name: "Pull requests 40" }).click();
   await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
-  await page.getByRole("button", { name: "Review changed files" }).click();
   const dialog = page.getByRole("dialog", { name: title });
   await expect(dialog.getByRole("button", { name: /Draft comment|Submit review|Discard all/ })).toHaveCount(0);
   const headerParts = [".diffIdentity", ".diffTitleDisclosure > button", ".diffClose", ".diffViewControls"];
@@ -174,7 +197,6 @@ test("keeps the header compact with an isolated merge button and no bottom bar",
 
   await page.getByRole("button", { name: "Pull requests 40" }).click();
   await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
-  await page.getByRole("button", { name: "Review changed files" }).click();
   const dialog = page.getByRole("dialog", { name: title });
   const header = dialog.locator(".diffHeader");
   await expect(header).toContainText("fictional-tools/garden · PR 1");
@@ -243,7 +265,7 @@ test("filters Ready work, discovers hidden issues, and clears a selection after 
   await page.getByRole("button", { name: "Refresh this item" }).click();
 
   await expect(page.getByText("This issue left Ready for agent because it has an open blocker.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Choose an item" })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ready for agent 1" })).toBeVisible();
 });
 
