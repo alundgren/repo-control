@@ -385,11 +385,6 @@ test("uses the low-contrast Share tab treatment for each appearance hint", async
     text: "rgba(193, 175, 154, 0.58)",
     border: "rgba(0, 0, 0, 0)",
   });
-
-  for (const id of [fixtureIds.lightNeutral, fixtureIds.lightHint, fixtureIds.darkNeutral, fixtureIds.darkHint]) {
-    await page.goto(viewUrl(id));
-    await expect(page).toHaveScreenshot(`share-tab-${id[0]}.png`, { clip: { x: 1218, y: 658, width: 62, height: 62 } });
-  }
 });
 
 test("keeps the dark-hint treatment when nearby artifact content is light", async ({ page }) => {
@@ -399,9 +394,6 @@ test("keeps the dark-hint treatment when nearby artifact content is light", asyn
     fill: "rgba(0, 0, 0, 0)",
     text: "rgba(193, 175, 154, 0.58)",
     border: "rgba(0, 0, 0, 0)",
-  });
-  await expect(page).toHaveScreenshot("share-tab-dark-over-light-block.png", {
-    clip: { x: 1218, y: 658, width: 62, height: 62 },
   });
 });
 

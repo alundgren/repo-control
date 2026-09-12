@@ -556,7 +556,7 @@ export function App() {
 
   return (
     <>
-    <main className="appShell" inert={diffItem ? true : undefined}>
+    <main className={`appShell${compactLayout && selectedItem && view !== "settings" ? " readingSelection" : ""}`} inert={diffItem ? true : undefined}>
       <aside className="navigation">
         <button className="brand" onClick={() => changeView("now")} type="button">
           <span aria-hidden="true" className="brandMark">↗</span>
@@ -594,11 +594,12 @@ export function App() {
             </div>
             {view !== "settings" ? <div className="syncArea">
               {overview ? (
-                <p className={`freshness ${overview.scope.truncatedReason ? "warning" : "complete"}`}>
-                  {freshness(overview)}
-                </p>
+                <details className="syncDetails">
+                  <summary className={`freshness ${overview.scope.truncatedReason ? "warning" : "complete"}`}>Synced {relativeTime(overview.fetchedAt)}{overview.scope.truncatedReason ? " · Partial result" : ""}</summary>
+                  <div><p>{freshness(overview)}</p></div>
+                </details>
               ) : null}
-              {liveState === "unavailable" ? <p className="freshness warning">Live updates are unavailable. Sync account still works.</p> : null}
+              {liveState === "unavailable" ? <p className="freshness warning" title="Sync account still works.">Live updates unavailable</p> : null}
               <button
                 className="quietButton syncButton"
                 disabled={syncState === "busy"}
@@ -726,11 +727,10 @@ function SettingsView({
   return (
     <div className="settingsLayout">
       <div className="settingsMain">
-        <p className="description">Search settings or choose a suggestion.</p>
         <label className="visuallyHidden" htmlFor="settings-search">Search settings and repositories</label>
         <input id="settings-search" onChange={(event) => onQuery(event.target.value)} placeholder="Search settings or repositories" type="search" value={query} />
         <div className="settingsResults" aria-label="Settings search results">
-          {showSetting ? <div className="settingResult"><span aria-hidden="true" className="resultIcon">◎</span><div><h2>Repository visibility</h2><p>Show or hide a repository in work queues and search.</p></div></div> : null}
+          {showSetting ? <div className="settingResult"><div><h2>Repository visibility</h2><p>Show or hide a repository in work queues and search.</p></div></div> : null}
           {!normalized && settings.repositories.some((repository) => repository.ignored) ? <button className="ignoredRoute" onClick={() => onQuery("restore")} type="button">Show currently hidden repositories</button> : null}
           {!normalized && settings.repositories.length === 0 ? <p className="settingsHint">No repositories are available yet. Return to a work view and sync the account.</p> : null}
           {!normalized && settings.repositories.length > 0 && !settings.repositories.some((repository) => repository.ignored) ? <p className="settingsHint">Nothing is hidden. Search for a repository to change its visibility.</p> : null}
@@ -755,11 +755,11 @@ function SettingsView({
           {state === "conflict" ? "Settings changed elsewhere. Review the updated impact, then apply again or discard." : null}
         </div>
       </div>
-      <aside className="settingsImpact" aria-label="Queue impact">
+      {changes.length > 0 ? <aside className="settingsImpact" aria-label="Queue impact">
         <p className="eyebrow">Queue impact</p>
         {(["now", "pullRequests", "agent", "human", "triage", "epics"] as const).map((key) => <div className="impactLine" key={key}><span>{impactTitle(key)}</span><strong>{currentCounts[key]} → {proposedCounts[key]}</strong></div>)}
         <p className="impactNote">{selectedWillClear ? "The current selection will clear." : "The current selection will stay available."} Account sync still loads work from hidden repositories.</p>
-      </aside>
+      </aside> : null}
     </div>
   );
 }
@@ -921,7 +921,7 @@ function ItemRow({
         <span className="itemNumber">{item.type === "pull_request" ? `PR${item.number}` : `#${item.number}`}</span>
         <span className="itemBody">
           <span className="itemTitle">{item.title}</span>
-          <span className="itemIdentity">{repository} · #{item.number}</span>
+          <span className="itemIdentity">{repository}</span>
           <ItemFacts item={item} overview={overview} showKind={showKind} showReadyExclusion={showReadyExclusion} />
         </span>
         <span className="itemAge">Updated {relativeTime(item.updatedAt)}</span>
@@ -941,15 +941,13 @@ function QuickRead({ backLabel, headingRef, item, onBack, onOpenDiff, onRefresh,
   refreshState: ItemRefreshState;
 }) {
   if (!item) {
-    return <aside aria-label="Quick read" className="quickRead"><p className="eyebrow">Quick read</p><h2 ref={headingRef} tabIndex={-1}>Choose an item</h2><p>Read the excerpt here, then open GitHub when you need the full context.</p></aside>;
+    return <aside aria-label="Quick read" className="quickRead"><h2 ref={headingRef} tabIndex={-1}>Choose an item to read</h2></aside>;
   }
   return (
     <aside aria-label="Quick read" className="quickRead">
       {onBack ? <button className="quietButton backToList" onClick={onBack} type="button">Back to {backLabel}</button> : null}
-      <p className="eyebrow">{item.type === "pull_request" ? "Pull request" : item.type === "issue" && item.queue === null ? "Epic" : "Issue"}</p>
       <p className="detailIdentity">{repositoryName(overview, item.repositoryId)} · {item.type === "pull_request" ? "PR" : "#"}{item.number}</p>
       <h2 ref={headingRef} tabIndex={-1}>{item.title}</h2>
-      <p className="detailAge">Updated {relativeTime(item.updatedAt)}</p>
       {item.type === "pull_request" ? <button className="reviewButton" onClick={(event) => void onOpenDiff(item, event.currentTarget)} type="button">Review changed files</button> : null}
       <a className="detailLink" href={item.url} rel="noreferrer" target="_blank">Open on GitHub</a>
       <p className="itemExcerpt">{item.excerpt ?? "No text excerpt is available for this item."}</p>
@@ -979,7 +977,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   const [diffView, setDiffView] = useState<DiffView>("grouped");
   const [priority, setPriority] = useState<PriorityRead>({ status: "disabled" });
   const [selectedTier, setSelectedTier] = useState(5);
-  const [priorityNavigatorOpen, setPriorityNavigatorOpen] = useState(false);
+  const [fileNavigatorOpen, setFileNavigatorOpen] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [draftMessage, setDraftMessage] = useState("");
@@ -1079,7 +1077,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
     if (nextView === diffView) return;
     if (overlayRef.current) scrollPositions.current[diffView] = overlayRef.current.scrollTop;
     setDiffView(nextView);
-    if (nextView === "priority") { setSelectedTier(5); setPriorityNavigatorOpen(false); }
+    if (nextView === "priority") { setSelectedTier(5); setFileNavigatorOpen(false); }
   }
 
   function toggleFile(index: number) {
@@ -1248,6 +1246,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
           {changedFileCount === null ? null : <p className="diffMeta">{changedFileCount.toLocaleString()} {changedFileCount === 1 ? "file" : "files"}{changeTotals ? ` · ${changeTotals}` : ""}</p>}
           {state.status === "loaded" ? (
             <div aria-label="Changed file arrangement" className="diffViewControls">
+              <button aria-controls="review-file-navigator" aria-expanded={fileNavigatorOpen} onClick={() => setFileNavigatorOpen((open) => !open)} type="button">Navigator</button>
               <button aria-label="Grouped" aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
               <button aria-label="Files" aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
               <button aria-pressed={diffView === "priority"} onClick={() => selectDiffView("priority")} type="button">AI priority</button>
@@ -1268,11 +1267,10 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
       {state.status === "loaded" ? (
         <>
           <div className="draftStatus">
-            <p>Drafts live in this tab only.</p>
             {!draftStore.recoveryAvailable ? <p className="storageWarning">Reload recovery is unavailable. Drafts remain in memory while this page stays open.</p> : null}
             <p aria-live="polite">{draftMessage}</p>
           </div>
-          {diffView === "priority" ? <PriorityStrip onSelect={(tier) => { setSelectedTier(tier); setPriorityNavigatorOpen(false); }} priority={priority} selectedTier={selectedTier} /> : null}
+          {diffView === "priority" ? <PriorityStrip onSelect={(tier) => { setSelectedTier(tier); setFileNavigatorOpen(false); }} priority={priority} selectedTier={selectedTier} /> : null}
           {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
             <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
             <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
@@ -1283,11 +1281,10 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
               </div>
             ))}
           </section> : null}
-          {diffView === "priority" && priority.status !== "completed" ? <div aria-live="polite" className="priorityMessage"><h2>{priorityStatusText(priority)}</h2><button className="quietButton" onClick={() => selectDiffView("files")} type="button">Review all files</button></div> : <div className="diffLayout">
-            <nav aria-label="Changed files" className="diffFileList">
-            {diffView === "priority" ? <><button aria-expanded={priorityNavigatorOpen} className="priorityNavigatorToggle" onClick={() => setPriorityNavigatorOpen((open) => !open)} type="button">{visibleIndexes.length} {tierDetails.name.toLowerCase()} files <span aria-hidden="true">{priorityNavigatorOpen ? "▴" : "⌄"}</span></button><div className="priorityNavigatorHeading"><strong>{selectedTier} {tierDetails.name}</strong><p>{visibleIndexes.length} of {state.data.fileCount} files</p></div></> : <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>}
+          {diffView === "priority" && priority.status !== "completed" ? <div aria-live="polite" className="priorityMessage"><h2>{priorityStatusText(priority)}</h2><button className="quietButton" onClick={() => selectDiffView("files")} type="button">Review all files</button></div> : <div className={`diffLayout${fileNavigatorOpen ? " withNavigator" : ""}`}>
+            <nav aria-label="Changed files" className="diffFileList" hidden={!fileNavigatorOpen} id="review-file-navigator">
               {diffView !== "grouped" ? (
-                <ul className={diffView === "priority" && !priorityNavigatorOpen ? "priorityNavigatorCollapsed" : ""}>{visibleIndexes.map((index) => { const file = state.data.files[index]!; return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>; })}</ul>
+                <ul>{visibleIndexes.map((index) => { const file = state.data.files[index]!; return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>; })}</ul>
               ) : (
                 <ul className="diffGroupedFileList">{state.data.groups.map((group, groupIndex) => (
                   <li key={`${group.name}-${groupIndex}`}>
@@ -1301,7 +1298,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
               )}
             </nav>
             <section aria-label="File diffs" className="diffFiles">
-              {diffView === "priority" ? <><div className="priorityHeading"><h2>{selectedTier} {tierDetails.name}</h2><p>{tierDetails.description}</p></div>{priority.result?.evidence.length ? <p className="priorityEvidence">Some evidence is incomplete or unavailable. See Details above.</p> : null}{visibleIndexes.length === 0 ? <div className="priorityEmpty"><h3>No {tierDetails.name.toLowerCase()} files</h3><p>{state.data.fileCount} files were classified. Choose another tier to continue.</p>{selectedTier === 5 ? <button className="quietButton" onClick={() => setSelectedTier(4)} type="button">Review tier 4</button> : null}</div> : null}</> : null}
+              {diffView === "priority" ? <>{priority.result?.evidence.length ? <p className="priorityEvidence">Some evidence is incomplete or unavailable. See Details above.</p> : null}{visibleIndexes.length === 0 ? <div className="priorityEmpty"><h3>No {tierDetails.name.toLowerCase()} files</h3><p>{state.data.fileCount} files were classified. Choose another tier to continue.</p>{selectedTier === 5 ? <button className="quietButton" onClick={() => setSelectedTier(4)} type="button">Review tier 4</button> : null}</div> : null}</> : null}
               {state.data.status === "partial" ? <p className="diffNotice">GitHub limits this list to 3,000 changed files. <a href={item.url} rel="noreferrer" target="_blank">Open the pull request on GitHub</a> to see whether more files changed.</p> : null}
               {diffView !== "grouped" ? visibleIndexes.map((index) => { const file = state.data.files[index]!; return (
                 <DiffFile
@@ -1367,7 +1364,6 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
             ) : null}
             <div aria-label="Review and merge" className="reviewBar">
               <span className="reviewCount">{currentDrafts.length} {currentDrafts.length === 1 ? "comment" : "comments"} pending</span>
-              <span className="reviewCommit">against commit <span className="mono">{state.data.headSha}</span></span>
               <span className="reviewBarGrow" />
               {state.data.reviewEnabled ? <>
                 <label className="visuallyHidden" htmlFor="review-outcome">Review outcome</label>
@@ -1516,7 +1512,7 @@ function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraf
         <span className="diffPath">{file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}</span>
         <span className="diffCounts">+{file.additions} −{file.deletions}</span>
       </button>
-      {priority ? <p className="filePriorityReason"><strong>{priority.tier} {priorityTiers.find((tier) => tier.tier === priority.tier)?.name}</strong> {priority.reason}</p> : null}
+      {priority ? <p className="filePriorityReason">{priority.reason}</p> : null}
       {expanded ? <div className="diffBody">
         {file.patch.status === "unavailable" ? (
           <p className="diffNotice">{file.patch.reason === "patch_budget" ? "The 5 MiB patch limit was reached before this file." : "GitHub did not provide patch text for this file."} <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p>
@@ -1560,7 +1556,7 @@ function DiffLine({ drafts, editorOpen, line, onBeginDraft, onCancelDraft, onCre
   return <div className={`diffLineBlock ${line.kind}`}>
     <div className="diffLine">
       <span aria-hidden="true" className="diffMarker">{marker}</span>
-      {anchorLabel ? <button aria-label={`Draft comment on ${anchorLabel}`} className="lineCommentButton" onClick={onBeginDraft} type="button">Comment</button> : <span aria-hidden="true" />}
+      {anchorLabel ? <button aria-label={`Draft comment on ${anchorLabel}`} className="lineCommentButton" onClick={onBeginDraft} type="button"><span aria-hidden="true">+</span></button> : <span aria-hidden="true" />}
       <span className="visuallyHidden">{line.kind === "added" ? "Added line: " : line.kind === "removed" ? "Removed line: " : ""}</span>
       <span>{line.text}</span>
     </div>
@@ -1584,6 +1580,7 @@ function DraftEditor({ draft, onCancel, onDelete, onSave, onSaveBody }: {
     else onSaveBody?.(body);
   }}>
     <label>{label}<textarea autoFocus={!draft} maxLength={maxDraftBodyBytes} onChange={(event) => setBody(event.target.value)} rows={4} value={body} /></label>
+    <p className="draftHint">Drafts live in this tab only.</p>
     <div className="draftActions">
       <button type="submit">Save draft</button>
       {onCancel ? <button className="quietButton" onClick={onCancel} type="button">Cancel</button> : null}

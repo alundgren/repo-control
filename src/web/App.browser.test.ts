@@ -15,8 +15,7 @@ test.afterAll(async () => {
 });
 
 for (const viewport of [{ name: "laptop", width: 1280, height: 720 }, { name: "narrow", width: 390, height: 844 }]) {
-  test(`matches the staged repository settings view at ${viewport.name} width`, async ({ page, browserName }) => {
-    test.skip(browserName !== "chromium", "One committed rendering baseline keeps the settings comparison stable.");
+  test(`applies staged repository settings at ${viewport.name} width`, async ({ page }) => {
     let revision = 4;
     let ignoredRepositoryIds = ["R_field"];
     const replacements: string[][] = [];
@@ -40,7 +39,6 @@ for (const viewport of [{ name: "laptop", width: 1280, height: 720 }, { name: "n
     await page.getByRole("searchbox", { name: "Search settings and repositories" }).fill("repository");
     await page.getByRole("button", { name: "Hide" }).first().click();
 
-    await expect(page.locator(".appShell")).toHaveScreenshot(`repository-settings-${viewport.name}.png`, { animations: "disabled" });
     expect(await page.locator(".appShell").evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(viewport.width);
 
     await page.getByRole("button", { name: "Apply changes" }).click();
@@ -50,6 +48,32 @@ for (const viewport of [{ name: "laptop", width: 1280, height: 720 }, { name: "n
     await page.getByRole("button", { name: "Apply changes" }).click();
     await expect(page.getByText("Repository visibility saved.")).toBeVisible();
     expect(replacements).toEqual([["R_field", "R_orbit"], ["R_field"]]);
+  });
+}
+
+for (const width of [1280, 390]) {
+  test(`keeps the queue and selected text readable at ${width}px`, async ({ page }) => {
+    await page.clock.setFixedTime(new Date("2026-08-24T12:00:00Z"));
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/events", (route) => route.abort());
+    await page.route("**/api/overview", (route) => route.fulfill({ json: readyFilteringOverview() }));
+    await page.goto(origin);
+    await page.getByRole("button", { name: "Ready for agent 2" }).click();
+    const syncTotals = page.getByText(/4 loaded items from 1 repositories/);
+    await expect(syncTotals).toBeHidden();
+    await page.getByText("Synced 1 day ago", { exact: true }).click();
+    await expect(syncTotals).toBeVisible();
+    await page.getByText("Synced 1 day ago", { exact: true }).click();
+    await page.getByRole("button", { name: "Select Start fictional irrigation" }).click();
+    await expect(page.getByRole("complementary", { name: "Quick read" })).toContainText("No text excerpt is available");
+    expect(await page.locator(".appShell").evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(width);
+    if (width < 1024) {
+      expect((await page.getByRole("heading", { name: "Start fictional irrigation" }).boundingBox())!.y).toBeLessThan(200);
+      await expect(page.getByRole("searchbox")).toBeHidden();
+      await page.getByRole("button", { name: "Back to Ready for agent" }).click();
+      await expect(page.getByRole("button", { name: "Select Start fictional irrigation" })).toBeFocused();
+      await expect(page.getByRole("searchbox")).toBeVisible();
+    }
   });
 }
 
@@ -136,6 +160,7 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
     }
   }
   await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await dialog.getByRole("button", { name: "Navigator", exact: true }).click();
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
   let stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
   let fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);

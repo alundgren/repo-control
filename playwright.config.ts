@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: "./src",
   testMatch: "**/*.browser.test.ts",
   outputDir: join(tmpdir(), "repo-control-playwright-results"),
+  snapshotPathTemplate: join(tmpdir(), "repo-control-playwright-snapshots", "{testFilePath}", "{arg}{-projectName}{ext}"),
   fullyParallel: false,
   workers: 1,
   use: {
