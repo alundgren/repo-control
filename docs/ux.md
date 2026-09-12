@@ -223,3 +223,25 @@ and the opened panel returns to standard contrast. The open panel may cover
 more, but it never changes the artifact iframe's viewport or layout.
 Publisher-selected placement is bounded to six fixed positions because the
 isolated viewer cannot inspect artifact content for collisions.
+
+## Agent-assisted code review
+
+Ask agent opens a right drawer with Start guided review and a question composer.
+Typing starts freeform review; following a guide uses the same conversation.
+Guide steps and result locations open pinned source with an explanation directly
+below the code. Back preserves the diff's aspect, folds and scroll position.
+Selected diff lines are explicit removable composer context. The agent offers
+navigation; it never moves the review on its own.
+
+The drawer uses existing surface, field, divider, link and accent roles. Above
+800px it occupies 25rem beside code; below that width it uses the screen and
+opening a result returns to code. Explanations use the existing surface and an
+accent border. This adds no palette or font role. Missing evidence and partial
+text-search coverage remain visible through Evidence limits. The initial send
+screen discloses that source goes to the configured provider.
+
+The focused source view is an intentional addition to the PR review. It lets
+unchanged-file destinations and base-side excerpts use the same interaction as
+changed code, while keeping the original diff mounted for return navigation.
+See [PR exploration](pr-exploration.md) for the complete UI decisions, selection,
+focus and cancellation behavior and the reusable module boundaries.

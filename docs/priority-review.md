@@ -102,3 +102,11 @@ check is unavailable, scores are hidden until current state can be checked.
 Queued, running, final retry, failure, expiry, ineligibility, stale, and disabled
 states provide **Review all files**. There is no manual retry control that can
 exceed the lifetime limit.
+
+## Interactive exploration
+
+The configured connection also enables Ask agent in the PR review. Interactive
+conversations use a separate service and bounded requests; they do not change
+classification jobs or their retries. A question can send requested unchanged
+source as well as patch excerpts. The initial conversation screen discloses that
+scope. See [PR exploration](pr-exploration.md) for its protocol, limits and UI.

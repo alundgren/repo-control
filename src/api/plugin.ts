@@ -12,6 +12,7 @@ import { buildOverview, buildRepositoryVisibility, toItemRefreshResponse, toSync
 import type { PriorityService } from "../priority/index.js";
 
 export type ApiPluginOptions = {
+  explorationEngine?: import("../exploration/engine.js").ExplorationEngine;
   cache: Cache;
   syncService: SyncService;
   refreshService: ItemRefreshService;
@@ -26,7 +27,7 @@ export type ApiPluginOptions = {
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, eventHub, logEvent },
+  { cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, explorationEngine, eventHub, logEvent },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -164,7 +165,7 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
       const result = await diffClient.readPullRequestDiff({ repositoryNameWithOwner: repository.nameWithOwner, number: item.number });
       const priority = result.status !== "unavailable" && priorityService
         ? await priorityService.read(item.id, result.headSha) : { status: "disabled" };
-      return { ...result, priority, reviewEnabled: reviewService?.enabled ?? false, mergeEnabled: mergeService?.enabled ?? false };
+      return { ...result, priority, explorationEnabled: Boolean(explorationEngine), reviewEnabled: reviewService?.enabled ?? false, mergeEnabled: mergeService?.enabled ?? false };
     },
   );
 

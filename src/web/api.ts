@@ -72,7 +72,7 @@ export async function refreshItem(nodeId: string): Promise<ItemRefreshResponse> 
   return request<ItemRefreshResponse>(`/api/items/${encodeURIComponent(nodeId)}/refresh`, { method: "POST" });
 }
 
-export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean; mergeEnabled: boolean; priority?: PriorityRead };
+export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean; mergeEnabled: boolean; explorationEnabled?: boolean; priority?: PriorityRead };
 
 export async function getPullRequestPriority(nodeId: string, headSha: string): Promise<PriorityRead> {
   try { return await request<PriorityRead>(`/api/items/${encodeURIComponent(nodeId)}/priority?headSha=${encodeURIComponent(headSha)}`); }

@@ -175,10 +175,10 @@ const PULL_REQUEST_FILE_PAGE_SIZE = 100;
 async function readPullRequestDiff(
   fetch: Fetch,
   token: string,
-  { repositoryNameWithOwner, number }: { repositoryNameWithOwner: string; number: number },
+  { repositoryNameWithOwner, number, signal }: { repositoryNameWithOwner: string; number: number; signal?: AbortSignal },
 ): Promise<Exclude<PullRequestDiffRead, { status: "unavailable" }>> {
   const base = pullRequestRestUrl({ repositoryNameWithOwner, number });
-  const pullRequest = await readRestJson(fetch, token, base);
+  const pullRequest = await readRestJson(fetch, token, base, signal);
   const headSha = parsePullRequestHead(pullRequest.payload);
 
   const files: PullRequestDiffFile[] = [];
@@ -187,7 +187,8 @@ async function readPullRequestDiff(
   let latestRateLimit = pullRequest.rateLimit;
   const maximumPages = PULL_REQUEST_FILE_LIMIT / PULL_REQUEST_FILE_PAGE_SIZE;
   for (let page = 1; page <= maximumPages; page += 1) {
-    const result = await readRestJson(fetch, token, `${base}/files?per_page=${PULL_REQUEST_FILE_PAGE_SIZE}&page=${page}`);
+    signal?.throwIfAborted();
+    const result = await readRestJson(fetch, token, `${base}/files?per_page=${PULL_REQUEST_FILE_PAGE_SIZE}&page=${page}`, signal);
     latestRateLimit = result.rateLimit;
     if (!Array.isArray(result.payload)) throw new WorkReadFailure("invalid_response");
     for (const value of result.payload) {
@@ -233,11 +234,12 @@ function parsePullRequestHead(payload: unknown): string {
   return payload.head.sha;
 }
 
-async function readRestJson(fetch: Fetch, token: string, url: string): Promise<{ payload: unknown; rateLimit: GitHubRateLimit }> {
+async function readRestJson(fetch: Fetch, token: string, url: string, signal?: AbortSignal): Promise<{ payload: unknown; rateLimit: GitHubRateLimit }> {
   let response: Response;
   try {
     response = await fetchWithTimeout(fetch, url, {
       method: "GET",
+      signal,
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${token}`,
@@ -603,7 +605,7 @@ async function fetchWithTimeout(fetch: Fetch, input: string, init: RequestInit) 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), GITHUB_REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    return await fetch(input, { ...init, signal: init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
   } finally {
     clearTimeout(timeout);
   }

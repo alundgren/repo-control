@@ -49,7 +49,7 @@ export type GitHubReadClient = {
   readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;
   readPullRequestHead(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestHeadRead>;
   readPullRequestMergeFacts(input: { pullRequestId: string }): Promise<PullRequestMergeFactsRead>;
-  readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestDiffRead>;
+  readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number; signal?: AbortSignal }): Promise<PullRequestDiffRead>;
   readPullRequestPriorityContext(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestPriorityContextRead>;
   readRepositoryPolicy(input: { repositoryNameWithOwner: string; headSha: string }): Promise<RepositoryPolicyRead>;
 };
