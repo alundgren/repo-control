@@ -16,7 +16,7 @@ public artifact viewer.
 | --- | --- | --- |
 | Now and queues | Choose work from titles, recency, blockers, and change facts. | Compact navigation, search, and sync status. Facts are plain text, not pills. |
 | Quick read | Read the selected item's text and relationships. | One identity line, review and GitHub actions, then freshness and refresh. |
-| Pull request review | Inspect code in the chosen aspect and write line comments. | File navigation opens on request. One compact header and review bar stay available. |
+| Pull request review | Inspect code in the chosen aspect. | File navigation opens on request. A compact header contains the aspect dropdown and merge action. |
 | AI priority | Read files in the selected tier and their reasons. | Tier controls carry selection and counts. Details explains the tier and classification. |
 | Settings | Find a repository and change its visibility. | Staged changes and queue impact appear when there is a change to apply. |
 | Public artifact | Read or interact with the artifact at full viewport size. | The small Share control opens sharing tools on request. |
@@ -66,12 +66,10 @@ reducing the prose size.
 
 ## Components
 
-- AI priority review aspect: a five-tier strip beside the existing Grouped and
-  Files aspects filters both navigation and actual file diffs. Every fresh entry
+- AI priority review aspect: a five-tier strip selected through the review aspect dropdown filters both navigation and actual file diffs. Every fresh entry
   starts at 5 Critical. Counts stay visible, including zero, and lower tiers
-  select an exact tier. The first available patch opens, with reasons visible
-  below every file heading even when folded. The existing comment and review
-  controls remain available across aspect changes.
+  select an exact tier. All files start expanded. Reasons appear beside filenames in secondary prose,
+  separated by spacing and a divider, and wrap when needed.
 - Priority status and Details: a quiet current-head indicator uses the existing
   success role. Details contains enqueue and attempt information plus incomplete
   evidence. Waiting, failed, expired, ineligible, stale, and unavailable states
@@ -146,74 +144,26 @@ reducing the prose size.
   Account sync, focused refresh, and live updates clear a Ready selection when
   the issue becomes claimed or blocked, then announce the reason. The Ready
   count and Now preview update with the row.
-- Pull-request diff overlay: a selected pull request opens a full-viewport
-  modal above the mounted queue. On laptop screens, its single-row sticky
-  header is at most 3.5rem high and keeps the repository, pull request, head
-  commit, change totals, Navigator and aspect controls, pending-comment count,
-  conditional Discard all action, and close action together. Long titles
-  truncate in that row; the title disclosure shows the complete text to
-  keyboard and pointer users. On narrow screens, the same header uses compact
-  title, head-commit, and control lines so every action remains reachable
-  without horizontal page scrolling. Grouped is selected on open. A persistent bottom review bar keeps
-  the current-head comment count, review outcome, submit action, merge
-  action, and merge readiness in one place. The commit stays in the header and
-  submission confirmation. File navigation starts closed to give code the full
-  width, and Navigator opens a compact column or an inline list at narrow widths.
-  File headers use one quiet background without a surrounding border or rounded
-  card. Group headings are small navigation cues. A plus button beside each
-  commentable line opens its editor and retains a descriptive accessible name.
-  The tab-only draft reminder appears in the editor. The optional review summary opens
-  above that bar as the explicit submission confirmation step. The server
-  assigns every file to one group from its path and filename. Category groups
-  precede directory groups. Generated group labels are lowercase when every
-  changed path is lowercase and otherwise start with an uppercase letter. Each
-  view keeps its own scroll position and per-file fold state. The
-  first file with patch text starts unfolded while every other file starts folded.
-  The close control and Escape return to the exact queue state and opening
-  control. Each comment form belongs to a path, line, old or new side, and the
-  displayed head SHA. Saved forms appear with their line in both Grouped and
-  Files, while a live pending count stays in the overlay controls. Drafts are
-  limited to 100 per pull request and head SHA, 16 KiB of UTF-8 text per body,
-  and 1 MiB of serialized draft data across the tab. A rejected addition or edit
-  leaves saved drafts unchanged and explains which limit was reached. Drafts
-  live in the current browser tab and use session storage for same-tab reloads.
-  If storage is unavailable or a write fails, the form keeps working in memory
-  and warns that reload recovery is unavailable. Drafts saved against an earlier
-  head SHA remain in a separate stale section where their text can be copied or
-  discarded. Closing the overlay and switching arrangements never clears,
-  moves, or duplicates them. Each draft has its own discard action, and Discard
-  all immediately removes every current and stale draft for that pull request.
-  When the operator enables review submission, the review bar
-  lets the person choose Comment, Approve, or Request changes and add an optional
-  summary. The submit control states how many comments belong to the displayed
-  head and asks for confirmation before contacting GitHub. Comment and Request
-  changes require a summary or line comment. Approve may be empty. A changed
-  head, failed verification, or GitHub rejection keeps the drafts and explains
-  what stopped. An ambiguous response says `Submission outcome unknown`, keeps
-  the drafts, and links to GitHub for verification before any retry. Confirmed
-  success clears only drafts for the submitted head, runs a focused refresh,
-  and keeps the overlay open. If the saved reload copy cannot be confirmed as
-  removed, the result warns that the review was submitted and must not be
-  retried. Merge remains a separate danger-marked action within the review bar.
-  It reads current GitHub state when the overlay opens and shows checking,
-  pending checks, a named block, unavailable, or not-permitted text. If GitHub
-  is still calculating mergeability, Check again repeats the readiness read.
-  Network and mutation failures never retry automatically. Only a configured
-  and currently ready pull request gets a Merge control. Its first press slides
-  from a lock icon to a merge icon and arms the same control for three seconds.
-  A second press during that window starts a squash merge; an unused window
-  locks itself again. The nearby status states that Repo Control will not delete
-  the pull request branch. A moved head, permission denial,
-  policy rejection, or validation failure states that nothing was retried. An
-  ambiguous response sends the person to GitHub before another attempt.
-  Confirmed success silently discards every pending draft for the pull request
-  and closes the overlay while focused refresh and the item event remove the
-  pull request from the queue. If live updates removed the opening control, focus
-  returns to the queue heading. Added and removed rows use low-saturation tints derived from the
-  success and warning roles, plus visible `+` and `−` gutter markers so colour
-  is never the only distinction. Omitted, incomplete, and size-limited patches,
-  a partial file list, and a failed read each state what is missing and link to
-  GitHub.
+- Pull-request diff overlay: a full-viewport modal above the mounted queue.
+  The compact sticky header shows repository, PR number, title disclosure,
+  Navigator, and a styled native aspect dropdown. Grouped is selected on open.
+  Head hashes and change totals are omitted from the header. File navigation
+  starts closed. Every file starts expanded in every aspect, including files
+  with unavailable patches. Each aspect remembers its scroll and fold state.
+  File headings place short AI reasons beside the monospace filename in
+  secondary prose, separated by spacing and a divider, with wrapping on narrow
+  screens. Code scrolls horizontally within its patch; the page does not.
+  There are no comment editors, review submission controls, or bottom bar.
+  Close and Escape return to the queue and its opening control.
+  Merge sits at the upper right with space separating it from other controls.
+  It checks current GitHub readiness and preserves the reviewed head check.
+  The first press arms the button for three seconds, and a second press
+  performs a squash merge. Escape or timeout locks it again. Hover or keyboard
+  focus shows that the branch will be retained; the armed instruction and any
+  failure remain visible. Checking, blocked, unavailable, and ambiguous states
+  retain their explanations and recovery actions. Nothing retries automatically.
+  Confirmed merge closes the overlay. Missing, incomplete, and limited patches
+  retain their explanation and GitHub fallback.
 - Relationship facts: plain static mono text after status facts, a shortened
   epic title with its `closed/total` fraction on issue rows that belong to an
   epic (`Epic:` prefixes stripped before word-boundary truncation), and linked
