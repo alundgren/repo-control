@@ -33,12 +33,12 @@ async function open(page: Page, priority: PriorityRead = completed) {
   await page.goto(origin);
   await page.getByRole("button", { name: "Select Keep workspace events private" }).click();
   await page.getByRole("button", { name: "Review changed files" }).click();
-  await page.getByRole("button", { name: "AI priority", exact: true }).click();
+  await page.getByRole("combobox", { name: "Review aspect" }).selectOption("priority");
   return page.getByRole("dialog");
 }
 
 for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
-  test(`filters exact tiers and preserves real line-comment submission at ${viewport.width}px`, async ({ page }) => {
+  test(`filters exact tiers with expanded files and no comment controls at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const dialog = await open(page);
     await expect(dialog.getByRole("article")).toHaveCount(2);
@@ -56,29 +56,25 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await dialog.getByText("Details", { exact: true }).click();
     await expect(dialog.getByRole("button", { name: "5 Critical 2" })).toHaveAttribute("aria-pressed", "true");
     await expect(dialog.getByRole("button", { name: /src\/auth\/verify.ts/ })).toHaveAttribute("aria-expanded", "true");
-    await expect(dialog.getByRole("button", { name: /workspaceSecrets.ts/ })).toHaveAttribute("aria-expanded", "false");
+    await expect(dialog.getByRole("button", { name: /workspaceSecrets.ts/ })).toHaveAttribute("aria-expanded", "true");
     await expect(dialog.getByText("Checks changed behavior for file 2.", { exact: false })).toBeVisible();
     expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(viewport.width);
-    await dialog.getByRole("button", { name: "Draft comment on new line 1" }).click();
-    await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Check workspace ownership before acceptance.");
-    await dialog.getByRole("button", { name: "Save draft" }).click();
+    await expect(dialog.getByRole("button", { name: /Draft comment|Submit review/ })).toHaveCount(0);
     await dialog.getByRole("button", { name: "4 Important 1" }).click();
     await expect(dialog.getByRole("article")).toHaveCount(1);
     await expect(dialog.getByRole("button", { name: /applyWorkspaceDeliveryPolicy.ts/ })).toBeVisible();
-    await expect(dialog.getByText("1 comment pending", { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Files", exact: true }).click();
+    await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
     await expect(dialog.getByRole("article")).toHaveCount(6);
-    await dialog.getByRole("button", { name: "AI priority", exact: true }).click();
+    await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("priority");
     await expect(dialog.getByRole("button", { name: "5 Critical 2" })).toHaveAttribute("aria-pressed", "true");
-    const submissions: unknown[] = [];
+    const filename = dialog.locator(".diffFileLabel").first();
+    const pathBox = await filename.locator(".diffPath").boundingBox();
+    const reasonBox = await filename.locator(".filePriorityReason").boundingBox();
+    if (viewport.width > 700) expect(Math.abs(pathBox!.y - reasonBox!.y)).toBeLessThan(8);
     await dialog.getByRole("button", { name: /src\/auth\/verify.ts/ }).click();
-    await dialog.getByRole("button", { name: "Files", exact: true }).click();
-    await dialog.getByRole("button", { name: "AI priority", exact: true }).click();
-    await expect(dialog.getByRole("button", { name: /src\/auth\/verify.ts/ })).toHaveAttribute("aria-expanded", "true");
-    await page.route("**/api/items/PR_fixture/review", (route) => { submissions.push(route.request().postDataJSON()); return route.fulfill({ json: { status: "submitted", reviewUrl: null, refresh: { status: "failed" } } }); });
-    await dialog.getByRole("button", { name: "Submit review…", exact: true }).click();
-    await dialog.getByRole("button", { name: "Submit review", exact: true }).click();
-    expect(submissions).toEqual([{ expectedHeadSha: "abc123", event: "COMMENT", comments: [{ path: paths[0], line: 1, side: "RIGHT", body: "Check workspace ownership before acceptance." }] }]);
+    await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
+    await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("priority");
+    await expect(dialog.getByRole("button", { name: /src\/auth\/verify.ts/ })).toHaveAttribute("aria-expanded", "false");
   });
 }
 

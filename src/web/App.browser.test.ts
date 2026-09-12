@@ -95,21 +95,21 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   const dialog = page.getByRole("dialog", { name: "Fictional pull request 1" });
   const firstFile = dialog.getByRole("button", { name: /src\/example-1.ts/ });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Grouped" })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toHaveValue("grouped");
   await expect(firstFile).toHaveAttribute("aria-expanded", "true");
   await firstFile.click();
-  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
   await expect(firstFile).toHaveAttribute("aria-expanded", "true");
-  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("grouped");
   await expect(firstFile).toHaveAttribute("aria-expanded", "false");
 
   await dialog.evaluate((element) => { element.scrollTop = 300; });
-  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
   await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(0);
   await dialog.evaluate((element) => { element.scrollTop = 500; });
-  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("grouped");
   await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(300);
-  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
   await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(500);
   await page.getByRole("button", { name: "Close changed files" }).click();
 
@@ -125,10 +125,6 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   const title = "A fictional pull request with a long title that wraps across several lines on a narrow screen";
   const headSha = "abc123def4567890abc123def4567890abc123de";
   await page.setViewportSize({ width: 375, height: 700 });
-  await page.addInitScript(({ sha }) => {
-    const drafts = Array.from({ length: 100 }, (_, index) => ({ id: `draft-${index}`, path: `src/pending-${index}.ts`, line: 1, side: "RIGHT", body: `Draft ${index}` }));
-    window.sessionStorage.setItem(`repo-control:pull-request-drafts:PR_1:${sha}`, JSON.stringify({ pullRequestId: "PR_1", headSha: sha, drafts }));
-  }, { sha: headSha });
   await page.route("**/events", (route) => route.abort());
   await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
   await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: diff(headSha) }));
@@ -138,14 +134,8 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
   await page.getByRole("button", { name: "Review changed files" }).click();
   const dialog = page.getByRole("dialog", { name: title });
-  const lineComment = dialog.getByRole("button", { name: "Draft comment on new line 1" }).first();
-  const lineCommentBox = await lineComment.boundingBox();
-  expect(lineCommentBox).not.toBeNull();
-  expect(lineCommentBox!.x + lineCommentBox!.width).toBeLessThanOrEqual(375);
-  await expect(dialog.getByText("100 comments pending")).toBeVisible();
-  await expect(dialog.locator(".pendingChip")).toContainText("100 pending");
-  await expect(dialog.getByRole("button", { name: "Discard all" })).toBeVisible();
-  const headerParts = [".diffIdentity", ".diffHeadSha", ".diffTitleDisclosure > button", ".diffClose", ".diffViewControls", ".pendingChip", ".diffDiscardAll"];
+  await expect(dialog.getByRole("button", { name: /Draft comment|Submit review|Discard all/ })).toHaveCount(0);
+  const headerParts = [".diffIdentity", ".diffTitleDisclosure > button", ".diffClose", ".diffViewControls"];
   const boxes = await Promise.all(headerParts.map((selector) => dialog.locator(selector).boundingBox()));
   for (const box of boxes) {
     expect(box).not.toBeNull();
@@ -159,13 +149,13 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
       expect(overlap, `${headerParts[left]} overlaps ${headerParts[right]}`).toBe(false);
     }
   }
-  await dialog.getByRole("button", { name: "Files", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
   await dialog.getByRole("button", { name: "Navigator", exact: true }).click();
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
   let stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
   let fileTop = await dialog.getByRole("button", { name: /src\/example-30.ts/ }).evaluate((element) => element.getBoundingClientRect().top);
   expect(fileTop).toBeGreaterThanOrEqual(stickyBottom);
-  await dialog.getByRole("button", { name: "Grouped" }).click();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("grouped");
   await dialog.getByRole("link", { name: "src/example-30.ts", exact: true }).click();
 
   stickyBottom = await dialog.locator(".diffTop").evaluate((element) => element.getBoundingClientRect().bottom);
@@ -174,7 +164,7 @@ test("keeps a linked file below the sticky review controls at a narrow width", a
   expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
-test("keeps the review header compact and the review bar at the viewport bottom", async ({ page }) => {
+test("keeps the header compact with an isolated merge button and no bottom bar", async ({ page }) => {
   const title = "A fictional pull request title long enough to prove the compact laptop header truncates without hiding its controls";
   await page.route("**/events", (route) => route.abort());
   await page.route("**/api/overview", (route) => route.fulfill({ json: overview(title) }));
@@ -186,31 +176,34 @@ test("keeps the review header compact and the review bar at the viewport bottom"
   await page.getByRole("button", { name: `Select ${title}`, exact: true }).click();
   await page.getByRole("button", { name: "Review changed files" }).click();
   const dialog = page.getByRole("dialog", { name: title });
-  await dialog.getByRole("button", { name: "Draft comment on new line 1" }).first().click();
-  await dialog.getByRole("textbox", { name: "New draft comment" }).fill("Keep this fictional name.");
-  await dialog.getByRole("button", { name: "Save draft" }).click();
   const header = dialog.locator(".diffHeader");
-  const bar = dialog.getByLabel("Review and merge");
-
   await expect(header).toContainText("fictional-tools/garden · PR 1");
-  await expect(header).toContainText("abc123def456");
-  await expect(header).toContainText("30 files · +1 −1");
-  await expect(dialog.getByRole("button", { name: "Grouped" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Files", exact: true })).toBeVisible();
-  await expect(dialog.getByText("1 pending comment")).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Discard all" })).toBeVisible();
+  await expect(header).not.toContainText("abc123def456");
+  await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: /Draft comment|Submit review/ })).toHaveCount(0);
+  await expect(dialog.locator(".reviewDock")).toHaveCount(0);
+  await expect(dialog.locator(".diffFileToggle[aria-expanded=true]")).toHaveCount(30);
   const disclosure = dialog.getByRole("button", { name: "Show full pull request title" });
   await disclosure.focus();
   await disclosure.press("Enter");
   await expect(dialog.locator(".diffTitleDisclosure > p")).toBeVisible();
   await disclosure.press("Enter");
-  await expect(dialog.getByRole("button", { name: "Submit review…" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Unlock merge" })).toHaveText("Merge");
   expect((await dialog.locator(".diffTop").boundingBox())!.height).toBeLessThanOrEqual(56);
   expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(1280);
-  const barBox = (await bar.boundingBox())!;
-  expect(barBox.height).toBeLessThanOrEqual(80);
-  expect(Math.round(barBox.y + barBox.height)).toBe(720);
+  const mergeBox = (await dialog.getByRole("button", { name: "Unlock merge" }).boundingBox())!;
+  const closeBox = (await dialog.getByRole("button", { name: "Close changed files" }).boundingBox())!;
+  expect(mergeBox.y).toBeLessThan(56);
+  expect(closeBox.x - mergeBox.x - mergeBox.width).toBeGreaterThanOrEqual(24);
+  await dialog.getByRole("button", { name: "Unlock merge" }).click();
+  await expect(dialog.getByText("Press Merge again within 3 seconds.", { exact: false })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(dialog.getByRole("button", { name: "Unlock merge" })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Unlock merge" })).toBeVisible();
+  expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(390);
+
 });
 
 test("filters Ready work, discovers hidden issues, and clears a selection after focused refresh", async ({ page }) => {
