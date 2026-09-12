@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OverviewResponse } from "../api/read-models.js";
 import { App } from "./App.js";
 
+vi.mock("./api.js", async (importOriginal) => ({ ...await importOriginal<typeof import("./api.js")>(), getIssueBody: vi.fn().mockResolvedValue({ status: "read", body: null }) }));
+
 describe("work queue overview", () => {
   afterEach(() => {
     cleanup();
@@ -58,7 +60,7 @@ describe("work queue overview", () => {
     expect(screen.queryByText("Current work")).toBeNull();
   });
 
-  it("keeps quick read as the shell's third column", async () => {
+  it("gives the work queue the remaining shell width", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(readyOverview())));
 
     render(<App />);
@@ -69,7 +71,6 @@ describe("work queue overview", () => {
     expect(Array.from(shell.children).map((child) => child.getAttribute("aria-label"))).toEqual([
       null,
       "Work queues",
-      "Quick read",
     ]);
   });
 
@@ -366,6 +367,7 @@ describe("work queue overview", () => {
 
     render(<App />);
     await user.click(await screen.findByRole("button", { name: "Select Add a fictional seed" }));
+    await user.click(screen.getByRole("button", { name: "Close issue" }));
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.type(await screen.findByRole("searchbox", { name: "Search settings and repositories" }), "garden");
     await user.click(screen.getByRole("button", { name: "Hide" }));
@@ -575,24 +577,15 @@ describe("work queue overview", () => {
     ]);
   });
 
-  it("removes a pull request from Now and the PR list when refresh reports a draft", async () => {
-    const user = userEvent.setup();
+  it("removes a draft pull request from Now and the PR list after a live update", async () => {
     const overview = readyOverview();
-    vi.stubGlobal("fetch", vi.fn()
-      .mockResolvedValueOnce(response(overview))
-      .mockResolvedValueOnce(response({
-        status: "updated",
-        item: { ...overview.pullRequests[0]!, isDraft: true },
-        fetchedAt: "2026-08-23T11:00:00.000Z",
-        relationshipStatus: "fresh",
-      })));
-
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
+    vi.stubGlobal("EventSource", TestEventSource);
     render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
-
+    await screen.findByText("Keep fictional paths tidy");
+    act(() => TestEventSource.last?.emit({ type: "updated", item: { ...overview.pullRequests[0]!, isDraft: true }, repositories: overview.repositories, scope: overview.scope }));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Select Keep fictional paths tidy" })).toBeNull());
-    await user.click(screen.getByRole("button", { name: "Pull requests 0" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pull requests 0" }));
     expect(screen.queryByRole("button", { name: "Select Keep fictional paths tidy" })).toBeNull();
   });
 
@@ -676,7 +669,7 @@ describe("work queue overview", () => {
 
     expect(await screen.findByText("This issue left Ready for agent because it is claimed.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     const search = screen.getByRole("searchbox", { name: "Filter pull requests and issues" });
     await user.type(search, "fictional seed");
     expect(screen.getByText("Hidden from Ready: claimed")).toBeTruthy();
@@ -760,31 +753,19 @@ describe("work queue overview", () => {
     expect(screen.getByText("Add a fictional seed")).toBeTruthy();
   });
 
-  it("selects one row at a time while keeping the work list and quick read visible", async () => {
+  it("opens an issue above the mounted queue and returns to its row", async () => {
     const user = userEvent.setup();
-    const overview = readyOverview();
-    overview.queues[0]!.issues = [
-      { ...issue({ id: "I_1", number: 22, title: "Add a fictional seed" }), excerpt: "Use <strong>plain text</strong>, not rendered markup." },
-      { ...issue({ id: "I_2", number: 23, title: "Review fictional moss" }), excerpt: "Second item context." },
-    ];
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(overview)));
-
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(readyOverview())));
     render(<App />);
-
-    await screen.findByText("Add a fictional seed");
-    await user.click(screen.getByRole("button", { name: "Ready for agent 2" }));
-    const firstRow = screen.getByRole("button", { name: "Select Add a fictional seed" });
-    await user.click(firstRow);
-
-    expect(screen.getByText("Use <strong>plain text</strong>, not rendered markup.")).toBeTruthy();
-    expect(screen.queryByRole("strong")).toBeNull();
-    expect(screen.getByText("Review fictional moss")).toBeTruthy();
-    expect(firstRow.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("link", { name: "Open on GitHub" })).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Select Review fictional moss" }));
-    expect(screen.queryByText("Use <strong>plain text</strong>, not rendered markup.")).toBeNull();
-    expect(screen.getByText("Second item context.")).toBeTruthy();
+    const row = await screen.findByRole("button", { name: "Select Add a fictional seed" });
+    await user.click(row);
+    expect(await screen.findByRole("dialog", { name: "Add a fictional seed" })).toBeTruthy();
+    expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true);
+    expect(await screen.findByText("No description provided.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub ↗" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(row));
   });
 
   it("opens, folds, unfolds, and closes a pull-request diff while restoring focus", async () => {
@@ -810,8 +791,7 @@ describe("work queue overview", () => {
 
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
-    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    const opener = screen.getByRole("button", { name: "Review changed files" });
+    const opener = screen.getByRole("button", { name: "Select Keep fictional paths tidy" });
     opener.focus();
     await user.click(opener);
 
@@ -875,13 +855,12 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     expect(await screen.findByText(/GitHub limits this list to 3,000 changed files/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open the pull request on GitHub" })).toBeTruthy();
     expect(screen.getByText("This patch may be incomplete because its lines do not match GitHub's file totals.")).toBeTruthy();
     expect(screen.getByText("The 5 MiB patch limit was reached before this file.")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Close changed files" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     expect(await screen.findByText("Changed files could not be loaded.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open this pull request on GitHub" })).toBeTruthy();
   });
@@ -895,7 +874,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     expect(await screen.findByRole("dialog", { name: "Keep fictional paths tidy" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Submit review" })).toBeNull();
   });
@@ -915,7 +893,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
     const mergeSection = mergeButton.closest("section");
     expect(mergeSection).not.toBeNull();
@@ -938,7 +915,7 @@ describe("work queue overview", () => {
     expect(url).toBe("/api/items/PR_1/merge");
     expect(request).toMatchObject({ method: "POST" });
     expect(JSON.parse(String(request.body))).toEqual({ expectedHeadSha: "abc123def456" });
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
+    await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     expect(await screen.findByRole("combobox", { name: "Review aspect" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Drafts from an earlier head commit" })).toBeNull();
     TestEventSource.last?.emit({ type: "removed", nodeId: "PR_1", itemType: "pull_request", number: 41, reason: "pull_request_merged", scope: readyOverview().scope });
@@ -955,7 +932,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     fireEvent.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    fireEvent.click(screen.getByRole("button", { name: "Review changed files" }));
     const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
 
     await waitFor(() => expect((mergeButton as HTMLButtonElement).disabled).toBe(false));
@@ -981,7 +957,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
 
     expect(await screen.findByText("The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.")).toBeTruthy();
     expect((screen.getByRole("button", { name: "Unlock merge" }) as HTMLButtonElement).disabled).toBe(true);
@@ -999,7 +974,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     await screen.findByRole("button", { name: "Unlock merge" });
     expect(document.getElementById("merge-status")).toBeNull();
     await user.hover(screen.getByRole("button", { name: "Unlock merge" }));
@@ -1020,7 +994,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     await user.click(await screen.findByRole("button", { name: "Check again" }));
 
     expect(await screen.findByRole("button", { name: "Unlock merge" })).toBeTruthy();
@@ -1039,7 +1012,6 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
-    await user.click(screen.getByRole("button", { name: "Review changed files" }));
     await user.click(await screen.findByRole("button", { name: "Unlock merge" }));
     await user.click(screen.getByRole("button", { name: "Confirm merge" }));
 
@@ -1074,7 +1046,7 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Refresh this item" }));
 
     expect(await screen.findByText("Item refreshed and moved to Needs me.")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Needs me 2" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Select Add a fictional seed" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Needs me 2" }));
@@ -1156,7 +1128,7 @@ describe("work queue overview", () => {
 
     expect(await screen.findByText("This issue left Ready for agent because it has an open blocker.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Ready for agent 1" })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item to read" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("announces unselected removals and distinguishes a search exit from a queue move", async () => {
@@ -1180,7 +1152,7 @@ describe("work queue overview", () => {
     expect(await screen.findByText("Item refreshed and no longer matches this search.")).toBeTruthy();
   });
 
-  it("gives epics their own navigation, list, quick read, and Now preview", async () => {
+  it("gives epics their own navigation, list, issue window, and Now preview", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();
     overview.queues[0]!.issues = [issue({ id: "I_1", number: 22, title: "Add a fictional seed" })];
@@ -1211,8 +1183,9 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Select Epic: offline sync" }));
     expect(await screen.findByRole("heading", { name: "Epic: offline sync" })).toBeTruthy();
     expect(screen.getByText("5 of 14 children closed.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open on GitHub" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "GitHub ↗" })).toBeTruthy();
 
+    await user.click(screen.getByRole("button", { name: "Close issue" }));
     await user.click(screen.getByRole("button", { name: "Now 8" }));
     const epicRows = within(screen.getByRole("region", { name: "Epics" })).getAllByRole("button", { name: /Select / });
     expect(epicRows.map((row) => row.getAttribute("aria-label"))).toEqual([

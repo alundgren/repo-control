@@ -28,6 +28,25 @@ describe("application server", () => {
     );
   });
 
+  it("reads full issue bodies on demand without changing cache or exposing hidden work", async () => {
+    const body = "## Description\n" + "Full issue text. ".repeat(100);
+    let reads = 0;
+    const { app, cache } = await buildApp({ issueBodyClient: { async readIssueBody() { reads++; return { status: "read", body }; } } });
+    cache.replaceActiveSnapshot(snapshot());
+    try {
+      const before = cache.getItem("I_issue_1");
+      const result = await app.inject({ method: "GET", url: "/api/items/I_issue_1/body" });
+      expect(result.json()).toEqual({ status: "read", body });
+      expect(result.headers["cache-control"]).toBe("no-store");
+      expect(cache.getItem("I_issue_1")).toEqual(before);
+      expect((await app.inject({ method: "GET", url: "/api/items/PR_1/body" })).statusCode).toBe(400);
+      expect((await app.inject({ method: "GET", url: "/api/items/missing/body" })).statusCode).toBe(404);
+      cache.replaceIgnoredRepositories(["R_repo_1"], 0);
+      expect((await app.inject({ method: "GET", url: "/api/items/I_issue_1/body" })).statusCode).toBe(409);
+      expect(reads).toBe(1);
+    } finally { await app.close(); }
+  });
+
   it("reports its health without exposing runtime details", async () => {
     const { app } = await buildApp();
 
@@ -624,7 +643,7 @@ describe("application server", () => {
     });
   });
 
-  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "diffClient" | "reviewService" | "mergeService" | "eventHub" | "logEvent">> = {}) {
+  async function buildApp(overrides: Partial<Pick<AppOptions, "syncService" | "refreshService" | "logger" | "artifactService" | "issueBodyClient" | "diffClient" | "reviewService" | "mergeService" | "eventHub" | "logEvent">> = {}) {
     const webRoot = await createWebRoot();
     const dataDirectory = await mkdtemp(join(tmpdir(), "repo-control-data-"));
     temporaryDirectories.push(dataDirectory);
@@ -643,7 +662,7 @@ describe("application server", () => {
     };
 
     const diffClient = overrides.diffClient ?? { async readPullRequestDiff() { throw new Error("readPullRequestDiff should not be called in this test"); } };
-    const app = await createApp({ webRoot, cache, syncService, refreshService, diffClient, reviewService: overrides.reviewService, mergeService: overrides.mergeService, logger: overrides.logger, artifactService: overrides.artifactService, eventHub: overrides.eventHub, logEvent: overrides.logEvent });
+    const app = await createApp({ webRoot, cache, syncService, refreshService, issueBodyClient: overrides.issueBodyClient, diffClient, reviewService: overrides.reviewService, mergeService: overrides.mergeService, logger: overrides.logger, artifactService: overrides.artifactService, eventHub: overrides.eventHub, logEvent: overrides.logEvent });
     return { app, cache };
   }
 

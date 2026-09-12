@@ -92,6 +92,14 @@ export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.
         return unavailableRead(error);
       }
     },
+    async readIssueBody({ nodeId }) {
+      try {
+        const data = await readWorkGraphQL(fetch, token, "IssueBody", `query IssueBody($id: ID!) { node(id: $id) { __typename ... on Issue { id body } } }`, { id: nodeId });
+        if (!isObject(data.node) || data.node.__typename !== "Issue" || data.node.id !== nodeId
+          || (data.node.body !== null && typeof data.node.body !== "string")) throw new WorkReadFailure("invalid_response");
+        return { status: "read", body: data.node.body };
+      } catch (error) { return unavailableRead(error); }
+    },
     async readFocusedItem({ nodeId }): Promise<FocusedItemRead> {
       try {
         const data = await readWorkGraphQL(fetch, token, "FocusedWorkItem", FOCUSED_ITEM_QUERY, { id: nodeId });
