@@ -919,6 +919,9 @@ describe("work queue overview", () => {
     const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
     const mergeSection = mergeButton.closest("section");
     expect(mergeSection).not.toBeNull();
+    await user.hover(mergeButton);
+    expect(document.getElementById("merge-status")).toBeNull();
+    expect(mergeButton.getAttribute("title")).toBeNull();
     expect(within(mergeSection!).getByRole("heading", { name: "Merge pull request" })).toBeTruthy();
     expect(within(mergeSection!).queryByRole("heading", { name: "Submit review" })).toBeNull();
 
@@ -955,6 +958,7 @@ describe("work queue overview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review changed files" }));
     const mergeButton = await screen.findByRole("button", { name: "Unlock merge" });
 
+    await waitFor(() => expect((mergeButton as HTMLButtonElement).disabled).toBe(false));
     vi.useFakeTimers();
     fireEvent.click(mergeButton);
     expect(screen.getByRole("button", { name: "Confirm merge" })).toBeTruthy();
@@ -980,24 +984,27 @@ describe("work queue overview", () => {
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
 
     expect(await screen.findByText("The pull request changed or was no longer ready. Nothing was merged. Close and reopen the review to inspect current state.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Unlock merge" }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("does not offer merge while checks are pending", async () => {
+  it.each([null, { status: "checks_pending" }, { status: "blocked", reason: "conflicts" }, { status: "unavailable" }, { status: "not_permitted" }])("disables merge without a popup for %j", async (readiness) => {
     const user = userEvent.setup();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(readyOverview()))
       .mockResolvedValueOnce(response({ ...draftDiff(), mergeEnabled: true }))
-      .mockResolvedValueOnce(response({ status: "checks_pending" }));
+      .mockImplementationOnce(() => readiness === null ? new Promise(() => {}) : Promise.resolve(response(readiness)));
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
     await user.click(screen.getByRole("button", { name: "Review changed files" }));
-    expect(await screen.findByText("Required checks are still running.")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
+    await screen.findByRole("button", { name: "Unlock merge" });
+    expect(document.getElementById("merge-status")).toBeNull();
+    await user.hover(screen.getByRole("button", { name: "Unlock merge" }));
+    expect(document.getElementById("merge-status")).toBeNull();
+    expect((screen.getByRole("button", { name: "Unlock merge" }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -1038,7 +1045,7 @@ describe("work queue overview", () => {
 
     expect(await screen.findByText("Merge outcome unknown.")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Verify on GitHub before trying again." })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Unlock merge" })).toBeNull();
+    expect((screen.getByRole("button", { name: "Unlock merge" }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
