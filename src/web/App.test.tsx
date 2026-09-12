@@ -574,6 +574,27 @@ describe("work queue overview", () => {
     ]);
   });
 
+  it("removes a pull request from Now and the PR list when refresh reports a draft", async () => {
+    const user = userEvent.setup();
+    const overview = readyOverview();
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(response(overview))
+      .mockResolvedValueOnce(response({
+        status: "updated",
+        item: { ...overview.pullRequests[0]!, isDraft: true },
+        fetchedAt: "2026-08-23T11:00:00.000Z",
+        relationshipStatus: "fresh",
+      })));
+
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(screen.getByRole("button", { name: "Refresh this item" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Select Keep fictional paths tidy" })).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Pull requests 0" }));
+    expect(screen.queryByRole("button", { name: "Select Keep fictional paths tidy" })).toBeNull();
+  });
+
   it("keeps an already-hidden Ready search result selected after focused refresh", async () => {
     const user = userEvent.setup();
     const overview = readyOverview();
