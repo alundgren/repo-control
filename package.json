@@ -13,8 +13,8 @@
     "build": "tsc --noEmit && vite build && tsc --project tsconfig.server.json",
     "lint": "eslint .",
     "start": "node dist/server/main.js",
-    "test": "vitest run --reporter=dot --exclude '**/*.browser.test.ts' && playwright test --reporter=line",
-    "test:browser": "playwright test --reporter=line",
+    "test": "node scripts/run-tests.mjs",
+    "test:browser": "node scripts/run-tests.mjs browser",
     "test:focused": "node scripts/run-focused-test.mjs",
     "typecheck": "tsc --noEmit",
     "verify:container": "node scripts/verify-container.mjs"

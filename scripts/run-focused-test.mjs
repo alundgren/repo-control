@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { runTests } from "./run-tests.mjs";
 import path from "node:path";
 import process from "node:process";
 
@@ -34,28 +34,4 @@ if (!supportedTestPath.test(relativeSourcePath)) {
 }
 
 const isBrowserTest = relativeSourcePath.endsWith(".browser.test.ts");
-const runnerArguments = isBrowserTest
-  ? [
-      path.join(repositoryRoot, "node_modules", "@playwright", "test", "cli.js"),
-      "test",
-      relativeSourcePath,
-      "--reporter=line",
-    ]
-  : [
-      path.join(repositoryRoot, "node_modules", "vitest", "vitest.mjs"),
-      "run",
-      "--reporter=dot",
-      relativeSourcePath,
-    ];
-
-const result = spawnSync(
-  process.execPath,
-  runnerArguments,
-  { cwd: repositoryRoot, stdio: "inherit" },
-);
-
-if (result.error) {
-  throw result.error;
-}
-
-process.exitCode = result.status ?? 1;
+process.exitCode = runTests(isBrowserTest ? "browser" : "unit", relativeSourcePath);

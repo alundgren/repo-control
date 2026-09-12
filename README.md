@@ -72,6 +72,12 @@ corepack pnpm test:focused -- src/server/app.test.ts
 ```
 
 Run `corepack pnpm test` for the full test suite.
+The full, browser-only, and focused commands stay quiet until completion. A
+successful run prints one `PASS` summary. Failures print each failed test with
+a short error excerpt and the temporary directory containing full logs and JSON
+reports. The full suite runs both Vitest and Playwright even when Vitest fails.
+Use `corepack pnpm --silent test` to also hide pnpm's command banner. Wait for
+the command to finish; there is no progress log to poll.
 
 ## License
 
