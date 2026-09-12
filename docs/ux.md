@@ -119,6 +119,12 @@ reducing the prose size.
   An empty queue or search links back to Repository visibility.
 - Work queue: navigation and the work list occupy two desktop columns. The list
   uses the remaining width. There is no permanent detail panel.
+- Description review aspect: the existing review dropdown opens the full PR title
+  and safely rendered Markdown body with a corner GitHub link. Only confirmed
+  merge conflicts add an inline notice. The compact review header remains in place.
+- Overlay scrollbars: thin divider-colored thumbs on transparent tracks retain
+  scroll position and standard wheel, touch, and keyboard scrolling without a
+  bright native track. Document code and tables keep independent horizontal scrolling.
 - Issue reading window: clicking an issue or epic opens a centered inset modal
   above the mounted queue. A compact header keeps repository identity, GitHub
   link, and close available while the title and full Markdown body scroll.
@@ -151,7 +157,7 @@ reducing the prose size.
   count and Now preview update with the row.
 - Pull-request diff overlay: a full-viewport modal above the mounted queue.
   The compact sticky header shows repository, PR number, title disclosure,
-  Navigator, and a styled native aspect dropdown. Grouped is selected on open.
+  Navigator, and a styled native aspect dropdown. AI priority is selected on open at tier 5 Critical.
   Head hashes and change totals are omitted from the header. File navigation
   starts closed. Every file starts expanded in every aspect, including files
   with unavailable patches. Each aspect remembers its scroll and fold state.
@@ -204,12 +210,6 @@ sentences and Apply changes. This keeps the search task clear until there are
 consequences to review. Browser tests check laptop and narrow layouts through
 visibility, dimensions, and interactions. Screenshots used for manual inspection
 stay in temporary storage outside the checkout; image baselines are not committed.
-
-The right-hand quick-read area remains because it makes the queue a stable
-scan-and-read surface. At narrow widths, selection temporarily replaces the
-list, queue navigation, search, and sync header with the item text. The brand
-and Settings remain available. Back restores the queue and focuses the opening
-row. This keeps the selected title within the first 200 pixels of the viewport.
 
 The public viewer uses the system UI font stack instead of embedding IBM Plex.
 The viewer response must stay self-contained and its CSP permits no font

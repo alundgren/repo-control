@@ -94,6 +94,16 @@ for (const width of [1280, 390]) {
     expect(box.x + box.width).toBeLessThan(width);
     expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(Math.ceil(box.width));
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    const scroll = dialog.locator(".issueScroll");
+    expect(await scroll.evaluate((element) => getComputedStyle(element).scrollbarWidth)).toBe("thin");
+    expect(await scroll.evaluate((element) => getComputedStyle(element).scrollbarColor)).toContain("193, 175, 154");
+    await scroll.focus();
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await scroll.evaluate((element) => { element.scrollTop = 0; });
+    await scroll.hover();
+    await page.mouse.wheel(0, 300);
+    await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
     await page.screenshot({ path: `/tmp/issue-reading-window-${width}-${testInfo.project.name}.png` });
     await dialog.getByText("End of full body.").scrollIntoViewIfNeeded();
     await expect(dialog.getByRole("button", { name: "Close issue" })).toBeVisible();
@@ -119,7 +129,9 @@ test("restores queue view, selection, filter, and browser scroll after closing c
   const dialog = page.getByRole("dialog", { name: "Fictional pull request 10" });
   const firstFile = dialog.getByRole("button", { name: /src\/example-1.ts/ });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toHaveValue("grouped");
+  await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toHaveValue("priority");
+  await expect(dialog.getByRole("button", { name: "Review all files" })).toBeVisible();
+  await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("grouped");
   await expect(firstFile).toHaveAttribute("aria-expanded", "true");
   await firstFile.click();
   await dialog.getByRole("combobox", { name: "Review aspect" }).selectOption("files");
@@ -204,6 +216,7 @@ test("keeps the header compact with an isolated merge button and no bottom bar",
   await expect(dialog.getByRole("combobox", { name: "Review aspect" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Draft comment|Submit review/ })).toHaveCount(0);
   await expect(dialog.locator(".reviewDock")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Review all files" }).click();
   await expect(dialog.locator(".diffFileToggle[aria-expanded=true]")).toHaveCount(30);
   const disclosure = dialog.getByRole("button", { name: "Show full pull request title" });
   await disclosure.focus();
@@ -377,4 +390,49 @@ function diff(headSha = "abc123def456") {
     groups: [{ name: "src", fileIndexes: files.map((_, index) => index) }],
     rateLimit: { cost: 2, remaining: 4998, resetAt: "2026-08-24T12:00:00.000Z" },
   };
+}
+
+for (const width of [1280, 390]) {
+  test(`reads the PR Description inside the slim review at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 });
+    await page.route("**/events", (route) => route.abort());
+    await page.route("**/api/overview", (route) => route.fulfill({ json: overview() }));
+    await page.route("**/api/items/PR_1/diff", (route) => route.fulfill({ json: { ...diff(), mergeEnabled: true } }));
+    await page.route("**/api/items/PR_1/merge", (route) => route.fulfill({ json: { status: "blocked", reason: "conflicts" } }));
+    const body = "## Summary\n\nKeep **fictional preferences**.\n\n- [x] Saved\n\n| Setting | Value |\n| --- | --- |\n| Mode | Kept |\n\n```text\n" + "long-path/".repeat(40) + "\n```\n\n<script>alert(1)</script>\n\n[unsafe](javascript:alert)\n\n" + "More PR context. ".repeat(400) + "\n\nEnd of PR body.";
+    await page.route("**/api/items/PR_1/body", (route) => route.fulfill({ json: { status: "read", body } }));
+    await page.goto(origin);
+    const opener = page.getByRole("button", { name: "Select Fictional pull request 1", exact: true });
+    await opener.click();
+    const dialog = page.getByRole("dialog");
+    const aspect = dialog.getByRole("combobox", { name: "Review aspect" });
+    await expect(aspect).toHaveValue("priority");
+    await aspect.selectOption("description");
+    const description = dialog.getByRole("article", { name: "Pull request description" });
+    await expect(description.getByRole("heading", { name: "Fictional pull request 1" })).toBeVisible();
+    await expect(description.getByRole("heading", { name: "Summary" })).toBeVisible();
+    await expect(description.getByRole("table")).toBeVisible();
+    await expect(description.getByRole("checkbox")).toBeDisabled();
+    await expect(description.getByText("This pull request has merge conflicts.", { exact: false })).toBeVisible();
+    await expect(description.getByRole("link", { name: "GitHub ↗", exact: true })).toHaveAttribute("href", "https://github.test/fictional-tools/garden/pull/1");
+    await expect(description.locator("script")).toHaveCount(0);
+    expect(await description.getByText("unsafe", { exact: true }).getAttribute("href")).toBeFalsy();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((element) => element.scrollWidth)).toBeLessThanOrEqual(width);
+    expect(await dialog.evaluate((element) => getComputedStyle(element).scrollbarWidth)).toBe("thin");
+    await page.screenshot({ path: `/tmp/pr-description-${width}-${testInfo.project.name}.png` });
+    await dialog.hover();
+    await page.mouse.wheel(0, 400);
+    await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await dialog.evaluate((element) => { element.scrollTop = 400; });
+    await aspect.selectOption("priority");
+    await aspect.selectOption("description");
+    await expect.poll(() => dialog.evaluate((element) => element.scrollTop)).toBe(400);
+    await description.getByText("End of PR body.").scrollIntoViewIfNeeded();
+    await expect(dialog.getByRole("button", { name: "Close changed files" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(opener).toBeFocused();
+    await opener.click();
+    await expect(page.getByRole("combobox", { name: "Review aspect" })).toHaveValue("priority");
+  });
 }

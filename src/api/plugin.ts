@@ -15,7 +15,7 @@ export type ApiPluginOptions = {
   cache: Cache;
   syncService: SyncService;
   refreshService: ItemRefreshService;
-  issueBodyClient?: Pick<GitHubReadClient, "readIssueBody">;
+  itemBodyClient?: Pick<GitHubReadClient, "readItemBody">;
   diffClient: Pick<GitHubReadClient, "readPullRequestDiff">;
   reviewService?: ReviewSubmissionService;
   mergeService?: PullRequestMergeService;
@@ -26,7 +26,7 @@ export type ApiPluginOptions = {
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, issueBodyClient, diffClient, reviewService, mergeService, priorityService, eventHub, logEvent },
+  { cache, syncService, refreshService, itemBodyClient, diffClient, reviewService, mergeService, priorityService, eventHub, logEvent },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -138,8 +138,7 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
     const item = cache.getItem(request.params.nodeId);
     if (!item) return reply.code(404).send({ status: "unavailable" });
     if (cache.isRepositoryIgnored(item.repositoryId)) return reply.code(409).send({ status: "unavailable" });
-    if (item.type !== "issue") return reply.code(400).send({ status: "unavailable" });
-    const result = await issueBodyClient?.readIssueBody?.({ nodeId: item.id });
+    const result = await itemBodyClient?.readItemBody?.({ nodeId: item.id });
     if (cache.isRepositoryIgnored(item.repositoryId) || !cache.getItem(item.id)) return reply.code(409).send({ status: "unavailable" });
     return result?.status === "read" ? result : { status: "unavailable" };
   });

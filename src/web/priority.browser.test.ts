@@ -32,7 +32,7 @@ async function open(page: Page, priority: PriorityRead = completed) {
   await page.route("**/api/items/PR_fixture/priority?*", (route) => route.fulfill({ json: priority }));
   await page.goto(origin);
   await page.getByRole("button", { name: "Select Keep workspace events private" }).click();
-  await page.getByRole("combobox", { name: "Review aspect" }).selectOption("priority");
+  await expect(page.getByRole("combobox", { name: "Review aspect" })).toHaveValue("priority");
   return page.getByRole("dialog");
 }
 

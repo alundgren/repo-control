@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 
+import { ItemBody } from "./ItemBody.js";
 import { IssueOverlay } from "./IssueOverlay.js";
 
 import type { ApiItem, OverviewResponse } from "../api/read-models.js";
@@ -18,7 +19,7 @@ type DiffState =
   | { status: "loading" }
   | { status: "loaded"; data: Exclude<PullRequestDiffResponse, { status: "unavailable" }> }
   | { status: "failed" };
-type DiffView = "grouped" | "files" | "priority";
+type DiffView = "grouped" | "files" | "priority" | "description";
 type MergePanelState = MergeReadiness
   | { status: "merging"; headSha: string; sourceBranch: string }
   | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous" };
@@ -926,8 +927,8 @@ function DiffOverlay({ item, onClose, repository, state }: {
   const overlayRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0, priority: 0 });
-  const [diffView, setDiffView] = useState<DiffView>("grouped");
+  const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0, priority: 0, description: 0 });
+  const [diffView, setDiffView] = useState<DiffView>("priority");
   const [priority, setPriority] = useState<PriorityRead>({ status: "disabled" });
   const [selectedTier, setSelectedTier] = useState(5);
   const [fileNavigatorOpen, setFileNavigatorOpen] = useState(false);
@@ -939,6 +940,7 @@ function DiffOverlay({ item, onClose, repository, state }: {
     grouped: new Set(),
     files: new Set(),
     priority: new Set(),
+    description: new Set(),
   });
 
   useEffect(() => {
@@ -955,10 +957,12 @@ function DiffOverlay({ item, onClose, repository, state }: {
       grouped: new Set(indexes),
       files: new Set(indexes),
       priority: new Set(indexes),
+      description: new Set(),
     });
     setPriority(state.data.priority ?? { status: "disabled" });
-    scrollPositions.current = { grouped: 0, files: 0, priority: 0 };
-    setDiffView("grouped");
+    scrollPositions.current = { grouped: 0, files: 0, priority: 0, description: 0 };
+    setDiffView("priority");
+    setSelectedTier(5);
   }, [state]);
 
   useEffect(() => {
@@ -1006,7 +1010,8 @@ function DiffOverlay({ item, onClose, repository, state }: {
     if (nextView === diffView) return;
     if (overlayRef.current) scrollPositions.current[diffView] = overlayRef.current.scrollTop;
     setDiffView(nextView);
-    if (nextView === "priority") { setSelectedTier(5); setFileNavigatorOpen(false); }
+    if (nextView === "priority") setSelectedTier(5);
+    if (nextView === "priority" || nextView === "description") setFileNavigatorOpen(false);
   }
 
   function toggleFile(index: number) {
@@ -1082,11 +1087,12 @@ function DiffOverlay({ item, onClose, repository, state }: {
           </div>
           {state.status === "loaded" ? (
             <div aria-label="Changed file arrangement" className="diffViewControls">
-              <button aria-controls="review-file-navigator" aria-expanded={fileNavigatorOpen} onClick={() => setFileNavigatorOpen((open) => !open)} type="button">Navigator</button>
+              <button aria-controls="review-file-navigator" aria-expanded={fileNavigatorOpen} onClick={() => { if (diffView === "description") selectDiffView("files"); setFileNavigatorOpen((open) => !open); }} type="button">Navigator</button>
               <select aria-label="Review aspect" value={diffView} onChange={(event) => selectDiffView(event.target.value as DiffView)}>
                 <option value="grouped">Grouped</option>
                 <option value="files">Files</option>
                 <option value="priority">AI priority</option>
+                <option value="description">Description</option>
               </select>
             </div>
           ) : null}
@@ -1104,7 +1110,13 @@ function DiffOverlay({ item, onClose, repository, state }: {
       {state.status === "loaded" ? (
         <>
           {diffView === "priority" ? <PriorityStrip onSelect={(tier) => { setSelectedTier(tier); setFileNavigatorOpen(false); }} priority={priority} selectedTier={selectedTier} /> : null}
-          {diffView === "priority" && priority.status !== "completed" ? <div aria-live="polite" className="priorityMessage"><h2>{priorityStatusText(priority)}</h2><button className="quietButton" onClick={() => selectDiffView("files")} type="button">Review all files</button></div> : <div className={`diffLayout${fileNavigatorOpen ? " withNavigator" : ""}`}>
+          <article hidden={diffView !== "description"} className="issueDocument prDescription" aria-label="Pull request description">
+            <div className="descriptionLink"><a href={item.url} target="_blank" rel="noopener noreferrer">GitHub ↗</a></div>
+            <h1>{item.title}</h1>
+            {mergeState.status === "blocked" && mergeState.reason === "conflicts" ? <p className="descriptionConflict">This pull request has merge conflicts. <a href={item.url} target="_blank" rel="noopener noreferrer">Resolve on GitHub ↗</a></p> : null}
+            <ItemBody item={item} kind="pull request" active={diffView === "description"} />
+          </article>
+          {diffView === "description" ? null : diffView === "priority" && priority.status !== "completed" ? <div aria-live="polite" className="priorityMessage"><h2>{priorityStatusText(priority)}</h2><button className="quietButton" onClick={() => selectDiffView("files")} type="button">Review all files</button></div> : <div className={`diffLayout${fileNavigatorOpen ? " withNavigator" : ""}`}>
             <nav aria-label="Changed files" className="diffFileList" hidden={!fileNavigatorOpen} id="review-file-navigator">
               {diffView !== "grouped" ? (
                 <ul>{visibleIndexes.map((index) => { const file = state.data.files[index]!; return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>; })}</ul>
