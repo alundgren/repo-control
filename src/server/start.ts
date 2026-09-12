@@ -17,6 +17,9 @@ import {
 } from "../github/connection.js";
 import { createItemRefreshService } from "../refresh/index.js";
 import { createPullRequestMergeService } from "../merge/index.js";
+import { createPriorityService, type PriorityService } from "../priority/index.js";
+import { createPriorityClassifier, PriorityConfigurationError, readPriorityConfiguration } from "../priority/provider.js";
+import { openPriorityStore } from "../priority/store.js";
 import {
   createReviewSubmissionService,
   GitHubWriteActionsConfigurationError,
@@ -53,6 +56,7 @@ export async function startServer({
   logEvent,
 }: StartServerOptions) {
   const artifactConfiguration = readArtifactConfiguration(environment);
+  const priorityConfiguration = readPriorityConfiguration(environment);
   const writeActions = readGitHubWriteActions(environment);
   const configuration = readConnectionConfiguration(environment);
   const connection = await validateConnection(configuration, createGitHubClient(configuration.token));
@@ -73,15 +77,21 @@ export async function startServer({
     : undefined;
   const coordinator = createReconciliationCoordinator();
   const eventHub = createChangeEventHub();
+  let priorityService: PriorityService | undefined;
+  const priorityStore = priorityConfiguration ? openPriorityStore({ path: join(dataDirectory, "repo-control.sqlite") }) : null;
   const syncService = createSyncService({
     cache,
     client,
     coordinator,
     onComplete: () => deliveryStore.resolveManualReconciliation(new Date().toISOString()),
+    onUpdate: () => { priorityService?.discover(); eventHub.publish({ status: "projection_changed" }); },
     webhookProvisioner,
     logEvent,
   });
-  const refreshService = createItemRefreshService({ cache, client, coordinator, onChange: eventHub.publish, logEvent });
+  const refreshService = createItemRefreshService({ cache, client, coordinator, onChange: (change) => { eventHub.publish(change); priorityService?.discover(); }, logEvent });
+  if (priorityConfiguration && priorityStore) {
+    priorityService = createPriorityService({ cache, store: priorityStore, client, classify: createPriorityClassifier(priorityConfiguration), reconcile: () => syncService.sync() });
+  }
   const reviewService = createReviewSubmissionService({
     cache,
     readClient: client,
@@ -126,6 +136,7 @@ export async function startServer({
       diffClient: client,
       reviewService,
       mergeService,
+      priorityService,
       eventHub,
       logEvent,
       webhookService: webhookService ?? undefined,
@@ -133,12 +144,15 @@ export async function startServer({
     });
     app.addHook("onClose", async () => {
       if (webhookService) await webhookService.stop();
+      await priorityService?.stop();
+      priorityStore?.close();
       artifactService?.stop();
       deliveryStore.close();
       webhookProvisioningStore?.close();
       cache.close();
     });
     await app.listen({ host, port, listenTextResolver: () => "Server listening" });
+    priorityService?.start();
     if (webhookService) {
       void webhookService.start().catch(() => emitLogEvent(logEvent, {
         event: "webhook.worker.failed",
@@ -150,6 +164,8 @@ export async function startServer({
     return { app, connection };
   } catch (error) {
     if (webhookService) await webhookService.stop();
+    await priorityService?.stop();
+    priorityStore?.close();
     artifactService?.stop();
     deliveryStore.close();
     webhookProvisioningStore?.close();
@@ -182,12 +198,14 @@ export async function startApplication(
 }
 
 function startupFailureCode(error: unknown) {
+  if (error instanceof PriorityConfigurationError) return error.code;
   if (error instanceof ArtifactConfigurationError) return error.code;
   if (error instanceof GitHubWriteActionsConfigurationError) return error.code;
   return error instanceof ConnectionValidationError ? error.code : "authentication_failed";
 }
 
 export function startupFailureMessage(error: unknown) {
+  if (error instanceof PriorityConfigurationError) return error.message;
   if (error instanceof ArtifactConfigurationError) {
     return error.message;
   }

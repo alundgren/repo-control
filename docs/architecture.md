@@ -30,6 +30,7 @@ refresh operations rather than a generic GitHub GraphQL proxy.
 | Item refresh service | Fetches and replaces one pull request or issue, plus the relationship facts the detail needs. Direct requests stop for hidden repositories, while webhook reconciliation can update their cached work. |
 | Workflow classifier | Applies the installation's label-to-queue mapping, keeps epic-labelled issues out of every queue, and marks unknown labels for Triage. |
 | Pull-request file classifier | Assigns each on-demand changed file to an ordered category or its immediate parent directory from the new path alone. The browser receives the ordered groups and does not repeat the classification rules. |
+| PR priority service (`src/priority`) | Discovers ready PRs after sync and refresh, reserves at most two durable processing tries per PR, gathers bounded GitHub evidence, and makes one direct DigitalOcean request per try. It validates exact file coverage and hides stale results. The browser filters the existing diff and review controls by tier. |
 | Local cache | Stores normalized, private, view-serving facts and the last successful snapshot in persistent SQLite. It never becomes a second issue tracker or an archive. |
 | Query API | Gives the browser views of cached data and starts explicit refresh operations. |
 | Artifact service (`src/artifact`) | Validates the opt-in public origin and per-type HTML policy, stores byte-exact Archify documents, presentations, and mockups with a 1 GiB quota, publishes private uploads, serves an isolated public viewer and exact download, and deletes expired rows on its cleanup schedule. |
@@ -138,7 +139,9 @@ repository hook so the following explicit sync catches up that repository's
 earlier work. Every sync also reads child counts for all cached epics by node ID
 because GitHub does not advance an epic's issue timestamp when its children
 change. A full reconciliation also runs once the prior full one is 24 hours
-old. There is no background polling. The full pass removes open-cache entries that were
+old. When AI priority is configured, a five-minute timer runs this same
+single-flight reconciliation; otherwise sync remains manual or webhook-driven.
+The full pass removes open-cache entries that were
 closed, deleted, or became inaccessible. GitHub search exposes at most 1,000
 results per query, so a type that reaches that cap is recorded as partial rather
 than presented as a full inventory.

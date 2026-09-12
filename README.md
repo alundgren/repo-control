@@ -1,5 +1,8 @@
 # Repo Control
 
+Optional [AI file priorities](docs/priority-review.md) classify ready pull-request
+files through DigitalOcean and filter the existing diff review by importance.
+
 Operator documentation for publishing self-contained HTML artifacts is in
 [docs/artifacts.md](docs/artifacts.md).
 

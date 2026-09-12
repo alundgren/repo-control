@@ -9,6 +9,7 @@ import type { ReviewSubmissionInput, ReviewSubmissionService } from "../review/i
 import type { ChangeEventHub } from "../events/index.js";
 import { emitLogEvent, type LogEventSink } from "../observability/index.js";
 import { buildOverview, buildRepositoryVisibility, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
+import type { PriorityService } from "../priority/index.js";
 
 export type ApiPluginOptions = {
   cache: Cache;
@@ -17,13 +18,14 @@ export type ApiPluginOptions = {
   diffClient: Pick<GitHubReadClient, "readPullRequestDiff">;
   reviewService?: ReviewSubmissionService;
   mergeService?: PullRequestMergeService;
+  priorityService?: PriorityService;
   eventHub?: ChangeEventHub;
   logEvent?: LogEventSink;
 };
 
 export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
   app,
-  { cache, syncService, refreshService, diffClient, reviewService, mergeService, eventHub, logEvent },
+  { cache, syncService, refreshService, diffClient, reviewService, mergeService, priorityService, eventHub, logEvent },
 ) => {
   app.addHook("onSend", async (_request, reply, payload) => {
     reply.header("Cache-Control", "no-store");
@@ -97,6 +99,7 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
         return reply.code(400).send({ status: "invalid", error: { code: "unknown_repository" } });
       }
       const overview = buildOverview(cache);
+      priorityService?.discover();
       if (overview.status === "ready") {
         eventHub?.publish({
           status: "settings",
@@ -149,9 +152,15 @@ export const apiPlugin: FastifyPluginAsync<ApiPluginOptions> = async (
       const repository = cache.getActiveSnapshot()?.repositories.find((entry) => entry.id === item.repositoryId);
       if (!repository) return reply.code(404).send({ status: "error", error: { code: "not_found" } });
       const result = await diffClient.readPullRequestDiff({ repositoryNameWithOwner: repository.nameWithOwner, number: item.number });
-      return { ...result, reviewEnabled: reviewService?.enabled ?? false, mergeEnabled: mergeService?.enabled ?? false };
+      const priority = result.status !== "unavailable" && priorityService
+        ? await priorityService.read(item.id, result.headSha) : { status: "disabled" };
+      return { ...result, priority, reviewEnabled: reviewService?.enabled ?? false, mergeEnabled: mergeService?.enabled ?? false };
     },
   );
+
+  app.get<{ Params: { nodeId: string }; Querystring: { headSha: string } }>("/items/:nodeId/priority", {
+    schema: { querystring: { type: "object", required: ["headSha"], properties: { headSha: { type: "string", minLength: 1, maxLength: 256 } } } },
+  }, async (request) => priorityService?.read(request.params.nodeId, request.query.headSha) ?? { status: "disabled" });
 
   app.post<{ Params: { nodeId: string }; Body: Omit<ReviewSubmissionInput, "nodeId"> }>(
     "/items/:nodeId/review",
