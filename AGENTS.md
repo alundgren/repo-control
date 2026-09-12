@@ -94,3 +94,9 @@ corepack pnpm test:focused -- src/server/app.test.ts
 `test:focused` accepts exactly one source test-file path after `--` and runs
 only that test program with compact output. Use the repository scripts for
 typechecking and the full suite when those checks are warranted.
+
+All test commands stay quiet until completion, then print one `PASS` summary or
+compact failures with a temporary diagnostics directory. Use `corepack pnpm
+--silent test` to suppress the command banner too. Wait on the running command
+for its result instead of repeatedly reading log tails. Full logs are retained
+only on failure, outside the checkout.
