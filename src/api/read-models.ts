@@ -145,7 +145,7 @@ export function buildOverview(cache: Cache): OverviewResponse {
     (item): item is CacheItem & { type: "issue" } => item.type === "issue",
   );
   const pullRequests = visibleItems.filter(
-    (item): item is CacheItem & { type: "pull_request" } => item.type === "pull_request",
+    (item): item is CacheItem & { type: "pull_request" } => item.type === "pull_request" && !item.pullRequest.isDraft,
   );
 
   const blockerCache = new Map<string, ApiBlocker>();
@@ -178,7 +178,7 @@ export function buildRepositoryVisibility(cache: Cache): RepositoryVisibilityRes
     const issueCounts = classifyIssues(cache.getQueueMapping(), snapshot.items.filter(
       (item): item is CacheItem & { type: "issue" } => item.type === "issue",
     ), { epicLabel: cache.getEpicLabel(), claimedLabel: cache.getClaimedLabel() });
-    for (const item of snapshot.items.filter((entry) => entry.type === "pull_request")) {
+    for (const item of snapshot.items.filter((entry) => entry.type === "pull_request" && !entry.pullRequest.isDraft)) {
       const entry = counts.get(item.repositoryId);
       if (entry) {
         entry.pullRequests += 1;

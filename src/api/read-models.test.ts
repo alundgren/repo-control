@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";
 import type { RefreshOutcome } from "../refresh/index.js";
 import type { SyncOutcome } from "../sync/index.js";
-import { buildOverview, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
+import { buildRepositoryVisibility, buildOverview, toItemRefreshResponse, toSyncResponse } from "./read-models.js";
 
 describe("api read models", () => {
   const temporaryDirectories: string[] = [];
@@ -119,6 +119,27 @@ describe("api read models", () => {
             closingIssues: { status: "complete", items: [] },
           },
         ]);
+      } finally {
+        cache.close();
+      }
+    });
+
+    it("excludes drafts from the overview and repository queue counts", async () => {
+      const cache = await freshCache();
+      try {
+        const draft = pullRequest({ id: "PR_draft" });
+        if (draft.type !== "pull_request") throw new Error("expected a pull request");
+        draft.pullRequest.isDraft = true;
+        cache.replaceActiveSnapshot(snapshot({ items: [draft, pullRequest({ id: "PR_ready" })] }));
+
+        const overview = buildOverview(cache);
+        if (overview.status !== "ready") throw new Error("expected a ready overview");
+        expect(overview.pullRequests.map((item) => item.id)).toEqual(["PR_ready"]);
+        expect(buildRepositoryVisibility(cache).repositories[0]?.counts).toMatchObject({ now: 1, pullRequests: 1 });
+
+        cache.replaceActiveSnapshot(snapshot({ items: [draft] }));
+        expect(buildOverview(cache)).toMatchObject({ pullRequests: [] });
+        expect(buildRepositoryVisibility(cache).repositories[0]?.counts).toMatchObject({ now: 0, pullRequests: 0 });
       } finally {
         cache.close();
       }

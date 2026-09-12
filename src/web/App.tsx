@@ -1819,7 +1819,7 @@ function replaceOverviewItem(
     issues: updated.type === "issue"
       ? [...overview.issues.filter((item) => item.id !== updated.id), updated].sort(compareIssues)
       : overview.issues,
-    pullRequests: updated.type === "pull_request"
+    pullRequests: updated.type === "pull_request" && !updated.isDraft
       ? [...overview.pullRequests.filter((item) => item.id !== updated.id), updated].sort(comparePullRequests)
       : overview.pullRequests.filter((item) => item.id !== updated.id),
     queues: overview.queues.map((queue) => ({
