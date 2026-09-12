@@ -315,3 +315,13 @@ input[type="search"]::placeholder { color: var(--color-text-muted); opacity: 1; 
   .diffViewControls { grid-column: 1; grid-row: 2; }
   .diffHeader .mergePanel { grid-column: 2 / 4; grid-row: 2; padding-inline: 0.75rem; min-height: 3.25rem; }
 }
+
+.issueScroll, .diffOverlay, .diffFileList, .unifiedDiff, .issueMarkdown pre, .issueMarkdown table, .priorityDetails > div {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-divider) transparent;
+}
+:is(.issueScroll, .diffOverlay, .diffFileList, .unifiedDiff, .issueMarkdown pre, .issueMarkdown table, .priorityDetails > div)::-webkit-scrollbar { width: 0.5rem; height: 0.5rem; }
+:is(.issueScroll, .diffOverlay, .diffFileList, .unifiedDiff, .issueMarkdown pre, .issueMarkdown table, .priorityDetails > div)::-webkit-scrollbar-track { background: transparent; }
+:is(.issueScroll, .diffOverlay, .diffFileList, .unifiedDiff, .issueMarkdown pre, .issueMarkdown table, .priorityDetails > div)::-webkit-scrollbar-thumb { border: 0.125rem solid transparent; border-radius: var(--radius-control); background: var(--color-divider); background-clip: padding-box; }
+.descriptionLink { display: flex; justify-content: flex-end; margin-bottom: 0.75rem; font-size: 0.84375rem; }
+.descriptionConflict { margin-top: 1.5rem; padding-left: 1rem; border-left: 3px solid var(--color-warning); color: var(--color-warning); font-size: 0.84375rem; }

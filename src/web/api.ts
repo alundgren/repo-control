@@ -150,7 +150,7 @@ async function request<Response>(input: RequestInfo | URL, init?: RequestInit): 
   return response.json() as Promise<Response>;
 }
 
-export async function getIssueBody(nodeId: string, signal: AbortSignal): Promise<{ status: "read"; body: string | null } | { status: "unavailable" }> {
+export async function getItemBody(nodeId: string, signal: AbortSignal): Promise<{ status: "read"; body: string | null } | { status: "unavailable" }> {
   const response = await fetch(`/api/items/${encodeURIComponent(nodeId)}/body`, { signal });
   if (!response.ok) return { status: "unavailable" };
   return response.json();

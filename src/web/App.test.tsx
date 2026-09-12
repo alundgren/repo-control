@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OverviewResponse } from "../api/read-models.js";
 import { App } from "./App.js";
 
-vi.mock("./api.js", async (importOriginal) => ({ ...await importOriginal<typeof import("./api.js")>(), getIssueBody: vi.fn().mockResolvedValue({ status: "read", body: null }) }));
+vi.mock("./api.js", async (importOriginal) => ({ ...await importOriginal<typeof import("./api.js")>(), getItemBody: vi.fn().mockResolvedValue({ status: "read", body: null }) }));
 
 describe("work queue overview", () => {
   afterEach(() => {
@@ -798,7 +798,9 @@ describe("work queue overview", () => {
     const dialog = await screen.findByRole("dialog", { name: "Keep fictional paths tidy" });
     const overlay = dialog as HTMLDivElement;
     expect(document.querySelector("main")?.hasAttribute("inert")).toBe(true);
-    expect((within(dialog).getByRole("combobox", { name: "Review aspect" }) as HTMLSelectElement).value).toBe("grouped");
+    expect((within(dialog).getByRole("combobox", { name: "Review aspect" }) as HTMLSelectElement).value).toBe("priority");
+    expect(within(dialog).getByRole("button", { name: "Review all files" })).toBeTruthy();
+    await user.selectOptions(within(dialog).getByRole("combobox", { name: "Review aspect" }), "grouped");
     expect(within(dialog.querySelector(".diffHeader")!).queryByText("abc123def456")).toBeNull();
     expect(within(dialog).queryByRole("button", { name: /Draft comment|Submit review/ })).toBeNull();
     const titleDisclosure = within(dialog).getByRole("button", { name: "Show full pull request title" });
@@ -855,6 +857,7 @@ describe("work queue overview", () => {
     render(<App />);
     await screen.findByText("Keep fictional paths tidy");
     await user.click(screen.getByRole("button", { name: "Select Keep fictional paths tidy" }));
+    await user.click(await screen.findByRole("button", { name: "Review all files" }));
     expect(await screen.findByText(/GitHub limits this list to 3,000 changed files/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open the pull request on GitHub" })).toBeTruthy();
     expect(screen.getByText("This patch may be incomplete because its lines do not match GitHub's file totals.")).toBeTruthy();
@@ -980,6 +983,9 @@ describe("work queue overview", () => {
     expect(document.getElementById("merge-status")).toBeNull();
     expect((screen.getByRole("button", { name: "Unlock merge" }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Review aspect" }), "description");
+    expect(await screen.findByText("No description provided.")).toBeTruthy();
+    expect(Boolean(screen.queryByText(/This pull request has merge conflicts/))).toBe(readiness?.status === "blocked");
   });
 
   it("lets a person recheck unknown mergeability until GitHub reports ready", async () => {

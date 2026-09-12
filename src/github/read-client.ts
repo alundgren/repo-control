@@ -43,7 +43,7 @@ export type GitHubReadClient = {
   readOwnedRepositoryCapabilities(): Promise<RepositoryCapability[]>;
   readOwnedRepositoryInventory?(): Promise<OwnedRepositoryInventoryRead>;
   readAccountSnapshot(input?: { updatedSince: string | null }): Promise<AccountSnapshotRead>;
-  readIssueBody?(input: { nodeId: string }): Promise<{ status: "read"; body: string | null } | UnavailableRead>;
+  readItemBody?(input: { nodeId: string }): Promise<{ status: "read"; body: string | null } | UnavailableRead>;
   readFocusedItem(input: { nodeId: string }): Promise<FocusedItemRead>;
   readRelationshipEnrichment(input: { nodeIds: string[] }): Promise<RelationshipEnrichmentRead>;
   readEpicProgress(input: { nodeIds: string[] }): Promise<EpicProgressRead>;

@@ -133,7 +133,7 @@ export async function startServer({
       cache,
       syncService,
       refreshService,
-      issueBodyClient: client,
+      itemBodyClient: client,
       diffClient: client,
       reviewService,
       mergeService,
