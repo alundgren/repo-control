@@ -441,6 +441,30 @@ describe("GitHub work reads", () => {
   });
 });
 
+describe("priority evidence reads", () => {
+  it("reads the full PR intent and current draft/state/head without using the cached excerpt", async () => {
+    const description = "A complete description. ".repeat(100);
+    const client = createGitHubReadClient("fictional-key", async () => response({ node_id: "PR_fixture", head: { sha: "abc123" }, state: "open", draft: true, title: "Validate signatures", body: description, changed_files: 2 }, restRateLimitHeaders()));
+    expect(await client.readPullRequestPriorityContext({ repositoryNameWithOwner: "fern/tools", number: 42 })).toMatchObject({ status: "read", nodeId: "PR_fixture", headSha: "abc123", isDraft: true, state: "open", description, fileCount: 2 });
+  });
+
+  it("rejects missing readiness facts", async () => {
+    const client = createGitHubReadClient("fictional-key", async () => response({ head: { sha: "abc123" }, state: "open", title: "Validate signatures", body: "Text", changed_files: 2 }, restRateLimitHeaders()));
+    expect(await client.readPullRequestPriorityContext({ repositoryNameWithOwner: "fern/tools", number: 42 })).toMatchObject({ status: "unavailable", error: { code: "invalid_response" } });
+  });
+
+  it("reads only the root policy at the reviewed revision and reports missing or oversized policy", async () => {
+    const urls: string[] = [];
+    const client = createGitHubReadClient("fictional-key", async (url) => { urls.push(url); return response({ type: "file", encoding: "base64", size: 12, content: Buffer.from("Check limits").toString("base64") }); });
+    expect(await client.readRepositoryPolicy({ repositoryNameWithOwner: "fern/tools", headSha: "abc123" })).toEqual({ status: "available", text: "Check limits" });
+    expect(urls).toEqual(["https://api.github.com/repos/fern/tools/contents/AGENTS.md?ref=abc123"]);
+    const oversized = createGitHubReadClient("fictional-key", async () => response({ type: "file", size: 20_000 }));
+    expect(await oversized.readRepositoryPolicy({ repositoryNameWithOwner: "fern/tools", headSha: "abc123" })).toEqual({ status: "truncated" });
+    const missing = createGitHubReadClient("fictional-key", async () => response({}, {}, 404));
+    expect(await missing.readRepositoryPolicy({ repositoryNameWithOwner: "fern/tools", headSha: "abc123" })).toEqual({ status: "absent" });
+  });
+});
+
 function workItem({
   id = "I_1",
   number = 17,

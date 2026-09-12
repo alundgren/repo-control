@@ -2,6 +2,7 @@ import type { ApiRepository, ApiScope, ItemRefreshResponse, OverviewResponse, Sy
 import type { PullRequestDiffRead } from "../github/read-client.js";
 import type { PullRequestReviewComment, PullRequestReviewEvent } from "../github/write-client.js";
 import type { MergeReadiness } from "../merge/index.js";
+import type { PriorityRead } from "../priority/types.js";
 
 export type LiveItemEvent =
   | { type: "updated"; item: import("../api/read-models.js").ApiItem; repositories: ApiRepository[]; scope: ApiScope }
@@ -71,7 +72,12 @@ export async function refreshItem(nodeId: string): Promise<ItemRefreshResponse> 
   return request<ItemRefreshResponse>(`/api/items/${encodeURIComponent(nodeId)}/refresh`, { method: "POST" });
 }
 
-export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean; mergeEnabled: boolean };
+export type PullRequestDiffResponse = PullRequestDiffRead & { reviewEnabled: boolean; mergeEnabled: boolean; priority?: PriorityRead };
+
+export async function getPullRequestPriority(nodeId: string, headSha: string): Promise<PriorityRead> {
+  try { return await request<PriorityRead>(`/api/items/${encodeURIComponent(nodeId)}/priority?headSha=${encodeURIComponent(headSha)}`); }
+  catch { return { status: "unavailable" }; }
+}
 
 export type ReviewSubmissionResponse =
   | { status: "submitted"; reviewUrl: string | null; refresh: ItemRefreshResponse | { status: "failed" } }

@@ -27,6 +27,7 @@ import {
   type PullRequestDiffRead,
   type PullRequestHeadRead,
   type PullRequestMergeFactsRead,
+  type PullRequestPriorityContextRead,
   type RelationshipCoverageByType,
   type RelationshipType,
   type RepositoryCapability,
@@ -41,6 +42,34 @@ const GITHUB_REQUEST_TIMEOUT_MS = 15_000;
 
 export function createGitHubReadClient(token: string, fetch: Fetch = globalThis.fetch): GitHubReadClient {
   return {
+    async readPullRequestPriorityContext(input): Promise<PullRequestPriorityContextRead> {
+      try {
+        const { payload } = await readRestJson(fetch, token, pullRequestRestUrl(input));
+        if (!isObject(payload) || !isString(payload.node_id) || !isString(payload.title)
+          || (payload.body !== null && typeof payload.body !== "string") || typeof payload.draft !== "boolean"
+          || (payload.state !== "open" && payload.state !== "closed") || !Number.isInteger(payload.changed_files)
+          || (payload.changed_files as number) < 0) throw new WorkReadFailure("invalid_response");
+        return { status: "read", nodeId: payload.node_id, headSha: parsePullRequestHead(payload), isDraft: payload.draft,
+          state: payload.state, title: payload.title, description: payload.body ?? "", fileCount: payload.changed_files as number };
+      } catch (error) { return unavailableRead(error); }
+    },
+    async readRepositoryPolicy({ repositoryNameWithOwner, headSha }) {
+      const base = pullRequestRestUrl({ repositoryNameWithOwner, number: 1 }).replace(/\/pulls\/1$/, "");
+      try {
+        const response = await fetchWithTimeout(fetch, `${base}/contents/AGENTS.md?ref=${encodeURIComponent(headSha)}`, {
+          method: "GET", redirect: "error",
+          headers: { accept: "application/vnd.github+json", authorization: `Bearer ${token}`, "x-github-api-version": "2022-11-28" },
+        });
+        if (response.status === 404) return { status: "absent" };
+        if (!response.ok) return { status: "unavailable" };
+        const payload: unknown = await response.json();
+        if (!isObject(payload) || payload.type !== "file" || typeof payload.size !== "number") return { status: "unavailable" };
+        if (payload.size > 16 * 1024) return { status: "truncated" };
+        if (payload.encoding !== "base64" || typeof payload.content !== "string" || payload.content.length > 24 * 1024) return { status: "unavailable" };
+        const text = Buffer.from(payload.content, "base64").toString("utf8");
+        return Buffer.byteLength(text) > 16 * 1024 ? { status: "truncated" } : { status: "available", text };
+      } catch { return { status: "unavailable" }; }
+    },
     async getViewer() {
       const data = await readGraphQL(fetch, token, "AuthenticatedViewer", VIEWER_QUERY, {});
       return parseViewer(data.viewer);

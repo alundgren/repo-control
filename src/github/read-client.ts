@@ -49,7 +49,21 @@ export type GitHubReadClient = {
   readPullRequestHead(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestHeadRead>;
   readPullRequestMergeFacts(input: { pullRequestId: string }): Promise<PullRequestMergeFactsRead>;
   readPullRequestDiff(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestDiffRead>;
+  readPullRequestPriorityContext(input: { repositoryNameWithOwner: string; number: number }): Promise<PullRequestPriorityContextRead>;
+  readRepositoryPolicy(input: { repositoryNameWithOwner: string; headSha: string }): Promise<RepositoryPolicyRead>;
 };
+
+export type PullRequestPriorityContext = {
+  nodeId: string;
+  headSha: string;
+  isDraft: boolean;
+  state: "open" | "closed";
+  title: string;
+  description: string;
+  fileCount: number;
+};
+export type PullRequestPriorityContextRead = ({ status: "read" } & PullRequestPriorityContext) | UnavailableRead;
+export type RepositoryPolicyRead = { status: "available"; text: string } | { status: "absent" | "unavailable" | "truncated" };
 
 export type PullRequestHeadRead =
   | { status: "read"; headSha: string; rateLimit: GitHubRateLimit }

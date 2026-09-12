@@ -50,6 +50,7 @@ export function createSyncService({
   now = Date.now,
   coordinator,
   onComplete,
+  onUpdate,
   webhookProvisioner,
   logEvent,
 }: {
@@ -58,6 +59,7 @@ export function createSyncService({
   now?: () => number;
   coordinator?: ReconciliationCoordinator;
   onComplete?: () => void;
+  onUpdate?: () => void;
   webhookProvisioner?: WebhookProvisioner;
   logEvent?: LogEventSink;
 }): SyncService {
@@ -72,6 +74,7 @@ export function createSyncService({
       const operation = () => runSync(cache, client, now);
       const promise = (coordinator ? coordinator.runSync(operation) : operation()).then(async (outcome) => {
         if (outcome.status !== "failed") {
+          onUpdate?.();
           await reconcileWebhookProvisioning(cache, client, webhookProvisioner, logEvent);
         }
         logSyncOutcome(outcome, Math.max(0, now() - startedAt), logEvent);

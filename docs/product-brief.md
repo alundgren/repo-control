@@ -44,7 +44,8 @@ update the matching receiver when the required event specification advances.
   pull-request review submission.
 - AI summaries, agent dispatch, or a local model integration.
 - Project-management features beyond the read-only epic view described below.
-- Notifications, background polling, or multi-user collaboration.
+- Notifications or multi-user collaboration. The optional AI priority service
+  reconciles monitored PRs every five minutes.
 - Organization-owned repositories or GitHub Apps.
 
 ## Epic rules

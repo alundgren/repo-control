@@ -47,6 +47,22 @@ used.
 
 ## Components
 
+- AI priority review aspect: a five-tier strip beside the existing Grouped and
+  Files aspects filters both navigation and actual file diffs. Every fresh entry
+  starts at 5 Critical. Counts stay visible, including zero, and lower tiers
+  select an exact tier. The first available patch opens, with reasons visible
+  below every file heading even when folded. The existing comment and review
+  controls remain available across aspect changes.
+- Priority status and Details: a quiet current-head indicator uses the existing
+  success role. Details contains enqueue and attempt information plus incomplete
+  evidence. Waiting, failed, expired, ineligible, stale, and unavailable states
+  hide scores and offer Review all files. There is no manual inference retry.
+  Empty tiers stay empty until the person chooses another tier.
+- Narrow priority review: all five tier controls fit in one row with stacked
+  number, label, and count. The file navigator collapses to a disclosure. Paths
+  wrap and code scrolls inside its diff. This uses the existing palette, type,
+  field, divider, and raised roles without adding visual tokens.
+
 - Application shell: the page frame and reading width.
 - Brand: product name with one accent mark.
 - Connection state: the title, explanation, and availability note shown before

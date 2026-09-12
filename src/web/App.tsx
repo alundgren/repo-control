@@ -7,6 +7,9 @@ import type { MergeReadiness } from "../merge/index.js";
 import { parseUnifiedPatch, type PatchLine } from "../github/unified-patch.js";
 import { getOverview, getPullRequestDiff, getPullRequestMergeReadiness, getRepositoryVisibility, mergePullRequest, refreshItem, replaceRepositoryVisibility, submitPullRequestReview, syncOverview, type LiveItemEvent, type LiveSettingsEvent, type PullRequestDiffResponse, type RepositoryVisibilitySettings } from "./api.js";
 import { DraftCommentStore, getSessionStorage, maxDraftBodyBytes, type DraftComment, type DraftSide } from "./draft-comments.js";
+import { getPullRequestPriority } from "./api.js";
+import { PriorityStrip, priorityStatusText, priorityTiers } from "./PriorityStrip.js";
+import type { FilePriority, PriorityRead } from "../priority/types.js";
 
 type View = "now" | "pullRequests" | "agent" | "human" | "triage" | "epics" | "settings";
 type SyncState = "idle" | "busy" | "success" | "partial" | "failed";
@@ -15,7 +18,7 @@ type DiffState =
   | { status: "loading" }
   | { status: "loaded"; data: Exclude<PullRequestDiffResponse, { status: "unavailable" }> }
   | { status: "failed" };
-type DiffView = "grouped" | "files";
+type DiffView = "grouped" | "files" | "priority";
 type MergePanelState = MergeReadiness
   | { status: "merging"; headSha: string; sourceBranch: string }
   | { status: "failed"; reason: "permission" | "policy" | "validation" | "ambiguous" };
@@ -972,8 +975,11 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   const overlayRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0 });
+  const scrollPositions = useRef<Record<DiffView, number>>({ grouped: 0, files: 0, priority: 0 });
   const [diffView, setDiffView] = useState<DiffView>("grouped");
+  const [priority, setPriority] = useState<PriorityRead>({ status: "disabled" });
+  const [selectedTier, setSelectedTier] = useState(5);
+  const [priorityNavigatorOpen, setPriorityNavigatorOpen] = useState(false);
   const [titleExpanded, setTitleExpanded] = useState(false);
   const [draftRevision, setDraftRevision] = useState(0);
   const [draftMessage, setDraftMessage] = useState("");
@@ -992,6 +998,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   const [expandedByView, setExpandedByView] = useState<Record<DiffView, Set<number>>>({
     grouped: new Set(),
     files: new Set(),
+    priority: new Set(),
   });
 
   useEffect(() => {
@@ -1010,10 +1017,33 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
     setExpandedByView({
       grouped: firstGroupedPatch === undefined ? new Set() : new Set([firstGroupedPatch]),
       files: firstFilePatch < 0 ? new Set() : new Set([firstFilePatch]),
+      priority: new Set(),
     });
-    scrollPositions.current = { grouped: 0, files: 0 };
+    setPriority(state.data.priority ?? { status: "disabled" });
+    scrollPositions.current = { grouped: 0, files: 0, priority: 0 };
     setDiffView("grouped");
   }, [state]);
+
+  useEffect(() => {
+    if (diffView !== "priority" || state.status !== "loaded" || state.data.priority?.status === "disabled" || !state.data.priority) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function update() {
+      if (state.status !== "loaded") return;
+      const read = await getPullRequestPriority(item.id, state.data.headSha);
+      if (cancelled) return;
+      setPriority(read);
+      timer = setTimeout(() => void update(), 15_000);
+    }
+    void update();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [diffView, state, item.id]);
+
+  useEffect(() => {
+    if (state.status !== "loaded" || diffView !== "priority") return;
+    const first = state.data.files.findIndex((file) => priority.result?.files.some((entry) => entry.path === file.path && entry.tier === selectedTier) && file.patch.status !== "unavailable");
+    setExpandedByView((current) => ({ ...current, priority: first < 0 ? new Set() : new Set([first]) }));
+  }, [selectedTier, priority.status, priority.result?.headSha, state, diffView]);
 
   useEffect(() => {
     if (state.status !== "loaded" || !state.data.mergeEnabled) return;
@@ -1049,6 +1079,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
     if (nextView === diffView) return;
     if (overlayRef.current) scrollPositions.current[diffView] = overlayRef.current.scrollTop;
     setDiffView(nextView);
+    if (nextView === "priority") { setSelectedTier(5); setPriorityNavigatorOpen(false); }
   }
 
   function toggleFile(index: number) {
@@ -1177,7 +1208,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
       return;
     }
     if (event.key !== "Tab") return;
-    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])];
+    const focusable = [...(overlayRef.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), select:not([disabled]), summary, textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') ?? [])].filter((element) => element.getClientRects().length > 0);
     if (focusable.length === 0) return;
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
@@ -1198,9 +1229,12 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
   const pendingCount = collections.reduce((total, collection) => total + collection.drafts.length, 0);
   const changedFileCount = state.status === "loaded" ? state.data.fileCount : null;
   const changeTotals = item.additions === null || item.deletions === null ? null : `+${item.additions.toLocaleString()} −${item.deletions.toLocaleString()}`;
+  const currentPriorities = priority.status === "completed" && priority.result?.headSha === currentHeadSha ? priority.result.files : [];
+  const visibleIndexes = state.status === "loaded" ? state.data.files.flatMap((file, index) => diffView !== "priority" || currentPriorities.some((entry) => entry.path === file.path && entry.tier === selectedTier) ? [index] : []) : [];
+  const tierDetails = priorityTiers.find((entry) => entry.tier === selectedTier)!;
 
   return (
-    <div aria-labelledby="diff-title" aria-modal="true" className="diffOverlay" onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
+    <div aria-labelledby="diff-title" aria-modal="true" className={`diffOverlay${diffView === "priority" ? " priorityOverlay" : ""}`} onKeyDown={handleKeyDown} ref={overlayRef} role="dialog">
       <div className="diffTop" ref={topRef}>
         <header className="diffHeader">
           <div className="diffHeaderSummary">
@@ -1216,6 +1250,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
             <div aria-label="Changed file arrangement" className="diffViewControls">
               <button aria-label="Grouped" aria-pressed={diffView === "grouped"} onClick={() => selectDiffView("grouped")} type="button">Grouped</button>
               <button aria-label="Files" aria-pressed={diffView === "files"} onClick={() => selectDiffView("files")} type="button">Files</button>
+              <button aria-pressed={diffView === "priority"} onClick={() => selectDiffView("priority")} type="button">AI priority</button>
             </div>
           ) : null}
           {state.status === "loaded" && pendingCount > 0 ? <p aria-label={`${pendingCount} pending ${pendingCount === 1 ? "comment" : "comments"}`} aria-live="polite" className="pendingChip"><span aria-hidden="true"><span>{pendingCount}</span><span className="pendingWide"> pending {pendingCount === 1 ? "comment" : "comments"}</span><span className="pendingNarrow"> pending</span></span></p> : null}
@@ -1237,6 +1272,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
             {!draftStore.recoveryAvailable ? <p className="storageWarning">Reload recovery is unavailable. Drafts remain in memory while this page stays open.</p> : null}
             <p aria-live="polite">{draftMessage}</p>
           </div>
+          {diffView === "priority" ? <PriorityStrip onSelect={(tier) => { setSelectedTier(tier); setPriorityNavigatorOpen(false); }} priority={priority} selectedTier={selectedTier} /> : null}
           {staleCollections.length > 0 ? <section aria-labelledby="stale-drafts-title" className="staleDrafts">
             <h2 id="stale-drafts-title">Drafts from an earlier head commit</h2>
             <p>The pull request moved after these drafts were saved. Copy what you need or discard them.</p>
@@ -1247,11 +1283,11 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
               </div>
             ))}
           </section> : null}
-          <div className="diffLayout">
+          {diffView === "priority" && priority.status !== "completed" ? <div aria-live="polite" className="priorityMessage"><h2>{priorityStatusText(priority)}</h2><button className="quietButton" onClick={() => selectDiffView("files")} type="button">Review all files</button></div> : <div className="diffLayout">
             <nav aria-label="Changed files" className="diffFileList">
-            <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>
-              {diffView === "files" ? (
-                <ul>{state.data.files.map((file, index) => <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>)}</ul>
+            {diffView === "priority" ? <><button aria-expanded={priorityNavigatorOpen} className="priorityNavigatorToggle" onClick={() => setPriorityNavigatorOpen((open) => !open)} type="button">{visibleIndexes.length} {tierDetails.name.toLowerCase()} files <span aria-hidden="true">{priorityNavigatorOpen ? "▴" : "⌄"}</span></button><div className="priorityNavigatorHeading"><strong>{selectedTier} {tierDetails.name}</strong><p>{visibleIndexes.length} of {state.data.fileCount} files</p></div></> : <p>{state.data.fileCount.toLocaleString()} changed {state.data.fileCount === 1 ? "file" : "files"}</p>}
+              {diffView !== "grouped" ? (
+                <ul className={diffView === "priority" && !priorityNavigatorOpen ? "priorityNavigatorCollapsed" : ""}>{visibleIndexes.map((index) => { const file = state.data.files[index]!; return <li key={`${file.path}-${index}`}><a href={`#diff-file-${index}`} onClick={(event) => moveToFile(event, index)}>{file.path}</a></li>; })}</ul>
               ) : (
                 <ul className="diffGroupedFileList">{state.data.groups.map((group, groupIndex) => (
                   <li key={`${group.name}-${groupIndex}`}>
@@ -1265,10 +1301,12 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
               )}
             </nav>
             <section aria-label="File diffs" className="diffFiles">
+              {diffView === "priority" ? <><div className="priorityHeading"><h2>{selectedTier} {tierDetails.name}</h2><p>{tierDetails.description}</p></div>{priority.result?.evidence.length ? <p className="priorityEvidence">Some evidence is incomplete or unavailable. See Details above.</p> : null}{visibleIndexes.length === 0 ? <div className="priorityEmpty"><h3>No {tierDetails.name.toLowerCase()} files</h3><p>{state.data.fileCount} files were classified. Choose another tier to continue.</p>{selectedTier === 5 ? <button className="quietButton" onClick={() => setSelectedTier(4)} type="button">Review tier 4</button> : null}</div> : null}</> : null}
               {state.data.status === "partial" ? <p className="diffNotice">GitHub limits this list to 3,000 changed files. <a href={item.url} rel="noreferrer" target="_blank">Open the pull request on GitHub</a> to see whether more files changed.</p> : null}
-              {diffView === "files" ? state.data.files.map((file, index) => (
+              {diffView !== "grouped" ? visibleIndexes.map((index) => { const file = state.data.files[index]!; return (
                 <DiffFile
-                  expanded={expandedByView.files.has(index)}
+                  expanded={expandedByView[diffView].has(index)}
+                  priority={diffView === "priority" ? currentPriorities.find((entry) => entry.path === file.path) : undefined}
                   file={file}
                   githubUrl={item.url}
                   id={`diff-file-${index}`}
@@ -1282,7 +1320,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
                   onSaveDraft={saveDraft}
                   onToggle={() => toggleFile(index)}
                 />
-              )) : state.data.groups.map((group, groupIndex) => (
+              ); }) : state.data.groups.map((group, groupIndex) => (
                 <div className="diffGroup" key={`${group.name}-${groupIndex}`}>
                   <h2>{group.name}</h2>
                   {group.fileIndexes.map((index) => {
@@ -1308,7 +1346,7 @@ function DiffOverlay({ draftStore, item, onClose, repository, state }: {
                 </div>
               ))}
             </section>
-          </div>
+          </div>}
           <div className="reviewDock">
             <ReviewSubmissionMessage itemUrl={item.url} state={submissionState} />
             {reviewComposerOpen ? (
@@ -1456,7 +1494,7 @@ function ReviewSubmissionMessage({ itemUrl, state }: {
   return <p aria-live="polite" className="reviewWarning">The review was not submitted. Drafts were kept.</p>;
 }
 
-function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraft, onCancelDraft, onCreateDraft, onDeleteDraft, onSaveDraft, onToggle }: {
+function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraft, onCancelDraft, onCreateDraft, onDeleteDraft, onSaveDraft, onToggle, priority }: {
   drafts: DraftComment[];
   expanded: boolean;
   file: PullRequestDiffFile;
@@ -1469,6 +1507,7 @@ function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraf
   onDeleteDraft: (draftId: string) => void;
   onSaveDraft: (draft: DraftComment) => boolean;
   onToggle: () => void;
+  priority?: FilePriority;
 }) {
   return (
     <article aria-label={file.path} className="diffFile" id={id}>
@@ -1477,6 +1516,7 @@ function DiffFile({ drafts, expanded, file, githubUrl, id, newDraft, onBeginDraf
         <span className="diffPath">{file.previousPath ? `${file.previousPath} → ${file.path}` : file.path}</span>
         <span className="diffCounts">+{file.additions} −{file.deletions}</span>
       </button>
+      {priority ? <p className="filePriorityReason"><strong>{priority.tier} {priorityTiers.find((tier) => tier.tier === priority.tier)?.name}</strong> {priority.reason}</p> : null}
       {expanded ? <div className="diffBody">
         {file.patch.status === "unavailable" ? (
           <p className="diffNotice">{file.patch.reason === "patch_budget" ? "The 5 MiB patch limit was reached before this file." : "GitHub did not provide patch text for this file."} <a href={githubUrl} rel="noreferrer" target="_blank">Open on GitHub</a></p>
