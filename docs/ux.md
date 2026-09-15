@@ -202,6 +202,16 @@ reducing the prose size.
 
 ## Deviations
 
+The exploratory [PR process presentation](pr-workflows/README.md) uses the same
+warm-paper palette and embeds IBM Plex with its licence. Its task is to explain
+the proposed daemon and let an engineer try a bounded process edit. The editor
+concept uses selectable action nodes, a permission inspector, JSON source,
+staged-change status, fixture simulation, reset, and download. It does not add
+production navigation or process APIs. On narrow screens the inspector follows
+the process, while architecture drawings scroll inside their own region. The
+presentation has its own compact slide navigation and an optional reading view.
+Its drawing sources and HTML are product artifacts, not visual test baselines.
+
 The Repository visibility screen follows option 03 on slide 5 of the pinned
 settings concepts. The production version uses full queue names in the impact
 list, supports multiple staged changes instead of the mockup's one sentence,

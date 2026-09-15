@@ -20,6 +20,8 @@ particular GitHub account or repository. Anyone can run their own copy.
 - Open [the prototype](prototype/index.html) in a browser. It has fictional
   data and needs no server or GitHub token.
 - Read the [product brief](docs/product-brief.md) for the version-one scope.
+- Explore the proposed [PR workflow engine](docs/pr-workflows/README.md), including
+  its presentation, editor concept, architecture, contracts, and research.
 - Read the [technical foundation](docs/architecture.md) before adding an app
   framework or authentication.
 - [Decisions](docs/decisions.md) records the choices that shaped the
