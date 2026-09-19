@@ -6,7 +6,7 @@ import { Writable } from "node:stream";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { openArtifactStore } from "../artifact/store.js";
 import { openCache } from "../cache/index.js";
@@ -232,8 +232,7 @@ describe("server startup", () => {
   async function buildBrowserAssets() {
     const output = await mkdtemp(join(tmpdir(), "repo-control-build-"));
     temporaryDirectories.push(output);
-    await execFile(process.execPath, [
-      "node_modules/vite/bin/vite.js",
+    await execFile("vp", [
       "build",
       "--outDir",
       output,

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { openCache, type Cache } from "../cache/index.js";
 import { createExplorationRepository } from "./github.js";
 import type { GitHubReadClient } from "../github/read-client.js";

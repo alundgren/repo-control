@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { DraftCommentStore, maxDraftBodyBytes, maxDraftComments, maxSavedDraftBytes, type DraftComment } from "./draft-comments.js";
 

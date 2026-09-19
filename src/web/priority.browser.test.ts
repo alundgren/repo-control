@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { createServer, type ViteDevServer } from "vite";
+import { createServer, type ViteDevServer } from "vite-plus";
 import type { PriorityRead } from "../priority/types.js";
 
 let server: ViteDevServer;

@@ -20,7 +20,7 @@ function docker(...args) {
   }
 }
 
-function piployContextArchive() {
+async function piployContextArchive() {
   const trackedFiles = spawnSync("git", ["ls-files", "-z"], {
     cwd: process.cwd(),
     encoding: "buffer",
@@ -33,16 +33,18 @@ function piployContextArchive() {
   // context preparation, which has differed from the Pi deployment path. A
   // clone contains tracked files only, so build that equivalent tar from the
   // working tree.
+  const archive = join(temporaryDirectory, "context.tar");
   const result = spawnSync(
     "tar",
-    ["--create", "--file=-", "--null", "--files-from=-"],
+    ["--create", `--file=${archive}`, "--null", "--files-from=-"],
     { cwd: process.cwd(), encoding: "buffer", input: trackedFiles.stdout },
   );
   assert.equal(result.status, 0, "cannot archive the Piploy-style build context");
-  return result.stdout;
+  return readFile(archive);
 }
 
 async function buildWithPiployContext() {
+  const context = await piployContextArchive();
   const response = await new Promise((resolve, reject) => {
     const build = request({
       socketPath: "/var/run/docker.sock",
@@ -55,7 +57,7 @@ async function buildWithPiployContext() {
       result.on("end", () => resolve({ statusCode: result.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
     });
     build.on("error", reject);
-    build.end(piployContextArchive());
+    build.end(context);
   });
   const errors = response.body
     .split("\n")
@@ -75,11 +77,13 @@ function runDatabaseCheck(source) {
   docker(
     "run",
     "--rm",
+    "--network=none",
     "--entrypoint",
-    "node",
+    "vp",
     "--mount",
     `type=volume,src=${volume},dst=/var/lib/repo-control`,
     image,
+    "node",
     "--input-type=module",
     "--eval",
     source,
@@ -90,12 +94,14 @@ async function runImageBoundaryCheck() {
   docker(
     "run",
     "--rm",
+    "--network=none",
     "--entrypoint",
-    "node",
+    "vp",
     image,
+    "node",
     "--input-type=module",
     "--eval",
-    'import { access } from "node:fs/promises"; for (const path of ["/app/.env", "/app/src", "/app/docs"]) { await access(path).then(() => process.exit(1)).catch(() => undefined); }',
+    'import assert from "node:assert/strict"; import { access, readFile } from "node:fs/promises"; const pkg = JSON.parse(await readFile("/app/package.json", "utf8")); assert.equal(process.versions.node, pkg.devEngines.runtime.version); for (const path of ["/app/.env", "/app/src", "/app/docs", "/app/node_modules/vite-plus"]) { await access(path).then(() => process.exit(1)).catch(() => undefined); }',
   );
   const archive = join(temporaryDirectory, "image.tar");
   docker("image", "save", "--output", archive, image);

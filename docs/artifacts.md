@@ -177,11 +177,11 @@ Install the browser binaries used by the local Playwright suite through the
 pinned package manager:
 
 ```sh
-corepack pnpm browser:install
+vp run browser:install
 ```
 
-`corepack pnpm test:focused -- src/artifact/viewer.browser.test.ts` runs that
-browser file alone in Chromium and WebKit. The full `corepack pnpm test`
+`vp run test:focused -- src/artifact/viewer.browser.test.ts` runs that
+browser file alone in Chromium and WebKit. The full `vp run test`
 command runs both the Vitest suite and browser tests.
 
 ## Dedicated public hostname
