@@ -8,16 +8,23 @@
     "node": "24.x",
     "pnpm": "11.22.0"
   },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.21.0",
+      "onFail": "download"
+    }
+  },
   "scripts": {
-    "browser:install": "playwright install chromium webkit",
-    "build": "tsc --noEmit && vite build && tsc --project tsconfig.server.json",
-    "lint": "eslint .",
-    "start": "node dist/server/main.js",
-    "test": "node scripts/run-tests.mjs",
-    "test:browser": "node scripts/run-tests.mjs browser",
-    "test:focused": "node scripts/run-focused-test.mjs",
-    "typecheck": "tsc --noEmit",
-    "verify:container": "node scripts/verify-container.mjs"
+    "browser:install": "vp exec playwright install chromium webkit",
+    "build": "vp exec tsc --noEmit && vp build && vp exec tsc --project tsconfig.server.json",
+    "lint": "vp exec eslint .",
+    "start": "vp exec node dist/server/main.js",
+    "test": "vp exec node scripts/run-tests.mjs",
+    "test:browser": "vp exec node scripts/run-tests.mjs browser",
+    "test:focused": "vp exec node scripts/run-focused-test.mjs",
+    "typecheck": "vp exec tsc --noEmit",
+    "verify:container": "vp exec node scripts/verify-container.mjs"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3",
@@ -48,7 +55,8 @@
     "pngjs": "7.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.67.0",
-    "vite": "^8.2.2",
-    "vitest": "^4.1.11"
+    "vite": "npm:@voidzero-dev/vite-plus-core@0.3.0",
+    "vite-plus": "0.3.0",
+    "vitest": "4.1.11"
   }
 }

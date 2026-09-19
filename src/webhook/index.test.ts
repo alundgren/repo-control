@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import fastify from "fastify";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { Cache } from "../cache/index.js";
 import type { ItemRefreshService } from "../refresh/index.js";

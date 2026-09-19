@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createExplorationEngine, type ExplorationRepository } from "./engine.js";
 import { ExplorationError, validateDecision, validateTurn, type ExplorationModel, type ReviewAnswer } from "./contracts.js";
 

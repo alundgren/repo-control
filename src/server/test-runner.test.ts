@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test } from "vite-plus/test";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -17,14 +17,15 @@ function fixture(unit: string, browser: string) {
   symlinkSync(path.join(root, "node_modules"), path.join(directory, "node_modules"), "dir");
   mkdirSync(path.join(directory, "src"));
   writeFileSync(path.join(directory, "package.json"), '{"type":"module"}');
-  writeFileSync(path.join(directory, "src/example.test.ts"), `import { test, expect } from 'vitest';\n${unit}`);
+  writeFileSync(path.join(directory, "src/example.test.ts"), `import { test, expect } from 'vite-plus/test';\n${unit}`);
   writeFileSync(path.join(directory, "src/example.browser.test.ts"), `import { test, expect } from '@playwright/test';\n${browser}`);
   writeFileSync(path.join(directory, "playwright.config.ts"), `export default { testDir: './src', testMatch: '**/*.browser.test.ts', outputDir: './results', workers: 1 };`);
   return directory;
 }
 
 function run(directory: string, focused?: string) {
-  const result = spawnSync(process.execPath, [
+  const result = spawnSync("vp", [
+    "exec", "node",
     path.join(root, focused ? "scripts/run-focused-test.mjs" : "scripts/run-tests.mjs"),
     ...(focused ? ["--", focused] : []),
   ], { cwd: directory, encoding: "utf8", timeout: 30_000 });

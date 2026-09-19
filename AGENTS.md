@@ -85,18 +85,20 @@ has a high cost of failure. Run the full suite when focused checks do not give
 enough confidence. Report any relevant check that was skipped or failed and
 explain why.
 
-Use the pinned pnpm version through Corepack. For a focused test:
+Use `vp` for all project commands. Vite+ manages the Node and pnpm versions
+pinned in `package.json`. Run scripts with `vp run <name>`; the built-in
+`vp test` and `vp build` bypass our combined test and build scripts.
+For a focused test:
 
 ```sh
-corepack pnpm test:focused -- src/server/app.test.ts
+vp run test:focused -- src/server/app.test.ts
 ```
 
 `test:focused` accepts exactly one source test-file path after `--` and runs
 only that test program with compact output. Use the repository scripts for
 typechecking and the full suite when those checks are warranted.
 
-All test commands stay quiet until completion, then print one `PASS` summary or
-compact failures with a temporary diagnostics directory. Use `corepack pnpm
---silent test` to suppress the command banner too. Wait on the running command
-for its result instead of repeatedly reading log tails. Full logs are retained
+After the task banner, test commands stay quiet until completion, then print
+one `PASS` summary or compact failures with a temporary diagnostics directory.
+Wait on the running command for its result instead of repeatedly reading log tails. Full logs are retained
 only on failure, outside the checkout.

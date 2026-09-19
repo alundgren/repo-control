@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { createServer, type ViteDevServer } from "vite";
+import { createServer, type ViteDevServer } from "vite-plus";
 
 let server: ViteDevServer;
 let origin: string;

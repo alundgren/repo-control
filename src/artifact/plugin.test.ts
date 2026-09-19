@@ -1,5 +1,5 @@
 import fastify from "fastify";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   ARTIFACT_SHARE_POSITIONS,

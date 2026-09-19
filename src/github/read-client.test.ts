@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createGitHubReadClient } from "./client.js";
 import { RELATIONSHIP_SUBJECT_LIMIT } from "./read-client.js";

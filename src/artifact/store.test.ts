@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import {
   ARTIFACT_SHARE_POSITIONS,

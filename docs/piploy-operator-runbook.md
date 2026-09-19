@@ -159,7 +159,7 @@ does not automate this sequence.
 Run this from the repository root:
 
 ```sh
-corepack pnpm verify:container
+vp run verify:container
 ```
 
 It sends a tar of the tracked repository files to Docker's Unix socket, which

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 import { createExplorationModel } from "./provider.js";
 const configuration = { endpoint: "https://inference.do-ai.run/v1/chat/completions", apiKey: "fictional-key" };
 const answer = { version: 1, kind: "answer", message: "Read the date calculation.", actions: [], question: null };

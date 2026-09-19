@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { openCache, type CacheItem } from "../cache/index.js";
 import type { GitHubReadClient, PullRequestDiffFile, PullRequestPriorityContext } from "../github/read-client.js";

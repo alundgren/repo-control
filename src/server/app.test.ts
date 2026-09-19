@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { ArtifactService } from "../artifact/index.js";
 import { openCache, type Cache, type CacheItem, type SuccessfulSnapshot } from "../cache/index.js";

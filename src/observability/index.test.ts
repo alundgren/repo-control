@@ -1,6 +1,6 @@
 import { Writable } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
 import { createLogEventSink, createOperationalLogger, type LogEvent } from "./index.js";
 

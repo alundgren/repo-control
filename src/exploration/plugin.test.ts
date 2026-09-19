@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it } from "vite-plus/test";
 import fastify from "fastify";
 import { explorationPlugin } from "./plugin.js";
 import { createExplorationEngine, type ExplorationRepository } from "./engine.js";

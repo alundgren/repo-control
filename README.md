@@ -44,12 +44,14 @@ until Piploy's public host-environment contract is reconciled.
 
 ## Run the shell
 
-Use Node 24 and pnpm 11. Corepack can provide the pinned pnpm version:
+Install [Vite+](https://viteplus.dev/guide/) once, then use `vp` for every
+project command. Vite+ downloads Node 24.21.0 and pnpm 11.22.0 from the pins in
+`package.json`; no separate Node, pnpm, or Corepack setup is needed:
 
 ```sh
-corepack pnpm install
-corepack pnpm build
-corepack pnpm start
+vp install
+vp run build
+vp run start
 ```
 
 The server listens on port 3000 by default. Set `PORT` to choose another port.
@@ -64,20 +66,23 @@ rejected unless the runtime is explicitly marked `development`, and the
 production image always runs with `NODE_ENV=production`. Do not put the token
 in a file, command line, browser configuration, or source code.
 
-Use `corepack pnpm lint` for linting. During a focused red-green loop, run one
+Use `vp run lint` for linting. During a focused red-green loop, run one
 source test file with:
 
 ```sh
-corepack pnpm test:focused -- src/server/app.test.ts
+vp run test:focused -- src/server/app.test.ts
 ```
 
-Run `corepack pnpm test` for the full test suite.
-The full, browser-only, and focused commands stay quiet until completion. A
+Run `vp run test` for the full test suite.
+After the task banner, the full, browser-only, and focused commands stay quiet
+until completion. A
 successful run prints one `PASS` summary. Failures print each failed test with
 a short error excerpt and the temporary directory containing full logs and JSON
 reports. The full suite runs both Vitest and Playwright even when Vitest fails.
-Use `corepack pnpm --silent test` to also hide pnpm's command banner. Wait for
-the command to finish; there is no progress log to poll.
+Use `vp run test`, not the built-in `vp test`, to include Playwright and the
+compact reporter. Likewise, `vp run build` includes the server build and
+typecheck; `vp build` builds only the frontend. Wait for the command to finish;
+there is no progress log to poll.
 
 ## License
 

@@ -55,12 +55,12 @@ export function runTests(mode = "all", sourceTest) {
     const logPath = path.join(directory, `${runner}.log`);
     const log = openSync(logPath, "w", 0o600);
     const args = browser
-      ? ["node_modules/@playwright/test/cli.js", "test", "--reporter=json"]
-      : ["node_modules/vitest/vitest.mjs", "run", "--disableConsoleIntercept", "--reporter=json", `--outputFile=${reportPath}`, "--exclude", "**/*.browser.test.ts"];
+      ? ["exec", "playwright", "test", "--reporter=json"]
+      : ["exec", "vitest", "run", "--disableConsoleIntercept", "--reporter=json", `--outputFile=${reportPath}`, "--exclude", "**/*.browser.test.ts"];
     if (sourceTest) args.push(browser ? sourceTest.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : sourceTest);
     let result;
     try {
-      result = spawnSync(process.execPath, args, {
+      result = spawnSync("vp", args, {
         stdio: ["ignore", log, log],
         env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath },
       });

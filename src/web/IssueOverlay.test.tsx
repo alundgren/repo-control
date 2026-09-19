@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vite-plus/test";
 import type { ApiIssue } from "../api/read-models.js";
 import { IssueOverlay } from "./IssueOverlay.js";
 
