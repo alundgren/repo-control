@@ -3,14 +3,23 @@ FROM ghcr.io/voidzero-dev/vite-plus:0.3.0@sha256:bca24ac970b21298430ad281f306dbe
 WORKDIR /app
 
 COPY --chown=vp:vp package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN vp install --frozen-lockfile
+RUN --mount=type=cache,id=repo-control-pnpm-v2,target=/pnpm/store,uid=1000,gid=1000,sharing=locked \
+  corepack pnpm --store-dir=/pnpm/store install --frozen-lockfile \
+    --network-concurrency=4 --fetch-timeout=300000
 
 COPY --chown=vp:vp tsconfig.json tsconfig.server.json vite.config.ts ./
 COPY --chown=vp:vp src ./src
-RUN vp run build && vp pm prune --prod
-
-# Keep the global CLI and its managed runtime available without development tools.
+RUN vp run build
 RUN cp "$(command -v vp)" /tmp/vp
+
+FROM ghcr.io/voidzero-dev/vite-plus:0.3.0@sha256:bca24ac970b21298430ad281f306dbe0a17be3fd1d6c9ec5f2cc73da65740b88 AS production-dependencies
+
+WORKDIR /app
+
+COPY --chown=vp:vp package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN --mount=type=cache,id=repo-control-pnpm-v2,target=/pnpm/store,uid=1000,gid=1000,sharing=locked \
+  corepack pnpm --store-dir=/pnpm/store install --prod --frozen-lockfile \
+    --network-concurrency=4 --fetch-timeout=300000
 
 FROM node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS runtime
 
@@ -27,7 +36,7 @@ RUN mkdir -p /var/lib/repo-control && chown node:node /var/lib/repo-control
 COPY --from=build /tmp/vp /usr/local/bin/vp
 COPY --from=build --chown=node:node /home/vp/.vite-plus/js_runtime /opt/vite-plus/js_runtime
 COPY --from=build --chown=node:node /app/package.json ./
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=production-dependencies --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 
 USER node
